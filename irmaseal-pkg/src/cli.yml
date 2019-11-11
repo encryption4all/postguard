@@ -1,0 +1,24 @@
+name: irmaseal-pkg
+version: "0.1"
+author: Wouter Geraedts <w.geraedts@sarif.nl>
+about: Private Key Generator (PKG) for IRMAseal, an Identity Based Encryption standard.
+subcommands:
+- generate:
+    about: generate a global public/private keypair
+- server:
+    about: run the IRMAseal PKG HTTP server
+    args:
+    - port:
+        short: p
+        long: port
+        value_name: PORT
+        takes_value: true
+        default_value: "8087"
+        help: TCP port to bind this service to
+    - host:
+        short: H
+        long: host
+        value_name: HOST
+        takes_value: true
+        default_value: "0.0.0.0"
+        help: host to bind this service to

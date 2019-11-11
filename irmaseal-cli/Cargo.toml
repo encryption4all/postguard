@@ -1,0 +1,18 @@
+[package]
+name = "irmaseal-cli"
+version = "0.1.0"
+authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
+edition = "2018"
+
+[dependencies]
+irmaseal-core = { path = "../irmaseal-core" }
+ibe = { git = "https://github.com/wassasin/ibe" }
+
+tokio = "0.1.22"
+futures = "0.1.28"
+qrcode = { version = "0.11.0", default-features = false }
+clap = { version = "2.33.0", features = ["yaml"] }
+rand = "0.7.0"
+arrayvec = { version = "0.4.11", features = ["array-sizes-129-255"] }
+serde = "1.0.99"
+reqwest = { version = "0.9", features = ["rustls-tls"], default-features = false }

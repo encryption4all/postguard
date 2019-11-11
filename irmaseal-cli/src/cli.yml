@@ -1,0 +1,33 @@
+name: irmaseal-cli
+version: "0.1"
+author: Wouter Geraedts <w.geraedts@sarif.nl>
+about: Command line interface for IRMAseal, an Identity Based Encryption standard.
+subcommands:
+- encrypt:
+    about: encrypt a file
+    args:
+    - INPUT:
+        help: Sets the input file to use
+        required: true
+        index: 1
+    - email:
+        long: email
+        value_name: EMAIL
+        takes_value: true
+        help: Recipient e-mail to encrypt file for
+    - bsn:
+        long: bsn
+        value_name: BSN
+        takes_value: true
+        help: Recipient BSN to encrypt file for
+- decrypt:
+    about: decrypt a file
+    args:
+    - INPUT:
+        help: Sets the input file to use
+        required: true
+        index: 1
+    - OUTPUT:
+        help: Sets the output file to use
+        required: true
+        index: 2
