@@ -1,12 +1,13 @@
 [package]
 name = "irmaseal-cli"
+description = "Commandline interface for IRMAseal"
 version = "0.1.0"
 authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
 edition = "2018"
 
 [dependencies]
-irmaseal-core = { path = "../irmaseal-core" }
-ibe = { git = "https://github.com/wassasin/ibe" }
+irmaseal-core = "0.1.0"
+ibe = "0.1.1"
 
 tokio = "0.1.22"
 futures = "0.1.28"

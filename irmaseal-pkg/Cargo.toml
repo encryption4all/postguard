@@ -6,8 +6,8 @@ edition = "2018"
 
 [dependencies]
 irmaseal-core = { path = "../irmaseal-core", default-features = false }
-ibe = { git = "https://github.com/wassasin/ibe" }
-irma = { git = "https://github.com/wassasin/irmars" }
+ibe = "0.1.1"
+irma = "0.0.1"
 
 actix-rt = "0.2.2"
 actix-web = { version = "1.0.7", default-features = false }
