@@ -3,6 +3,7 @@ name = "irmaseal-pkg"
 version = "0.1.0"
 authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
 edition = "2018"
+license = "MIT"
 
 [dependencies]
 irmaseal-core = { path = "../irmaseal-core", default-features = false }
