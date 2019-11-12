@@ -18,11 +18,10 @@ sha3 = { version = "0.8.2", optional = true }
 
 arrayref = "0.3.5"
 arrayvec = { version = "0.4.11", features = ["array-sizes-129-255", "serde-1"] }
-subtle = "2.1.1"
+subtle = "2.2.1"
 serde = { version = "1.0.99", features = ["derive"] }
 base64 = "0.10.1"
-
-ibe = { git = "https://github.com/wassasin/ibe" }
+ibe = "0.1.1"
 
 [features]
 default = ["stream"]
