@@ -6,6 +6,7 @@ authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
 edition = "2018"
 license = "MIT"
 keywords = ["ibe", "encryption", "ecc", "no_std"]
+repository = "https://github.com/wassasin/irmaseal/irmaseal-core"
 categories = ["cryptography", "no-std"]
 
 [dependencies]
