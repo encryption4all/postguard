@@ -15,9 +15,12 @@ pub fn exec(m: &ArgMatches) {
     let host = m.value_of("host").unwrap();
     let port = m.value_of("port").unwrap().parse::<u16>().unwrap();
 
+    let public = m.value_of("public").unwrap();
+    let secret = m.value_of("secret").unwrap();
+
     let state = AppState {
-        pk: read_pk().unwrap(),
-        sk: read_sk().unwrap(),
+        pk: read_pk(public).unwrap(),
+        sk: read_sk(secret).unwrap(),
         irma_server_host: "https://irma-noauth.demo.sarif.nl".to_string(),
     };
 

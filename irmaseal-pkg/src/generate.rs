@@ -20,12 +20,15 @@ fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
     inner(path.as_ref(), contents.as_ref())
 }
 
-pub fn exec(_: &ArgMatches) {
+pub fn exec(m: &ArgMatches) {
     let mut rng = rand::thread_rng();
     let (pk, sk) = setup(&mut rng);
 
-    write_owned("./pkg.pub", pk.to_bytes().as_ref());
-    write_owned("./pkg.sec", sk.to_bytes().as_ref());
+    let public = m.value_of("public").unwrap();
+    let secret = m.value_of("secret").unwrap();
 
-    println!("Written ./pkg.pub and ./pkg.sec");
+    write_owned(public, pk.to_bytes().as_ref());
+    write_owned(secret, sk.to_bytes().as_ref());
+
+    println!("Written {} and {}", public, secret);
 }

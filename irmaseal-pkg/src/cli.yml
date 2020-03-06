@@ -5,6 +5,19 @@ about: Private Key Generator (PKG) for IRMAseal, an Identity Based Encryption st
 subcommands:
 - generate:
     about: generate a global public/private keypair
+    args:
+    - secret:
+        short: S
+        long: secret
+        takes_value: true
+        default_value: "./pkg.sec"
+        help: path to the private key
+    - public:
+        short: P
+        long: public
+        takes_value: true
+        default_value: "./pkg.pub"
+        help: path to the public key
 - server:
     about: run the IRMAseal PKG HTTP server
     args:
@@ -22,3 +35,15 @@ subcommands:
         takes_value: true
         default_value: "0.0.0.0"
         help: host to bind this service to
+    - secret:
+        short: S
+        long: secret
+        takes_value: true
+        default_value: "./pkg.sec"
+        help: path to the private key
+    - public:
+        short: P
+        long: public
+        takes_value: true
+        default_value: "./pkg.pub"
+        help: path to the public key

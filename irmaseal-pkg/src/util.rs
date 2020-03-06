@@ -2,10 +2,12 @@ use arrayref::array_ref;
 use ibe::kiltz_vahlis_one::{PublicKey, SecretKey};
 use irmaseal_core::Error;
 
-pub fn read_pk() -> Result<PublicKey, Error> {
+use std::path::Path;
+
+pub fn read_pk(path: impl AsRef<Path>) -> Result<PublicKey, Error> {
     const LENGTH: usize = 25056;
 
-    let bytes = std::fs::read("./pkg.pub").unwrap();
+    let bytes = std::fs::read(path).unwrap();
     if bytes.len() != LENGTH {
         return Err(Error::FormatViolation);
     }
@@ -14,10 +16,10 @@ pub fn read_pk() -> Result<PublicKey, Error> {
     Ok(open_ct(PublicKey::from_bytes(bytes)).ok_or(Error::FormatViolation)?)
 }
 
-pub fn read_sk() -> Result<SecretKey, Error> {
+pub fn read_sk(path: impl AsRef<Path>) -> Result<SecretKey, Error> {
     const LENGTH: usize = 48;
 
-    let bytes = std::fs::read("./pkg.sec").unwrap();
+    let bytes = std::fs::read(path).unwrap();
     if bytes.len() != LENGTH {
         return Err(Error::FormatViolation);
     }
