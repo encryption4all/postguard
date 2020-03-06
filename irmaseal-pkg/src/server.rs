@@ -18,10 +18,12 @@ pub fn exec(m: &ArgMatches) {
     let public = m.value_of("public").unwrap();
     let secret = m.value_of("secret").unwrap();
 
+    let irma_server_host = m.value_of("irma").unwrap().to_string();
+
     let state = AppState {
         pk: read_pk(public).unwrap(),
         sk: read_sk(secret).unwrap(),
-        irma_server_host: "https://irma-noauth.demo.sarif.nl".to_string(),
+        irma_server_host,
     };
 
     let system = System::new("main");
