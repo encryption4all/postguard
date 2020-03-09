@@ -35,16 +35,24 @@ pub async fn exec(m: &ArgMatches<'_>) {
     let client = crate::client::Client::new(server).unwrap();
 
     let parameters = client.parameters().await.unwrap();
+    eprintln!("Fetched parameters from {}", server);
+    eprintln!("Encrypting for recipient {:#?}", i);
+
     let output = format!("{}.irma", input);
-    let mut w = crate::util::FileWriter::new(std::fs::File::create(output).unwrap());
+    let mut w = crate::util::FileWriter::new(std::fs::File::create(&output).unwrap());
 
     let mut sealer = Sealer::new(&i, &parameters.public_key, &mut rng, &mut w).unwrap();
 
     use std::io::Read;
     let mut src = std::fs::File::open(input).unwrap();
     let mut buf = [0u8; 512];
+
+    eprintln!("Encrypting {}...", input);
+
+    let mut total_len = 0;
     loop {
         let len = src.read(&mut buf).unwrap();
+        total_len += len;
 
         if len == 0 {
             break;
@@ -53,4 +61,9 @@ pub async fn exec(m: &ArgMatches<'_>) {
         use irmaseal_core::Writable;
         sealer.write(&buf[0..len]).unwrap();
     }
+
+    eprintln!(
+        "Encrypted {} bytes, written result to {}",
+        total_len, output
+    );
 }

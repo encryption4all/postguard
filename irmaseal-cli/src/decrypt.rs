@@ -41,12 +41,16 @@ pub async fn exec(m: &ArgMatches<'_>) {
     let output = m.value_of("OUTPUT").unwrap();
     let server = m.value_of("server").unwrap();
 
+    eprintln!("Opening {}", input);
+
     let r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
 
     let (identity, o) = OpenerSealed::new(r).unwrap();
     let timestamp = identity.timestamp;
 
     let client = Client::new(server).unwrap();
+
+    eprintln!("Requesting private key for {:#?}", identity.attribute);
 
     let sp: OwnedKeyChallenge = client
         .request(&KeyRequest {
@@ -55,9 +59,13 @@ pub async fn exec(m: &ArgMatches<'_>) {
         .await
         .unwrap();
 
+    eprintln!("Please scan the following QR-code with IRMA:");
+
     print_qr(&sp.qr);
 
     if let Some(r) = wait_on_session(client, &sp, timestamp).await.unwrap() {
+        eprintln!("Disclosure successful, decrypting {} to {}", input, output);
+
         let mut o = o.unseal(&r.key.unwrap()).unwrap();
 
         let mut of = crate::util::FileWriter::new(std::fs::File::create(output).unwrap());
