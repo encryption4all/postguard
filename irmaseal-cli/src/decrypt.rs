@@ -2,11 +2,10 @@ use clap::ArgMatches;
 use irmaseal_core::api::*;
 use irmaseal_core::stream::OpenerSealed;
 
-use futures::future::{loop_fn, ok, Either, Future, Loop};
-use std::time::{Duration, Instant};
-use tokio::timer::Delay;
+use std::time::Duration;
+use tokio::time::delay_for;
 
-use crate::client::OwnedKeyChallenge;
+use crate::client::{Client, ClientError, OwnedKeyChallenge};
 
 fn print_qr(s: &str) {
     let code = qrcode::QrCode::new(s).unwrap();
@@ -19,7 +18,25 @@ fn print_qr(s: &str) {
     println!("\n\n{}", scode);
 }
 
-pub fn exec(m: &ArgMatches) {
+async fn wait_on_session(
+    client: Client<'_>,
+    sp: &OwnedKeyChallenge,
+    timestamp: u64,
+) -> Result<Option<KeyResponse>, ClientError> {
+    for _ in 0..120 {
+        let r: KeyResponse = client.result(&sp.token, timestamp).await?;
+
+        if r.status != KeyStatus::DoneValid {
+            delay_for(Duration::new(0, 500_000_000)).await;
+        } else {
+            return Ok(Some(r));
+        }
+    }
+
+    Ok(None)
+}
+
+pub async fn exec(m: &ArgMatches<'_>) {
     let input = m.value_of("INPUT").unwrap();
     let output = m.value_of("OUTPUT").unwrap();
 
@@ -28,41 +45,25 @@ pub fn exec(m: &ArgMatches) {
     let (identity, o) = OpenerSealed::new(r).unwrap();
     let timestamp = identity.timestamp;
 
-    let client = crate::client::Client::new("http://localhost:8087").unwrap();
+    let client = Client::new("http://localhost:8087").unwrap();
 
-    let res = client
+    let sp: OwnedKeyChallenge = client
         .request(&KeyRequest {
             attribute: identity.attribute,
         })
-        .and_then(move |sp: OwnedKeyChallenge| {
-            print_qr(&sp.qr);
+        .await
+        .unwrap();
 
-            loop_fn(120, move |i: u8| {
-                client
-                    .result(&sp.token, timestamp)
-                    .and_then(move |r: KeyResponse| {
-                        if r.status != KeyStatus::DoneValid && i > 0 {
-                            Either::A(
-                                Delay::new(Instant::now() + Duration::new(0, 500_000_000))
-                                    .then(move |_| Ok(Loop::Continue(i - 1))),
-                            )
-                        } else {
-                            Either::B(ok(Loop::Break(r)))
-                        }
-                    })
-            })
-        })
-        .and_then(move |r: KeyResponse| {
-            let mut o = o.unseal(&r.key.unwrap()).unwrap();
+    print_qr(&sp.qr);
 
-            let mut of = crate::util::FileWriter::new(std::fs::File::create(output).unwrap());
-            o.write_to(&mut of).unwrap();
+    if let Some(r) = wait_on_session(client, &sp, timestamp).await.unwrap() {
+        let mut o = o.unseal(&r.key.unwrap()).unwrap();
 
-            eprintln!("Succesfully decrypted {}", output);
+        let mut of = crate::util::FileWriter::new(std::fs::File::create(output).unwrap());
+        o.write_to(&mut of).unwrap();
 
-            Ok(())
-        });
-
-    let mut rt = tokio::runtime::current_thread::Runtime::new().expect("new rt");
-    rt.block_on(res).unwrap();
+        eprintln!("Succesfully decrypted {}", output);
+    } else {
+        eprintln!("Did not scan the QR code and disclose in time");
+    };
 }

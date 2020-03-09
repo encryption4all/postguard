@@ -1,20 +1,20 @@
 [package]
 name = "irmaseal-cli"
 description = "Commandline interface for IRMAseal"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
 edition = "2018"
 license = "MIT"
 
 [dependencies]
 irmaseal-core = "0.1.0"
-ibe = "0.1.1"
+ibe = "0.1.3"
 
-tokio = "0.1.22"
-futures = "0.1.28"
-qrcode = { version = "0.11.0", default-features = false }
+tokio = { version = "0.2.5", features = ["rt-threaded", "time"] }
+futures = "0.3.4"
+qrcode = { version = "0.12.0", default-features = false }
 clap = { version = "2.33.0", features = ["yaml"] }
-rand = "0.7.0"
-arrayvec = { version = "0.4.11", features = ["array-sizes-129-255"] }
-serde = "1.0.99"
-reqwest = { version = "0.9", features = ["rustls-tls"], default-features = false }
+rand = "0.7.3"
+arrayvec = { version = "0.5.1", features = ["array-sizes-129-255"] }
+serde = "1.0.104"
+reqwest = { version = "0.10.4", features = ["rustls-tls", "json"], default-features = false }
