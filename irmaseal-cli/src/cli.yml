@@ -20,6 +20,14 @@ subcommands:
         value_name: BSN
         takes_value: true
         help: Recipient BSN to encrypt file for
+    - server:
+        short: s
+        long: server
+        value_name: server
+        takes_value: true
+        default_value: https://pkg.demo.irmaseal.org
+        help: Public Key Generator server URL
+
 - decrypt:
     about: decrypt a file
     args:
@@ -31,3 +39,10 @@ subcommands:
         help: Sets the output file to use
         required: true
         index: 2
+    - server:
+        short: s
+        long: server
+        value_name: server
+        takes_value: true
+        default_value: https://pkg.demo.irmaseal.org
+        help: Public Key Generator server URL

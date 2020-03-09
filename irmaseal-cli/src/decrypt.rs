@@ -39,13 +39,14 @@ async fn wait_on_session(
 pub async fn exec(m: &ArgMatches<'_>) {
     let input = m.value_of("INPUT").unwrap();
     let output = m.value_of("OUTPUT").unwrap();
+    let server = m.value_of("server").unwrap();
 
     let r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
 
     let (identity, o) = OpenerSealed::new(r).unwrap();
     let timestamp = identity.timestamp;
 
-    let client = Client::new("http://localhost:8087").unwrap();
+    let client = Client::new(server).unwrap();
 
     let sp: OwnedKeyChallenge = client
         .request(&KeyRequest {

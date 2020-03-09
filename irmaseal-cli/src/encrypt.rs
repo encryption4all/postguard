@@ -16,6 +16,7 @@ pub async fn exec(m: &ArgMatches<'_>) {
     let input = m.value_of("INPUT").unwrap();
     let email = m.value_of("email");
     let bsn = m.value_of("bsn");
+    let server = m.value_of("server").unwrap();
     let timestamp = now();
 
     let i = match (email, bsn) {
@@ -31,7 +32,7 @@ pub async fn exec(m: &ArgMatches<'_>) {
         }
     };
 
-    let client = crate::client::Client::new("http://localhost:8087").unwrap();
+    let client = crate::client::Client::new(server).unwrap();
 
     let parameters = client.parameters().await.unwrap();
     let output = format!("{}.irma", input);
