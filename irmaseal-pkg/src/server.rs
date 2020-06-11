@@ -38,7 +38,8 @@ pub fn exec(m: &ArgMatches) {
             )
             .service(
                 actix_web::web::resource("/v1/request")
-                    .route(actix_web::web::post().to_async(handlers::request)),
+                    .route(actix_web::web::post().to_async(handlers::request))
+                    .route(actix_web::web::method(actix_web::http::Method::OPTIONS).to_async(handlers::request_preflight))
             )
             .service(
                 actix_web::web::resource("/v1/request/{token}/{timestamp}")

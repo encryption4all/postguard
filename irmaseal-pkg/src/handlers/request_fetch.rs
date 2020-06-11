@@ -86,6 +86,6 @@ pub fn request_fetch(
                 },
             };
 
-            Ok(HttpResponse::Ok().json(result))
+            Ok(HttpResponse::Ok().header("Access-Control-Allow-Origin", "*").json(result))
         })
 }
