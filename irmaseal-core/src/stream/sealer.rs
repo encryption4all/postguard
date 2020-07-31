@@ -1,4 +1,4 @@
-use cfb_mode::stream_cipher::{NewStreamCipher, StreamCipher};
+use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
 use rand::{CryptoRng, Rng};
 

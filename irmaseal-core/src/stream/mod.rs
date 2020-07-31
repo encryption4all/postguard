@@ -10,7 +10,7 @@ mod tests;
 pub use opener::*;
 pub use sealer::*;
 
-pub(crate) type SymCrypt = cfb_mode::Cfb<aes::Aes256>;
+pub(crate) type SymCrypt = ctr::Ctr128<aes::Aes256>;
 pub(crate) type Verifier = hmac::Hmac<sha3::Sha3_256>;
 
 /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.

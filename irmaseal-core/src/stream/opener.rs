@@ -3,7 +3,7 @@ use crate::stream::*;
 use crate::*;
 
 use arrayref::array_ref;
-use cfb_mode::stream_cipher::{NewStreamCipher, StreamCipher};
+use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
 
 /// First stage opener of an IRMAseal encrypted bytestream.

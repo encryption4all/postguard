@@ -10,12 +10,13 @@ homepage = "https://github.com/Wassasin/irmaseal/tree/master/irmaseal-core"
 categories = ["cryptography", "no-std"]
 
 [dependencies]
-digest = { version = "0.8", optional = true }
-rand = { version = "0.7", optional = true }
-aes = { version = "0.3", optional = true }
+digest = { version = "0.8.1", optional = true }
+rand = { version = "0.7.0", optional = true }
+aes = { version = "0.4.0", optional = true }
+ctr = { version = "0.4.0", optional = true }
 cfb-mode = { version = "0.3", optional = true }
-hmac = { version = "0.7", optional = true }
-sha3 = { version = "0.8", optional = true }
+hmac = { version = "0.7.1", optional = true }
+sha3 = { version = "0.8.2", optional = true }
 
 arrayref = "0.3"
 arrayvec = { version = "0.5", features = ["array-sizes-129-255", "serde"] }
@@ -27,4 +28,4 @@ ibe = "0.1"
 [features]
 default = ["stream"]
 
-stream = ["digest", "rand", "aes", "cfb-mode", "hmac", "sha3"]
+stream = ["digest", "rand", "aes", "ctr", "hmac", "sha3"]
