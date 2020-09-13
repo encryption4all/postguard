@@ -10,5 +10,5 @@ pub fn parameters(state: Data<AppState>) -> impl Future<Item = HttpResponse, Err
         public_key: state.pk.into(),
     };
 
-    ok(HttpResponse::Ok().header("Access-Control-Allow-Origin", "*").json(parameters))
+    ok(HttpResponse::Ok().json(parameters))
 }

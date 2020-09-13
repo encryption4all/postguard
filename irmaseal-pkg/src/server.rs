@@ -30,6 +30,7 @@ pub fn exec(m: &ArgMatches) {
 
     actix_web::HttpServer::new(move || {
         actix_web::App::new()
+            .wrap(actix_cors::Cors::default())
             .data(actix_web::web::JsonConfig::default().limit(1024 * 4096))
             .data(state.clone())
             .service(
@@ -39,7 +40,6 @@ pub fn exec(m: &ArgMatches) {
             .service(
                 actix_web::web::resource("/v1/request")
                     .route(actix_web::web::post().to_async(handlers::request))
-                    .route(actix_web::web::method(actix_web::http::Method::OPTIONS).to_async(handlers::request_preflight))
             )
             .service(
                 actix_web::web::resource("/v1/request/{token}/{timestamp}")

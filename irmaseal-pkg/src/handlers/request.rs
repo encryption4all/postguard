@@ -7,16 +7,6 @@ use irma::request::*;
 
 use crate::server::AppState;
 
-pub fn request_preflight(
-) -> Result<HttpResponse, crate::Error> {
-    let response = HttpResponse::Ok()
-        .header("Access-Control-Allow-Methods", "POST")
-        .header("Access-Control-Allow-Headers", "Content-Type")
-        .header("Access-Control-Allow-Origin", "*")
-        .finish();
-    Ok(response)
-}
-
 pub fn request(
     state: Data<AppState>,
     value: Json<KeyRequest>,
@@ -43,6 +33,6 @@ pub fn request(
         let qr = &serde_json::to_string(&sp.session_ptr).or(Err(crate::Error::Unexpected))?;
         let token: &str = (&sp.token).into();
 
-        Ok(HttpResponse::Ok().header("Access-Control-Allow-Origin", "*").json(KeyChallenge { qr, token }))
+        Ok(HttpResponse::Ok().json(KeyChallenge { qr, token }))
     })
 }
