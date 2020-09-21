@@ -68,3 +68,23 @@ pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
         None
     }
 }
+
+// We don't want serialize 64 bit numbers as JSON numbers
+// due to 64 bit numbers not fitting in JSON.
+// https://github.com/serde-rs/json/issues/329
+pub mod u64_ser {
+    use arrayvec::{ArrayString};
+    use serde::{de, Serializer, Deserialize, Deserializer};
+
+    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        serializer.collect_str(value)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+        where D: Deserializer<'de>
+    {
+        ArrayString::<[u8; 32]>::deserialize(deserializer)?.parse().map_err(de::Error::custom)
+    }
+}

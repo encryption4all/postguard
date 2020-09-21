@@ -2,6 +2,7 @@ use crate::stream::util::ArchiveReader;
 use crate::stream::*;
 use crate::*;
 
+use core::convert::TryInto;
 use arrayref::array_ref;
 use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
@@ -28,28 +29,23 @@ impl<R: Readable> OpenerSealed<R> {
     /// Starts interpreting a bytestream as an IRMAseal stream.
     /// Will immediately detect whether the bytestream actually is such a stream, and will yield
     /// the identity for which the stream is intended, as well as the stream continuation.
-    pub fn new(r: R) -> Result<(Identity, OpenerSealed<R>), Error> {
-        let mut ar = ArchiveReader::<R, [u8; 2048]>::new(r);
-
-        let prelude = ar.read_bytes_strict(PRELUDE.len())?;
+    pub fn new(mut r: R) -> Result<(Metadata, OpenerSealed<R>), Error> {
+        let prelude = r.read_bytes_strict(PRELUDE.len())?;
         if prelude != PRELUDE {
             return Err(Error::NotIRMASEAL);
         }
 
-        let format_version = ar.read_byte()?;
-        if format_version != FORMAT_VERSION {
-            return Err(Error::IncorrectVersion);
-        }
+        let meta_len = u16::from_be_bytes(r.read_bytes_strict(core::mem::size_of::<u16>())?.try_into().unwrap());
+        let metadata_buf = r.read_bytes_strict(meta_len.into())?;
 
-        let i = Identity::read_from(&mut ar)?;
+        let metadata = serde_json::from_slice(metadata_buf).or(Err(Error::FormatViolation))?;
 
-        Ok((i, OpenerSealed { ar }))
+        let ar = ArchiveReader::<R, [u8; 2048]>::new(r);
+        Ok((metadata, OpenerSealed { ar }))
     }
 
     /// Will unseal the stream continuation and yield a plaintext bytestream.
     pub fn unseal(mut self, usk: &UserSecretKey) -> Result<OpenerUnsealed<R>, Error> {
-        const CIPHERTEXT_SIZE: usize = 144;
-
         let cbuf = self.ar.read_bytes_strict(CIPHERTEXT_SIZE)?;
         let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref![
             cbuf,

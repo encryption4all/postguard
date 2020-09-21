@@ -1,11 +1,10 @@
-use super::{Error, Readable, Writable};
-use arrayref::array_ref;
+use super::{Error, Writable};
 use arrayvec::{ArrayString, ArrayVec};
 use serde::{Deserialize, Serialize};
 
 const IDENTITY_UNSET: u8 = 0xFF;
 
-// Must be at least 8+1+255+1+254 = 519
+// Must be at least 8+255+1+254 = 518
 #[allow(dead_code)]
 type IdentityBuf = ArrayVec<[u8; 1024]>;
 
@@ -20,6 +19,7 @@ pub struct Attribute {
 /// An IRMAseal identity, from which internally a Waters identity can be derived.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct Identity {
+    #[serde(with = "crate::util::u64_ser")]
     pub timestamp: u64,
     pub attribute: Attribute,
 }
@@ -36,60 +36,6 @@ impl Attribute {
 
         Ok(Attribute { atype, value })
     }
-
-    /// Write the byte representation of this attribute as a bytestream.
-    pub fn write_to<W: Writable>(&self, w: &mut W) -> Result<(), Error> {
-        use core::convert::TryFrom;
-
-        let at = self.atype.as_bytes();
-        // ArrayString cannot be larger than 255.
-        let at_len = u8::try_from(at.len()).unwrap();
-        w.write(&[at_len.to_be()])?;
-        w.write(at)?;
-
-        match self.value {
-            None => w.write(&[IDENTITY_UNSET])?,
-            Some(i) => {
-                let i = i.as_bytes();
-
-                if i.len() >= usize::from(IDENTITY_UNSET) {
-                    return Err(Error::ConstraintViolation);
-                }
-
-                // ArrayString cannot be larger than 254.
-                let i_len = u8::try_from(i.len()).unwrap();
-                w.write(&[i_len.to_be()])?;
-                w.write(i)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Construct an attribute from a bytestream.
-    pub fn read_from<R: Readable>(r: &mut R) -> Result<Self, Error> {
-        let at_len = u8::from_be(r.read_byte()?);
-        let at_len = usize::from(at_len);
-        let atype = core::str::from_utf8(r.read_bytes(at_len)?).or(Err(Error::FormatViolation))?;
-
-        // Unwrap is valid because it impossible to not fit given u8.
-        let atype = ArrayString::<[u8; 255]>::from(atype).unwrap();
-
-        let i_len = u8::from_be(r.read_byte()?);
-        let value = if i_len == IDENTITY_UNSET {
-            None
-        } else {
-            let i_len = usize::from(i_len);
-            let value =
-                core::str::from_utf8(r.read_bytes(i_len)?).or(Err(Error::FormatViolation))?;
-
-            // Unwrap is valid because it impossible to not fit given u8.
-            let value = ArrayString::<[u8; 254]>::from(value).unwrap();
-            Some(value)
-        };
-
-        Ok(Attribute { atype, value })
-    }
 }
 
 impl Identity {
@@ -103,29 +49,29 @@ impl Identity {
         })
     }
 
-    /// Write the byte representation of this identity as a bytestream.
-    pub fn write_to<W: Writable>(&self, w: &mut W) -> Result<(), Error> {
-        w.write(&self.timestamp.to_be_bytes())?;
-        self.attribute.write_to(w)
-    }
-
-    /// Construct an identity from a bytestream.
-    pub fn read_from<R: Readable>(r: &mut R) -> Result<Identity, Error> {
-        let timestamp = r.read_bytes(8)?;
-        let timestamp = u64::from_be_bytes(*array_ref![timestamp, 0, 8]);
-
-        Ok(Identity {
-            timestamp,
-            attribute: Attribute::read_from(r)?,
-        })
-    }
-
     /// Derive the corresponding Waters identity in a deterministic way.
-    /// Uses `self.write_to` and `ibe::kiltz_vahlis_one::Identity:derive` internally.
-    pub fn derive(&self) -> ibe::kiltz_vahlis_one::Identity {
+    /// Uses `ibe::kiltz_vahlis_one::Identity:derive` internally.
+    pub fn derive(&self) -> Result<ibe::kiltz_vahlis_one::Identity, Error> {
         let mut buf = IdentityBuf::new();
-        self.write_to(&mut buf).unwrap();
-        ibe::kiltz_vahlis_one::Identity::derive(&buf)
+
+        buf.write(&self.timestamp.to_be_bytes())?;
+
+        buf.write(self.attribute.atype.as_bytes())?;
+
+        match self.attribute.value {
+            None => buf.write(&[IDENTITY_UNSET]),
+            Some(i) => {
+                let i = i.as_bytes();
+
+                if i.len() >= usize::from(IDENTITY_UNSET) {
+                    return Err(Error::ConstraintViolation);
+                }
+
+                buf.write(i)
+            }
+        }?;
+
+        Ok(ibe::kiltz_vahlis_one::Identity::derive(&buf))
     }
 }
 
@@ -144,10 +90,10 @@ mod tests {
             Some("w.geraedts@sarif.nl"),
         )
         .unwrap();
-        i.write_to(&mut buf).unwrap();
 
-        let mut reader = SliceReader::new(&buf);
-        let i2 = Identity::read_from(&mut reader).unwrap();
+        buf.write(serde_json::to_vec(&i).unwrap().as_slice()).unwrap();
+
+        let i2 = serde_json::from_slice(buf.as_slice()).unwrap();
 
         assert_eq!(i, i2);
     }

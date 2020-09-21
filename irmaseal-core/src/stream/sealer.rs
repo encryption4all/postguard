@@ -1,6 +1,7 @@
 use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
 use rand::{CryptoRng, Rng};
+use core::convert::TryFrom;
 
 use crate::stream::*;
 use crate::*;
@@ -14,12 +15,15 @@ pub struct Sealer<'a, W: Writable> {
 
 impl<'a, W: Writable> Sealer<'a, W> {
     pub fn new<R: Rng + CryptoRng>(
-        i: &Identity,
+        media_type: &str,
+        media_metadata: serde_json::Value,
+        i: Identity,
         pk: &PublicKey,
         rng: &mut R,
         w: &'a mut W,
     ) -> Result<Sealer<'a, W>, Error> {
-        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &i.derive(), rng);
+        let derived = i.derive()?;
+        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
 
         let (aeskey, mackey) = crate::stream::util::derive_keys(&k);
         let iv = crate::stream::util::generate_iv(rng);
@@ -29,20 +33,20 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         let ciphertext = c.to_bytes();
 
-        hmac.input(&PRELUDE);
+        let metadata = Metadata::new(Version::V1_0, media_type, media_metadata, &ciphertext, &iv, i)?;
+        let json_bytes = serde_json::to_vec(&metadata).or(Err(Error::FormatViolation))?;
+
+        let metadata_len = u16::try_from(json_bytes.len())
+            .or(Err(Error::FormatViolation))?.to_be_bytes();
+
+        hmac.write(&PRELUDE)?;
         w.write(&PRELUDE)?;
 
-        hmac.input(&[FORMAT_VERSION]);
-        w.write(&[FORMAT_VERSION])?;
+        hmac.write(&metadata_len)?;
+        w.write(&metadata_len)?;
 
-        i.write_to(&mut hmac)?;
-        i.write_to(w)?;
-
-        hmac.input(&ciphertext);
-        w.write(&ciphertext)?;
-
-        hmac.input(&iv);
-        w.write(&iv)?;
+        hmac.write(&json_bytes.as_slice())?;
+        w.write(json_bytes.as_slice())?;
 
         Ok(Sealer { aes, hmac, w })
     }

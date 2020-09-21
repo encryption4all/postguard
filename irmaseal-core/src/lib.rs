@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod identity;
+mod meta;
 
 pub mod api;
 pub mod util;
@@ -11,6 +12,7 @@ pub mod stream;
 
 pub use artifacts::*;
 pub use identity::*;
+pub use meta::*;
 
 #[derive(Debug)]
 pub enum Error {
