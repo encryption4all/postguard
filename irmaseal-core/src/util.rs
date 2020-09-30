@@ -48,7 +48,7 @@ impl<A: Array<Item = u8>> Writable for ArrayVec<A> {
         unsafe {
             let len = self.len();
 
-            if len + data.len() > A::capacity() {
+            if len + data.len() > A::CAPACITY {
                 return Err(Error::UpstreamWritableError);
             }
 
