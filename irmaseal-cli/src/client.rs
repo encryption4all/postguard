@@ -29,7 +29,7 @@ impl<'a> Client<'a> {
 
     pub async fn parameters(&self) -> Result<Parameters, ClientError> {
         self.client
-            .get(self.create_url("/v1/parameters"))
+            .get(self.create_url("v1/parameters"))
             .send()
             .await?
             .error_for_status()?
@@ -39,7 +39,7 @@ impl<'a> Client<'a> {
 
     pub async fn request(&self, kr: &KeyRequest) -> Result<OwnedKeyChallenge, ClientError> {
         self.client
-            .post(self.create_url("/v1/request"))
+            .post(self.create_url("v1/request"))
             .json(kr)
             .send()
             .await?
@@ -51,7 +51,7 @@ impl<'a> Client<'a> {
     pub async fn result(&self, token: &str, timestamp: u64) -> Result<KeyResponse, ClientError> {
         self.client
             .get(
-                self.create_url("/v1/request/")
+                self.create_url("v1/request/")
                     .join(&format!("{}/{}", token, timestamp))
                     .unwrap(),
             )
