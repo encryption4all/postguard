@@ -1,19 +1,26 @@
-use super::stream::*;
-use crate::Identity;
-use super::{Error};
+use crate::*;
 use base64;
 use arrayvec::{ArrayString, ArrayVec};
 use serde::{Deserialize, Serialize, Deserializer, Serializer};
 
+#[allow(dead_code)]
+pub(crate) const KEYSIZE: usize = 32;
+pub(crate) const IVSIZE: usize = 16;
+pub(crate) const IVSIZE_B64: usize = 24;
+#[allow(dead_code)]
+pub(crate) const MACSIZE: usize = 32;
+pub(crate) const CIPHERTEXT_SIZE: usize = 144;
+pub(crate) const CIPHERTEXT_SIZE_B64: usize = 192;
+
 /// The version of the encrypted data
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Version {
-    V1_0,
+    V1_0
 }
 
 /// Metadata which contains the version
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Metadata {
     pub version: Version,
     pub media_type: ArrayString<[u8; 255]>,
@@ -31,7 +38,11 @@ fn to_base64_ciphertext<S>(ciphertext: &ArrayVec<[u8; CIPHERTEXT_SIZE]>, seriali
 {
     let mut b64_encoded = ArrayVec::<[u8; CIPHERTEXT_SIZE_B64]>::new();
 
-    base64::encode_config_slice(&ciphertext, base64::STANDARD, b64_encoded.as_mut_slice());
+    for _ in 0..CIPHERTEXT_SIZE_B64 {
+        b64_encoded.push(0);
+    }
+
+    base64::encode_config_slice(ciphertext.as_slice(), base64::STANDARD, b64_encoded.as_mut_slice());
 
     b64_encoded.serialize(serializer)
 }
@@ -42,6 +53,10 @@ fn from_base64_ciphertext<'de, D>(deserializer: D) -> Result<ArrayVec<[u8; CIPHE
     use serde::de::Error;
 
     let mut result = ArrayVec::<[u8; CIPHERTEXT_SIZE]>::new();
+
+    for _ in 0..CIPHERTEXT_SIZE {
+        result.push(0);
+    }
 
     ArrayVec::<[u8; CIPHERTEXT_SIZE_B64]>::deserialize(deserializer)
         .and_then(|avec| base64::decode_config_slice(&avec, base64::STANDARD, result.as_mut_slice())
@@ -55,6 +70,10 @@ fn to_base64_iv<S>(ciphertext: &ArrayVec<[u8; IVSIZE]>, serializer: S) -> Result
 {
     let mut b64_encoded = ArrayVec::<[u8; IVSIZE_B64]>::new();
 
+    for _ in 0..IVSIZE_B64 {
+        b64_encoded.push(0);
+    }
+
     base64::encode_config_slice(&ciphertext, base64::STANDARD, b64_encoded.as_mut_slice());
 
     b64_encoded.serialize(serializer)
@@ -66,6 +85,10 @@ fn from_base64_iv<'de, D>(deserializer: D) -> Result<ArrayVec<[u8; IVSIZE]>, D::
     use serde::de::Error;
 
     let mut result = ArrayVec::<[u8; IVSIZE]>::new();
+
+    for _ in 0..IVSIZE {
+        result.push(0);
+    }
 
     ArrayVec::<[u8; IVSIZE_B64]>::deserialize(deserializer)
         .and_then(|avec| base64::decode_config_slice(&avec, base64::STANDARD, result.as_mut_slice())
@@ -84,11 +107,12 @@ impl Metadata {
         media_metadata: serde_json::Value,
         ciphertext: &[u8; CIPHERTEXT_SIZE],
         iv: &[u8; IVSIZE],
-        identity: Identity
+        identity: &Identity
     ) -> Result<Self, Error> {
         let media_type = ArrayString::<[u8; 255]>::from(media_type).or(Err(Error::ConstraintViolation))?;
         let ciphertext = ciphertext.iter().cloned().collect::<ArrayVec::<[u8; CIPHERTEXT_SIZE]>>();
         let iv = iv.iter().cloned().collect::<ArrayVec::<[u8; IVSIZE]>>();
+        let identity = identity.clone();
 
         Ok(Metadata { version, media_type, media_metadata, ciphertext, iv, identity })
     }

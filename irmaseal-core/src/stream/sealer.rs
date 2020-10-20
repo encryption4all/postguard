@@ -17,7 +17,7 @@ impl<'a, W: Writable> Sealer<'a, W> {
     pub fn new<R: Rng + CryptoRng>(
         media_type: &str,
         media_metadata: serde_json::Value,
-        i: Identity,
+        i: &Identity,
         pk: &PublicKey,
         rng: &mut R,
         w: &'a mut W,
@@ -33,7 +33,7 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         let ciphertext = c.to_bytes();
 
-        let metadata = Metadata::new(Version::V1_0, media_type, media_metadata, &ciphertext, &iv, i)?;
+        let metadata = Metadata::new(Version::V1_0, media_type, media_metadata, &ciphertext, &iv, &i)?;
         let json_bytes = serde_json::to_vec(&metadata).or(Err(Error::FormatViolation))?;
 
         let metadata_len = u16::try_from(json_bytes.len())
@@ -48,7 +48,12 @@ impl<'a, W: Writable> Sealer<'a, W> {
         hmac.write(&json_bytes.as_slice())?;
         w.write(json_bytes.as_slice())?;
 
-        Ok(Sealer { aes, hmac, w })
+        if json_bytes.len() > MAX_METADATA_SIZE {
+            Err(Error::FormatViolation)
+        }
+        else {
+            Ok(Sealer { aes, hmac, w })
+        }
     }
 }
 

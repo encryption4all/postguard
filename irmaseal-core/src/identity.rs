@@ -9,7 +9,7 @@ const IDENTITY_UNSET: u8 = 0xFF;
 type IdentityBuf = ArrayVec<[u8; 1024]>;
 
 /// An IRMAseal Attribute, which is a simple case of an IRMA ConDisCon.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Attribute {
     #[serde(rename = "type")]
     pub atype: ArrayString<[u8; 255]>,
@@ -17,7 +17,7 @@ pub struct Attribute {
 }
 
 /// An IRMAseal identity, from which internally a Waters identity can be derived.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Identity {
     #[serde(with = "crate::util::u64_ser")]
     pub timestamp: u64,
@@ -78,7 +78,6 @@ impl Identity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::SliceReader;
 
     #[test]
     fn eq_write_read() {
