@@ -2,6 +2,7 @@ use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
 use rand::{CryptoRng, Rng};
 use core::convert::TryFrom;
+use postcard::to_slice;
 
 use crate::stream::*;
 use crate::*;
@@ -15,9 +16,7 @@ pub struct Sealer<'a, W: Writable> {
 
 impl<'a, W: Writable> Sealer<'a, W> {
     pub fn new<R: Rng + CryptoRng>(
-        media_type: &str,
-        media_metadata: serde_json::Value,
-        i: &Identity,
+        i: Identity,
         pk: &PublicKey,
         rng: &mut R,
         w: &'a mut W,
@@ -33,10 +32,11 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         let ciphertext = c.to_bytes();
 
-        let metadata = Metadata::new(Version::V1_0, media_type, media_metadata, &ciphertext, &iv, &i)?;
-        let json_bytes = serde_json::to_vec(&metadata).or(Err(Error::FormatViolation))?;
+        let metadata = Metadata::new(Version::V1_0, &ciphertext, &iv, i)?;
+        let mut deser_buf = [0; MAX_METADATA_SIZE];
+        let meta_bytes = to_slice(&metadata, &mut deser_buf).or(Err(Error::FormatViolation))?;
 
-        let metadata_len = u16::try_from(json_bytes.len())
+        let metadata_len = u16::try_from(meta_bytes.len())
             .or(Err(Error::FormatViolation))?.to_be_bytes();
 
         hmac.write(&PRELUDE)?;
@@ -45,10 +45,10 @@ impl<'a, W: Writable> Sealer<'a, W> {
         hmac.write(&metadata_len)?;
         w.write(&metadata_len)?;
 
-        hmac.write(&json_bytes.as_slice())?;
-        w.write(json_bytes.as_slice())?;
+        hmac.write(&meta_bytes)?;
+        w.write(meta_bytes)?;
 
-        if json_bytes.len() > MAX_METADATA_SIZE {
+        if metadata_len.len() > MAX_METADATA_SIZE {
             Err(Error::FormatViolation)
         }
         else {

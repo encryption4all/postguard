@@ -19,7 +19,6 @@ pub struct Attribute {
 /// An IRMAseal identity, from which internally a Waters identity can be derived.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Identity {
-    #[serde(with = "crate::util::u64_ser")]
     pub timestamp: u64,
     pub attribute: Attribute,
 }
@@ -81,7 +80,7 @@ mod tests {
 
     #[test]
     fn eq_write_read() {
-        let mut buf = IdentityBuf::new();
+        let mut buf: [u8; 1024] = [0; 1024];
 
         let i = Identity::new(
             1566722350,
@@ -90,9 +89,9 @@ mod tests {
         )
         .unwrap();
 
-        buf.write(serde_json::to_vec(&i).unwrap().as_slice()).unwrap();
+        let identity_bytes = postcard::to_slice(&i, &mut buf).unwrap();
 
-        let i2 = serde_json::from_slice(buf.as_slice()).unwrap();
+        let i2 = postcard::from_bytes(identity_bytes).unwrap();
 
         assert_eq!(i, i2);
     }

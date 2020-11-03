@@ -12,7 +12,6 @@ use hmac::Mac;
 ///
 /// Enables the library user to lookup the UserSecretKey corresponding to this Identity before continuing.
 pub struct OpenerSealed<R: Readable> {
-    pub metadata: Metadata,
     ar: ArchiveReader<R, [u8; MAX_METADATA_SIZE]>,
 }
 
@@ -20,7 +19,6 @@ pub struct OpenerSealed<R: Readable> {
 ///
 /// **Warning**: will only validate the authenticity of the plaintext when calling `validate`.
 pub struct OpenerUnsealed<R: Readable> {
-    pub metadata: Metadata,
     aes: SymCrypt,
     hmac: Verifier,
     r: R,
@@ -31,7 +29,7 @@ impl<R: Readable> OpenerSealed<R> {
     /// Starts interpreting a bytestream as an IRMAseal stream.
     /// Will immediately detect whether the bytestream actually is such a stream, and will yield
     /// the identity for which the stream is intended, as well as the stream continuation.
-    pub fn new(r: R) -> Result<OpenerSealed<R>, Error> {
+    pub fn new(r: R) -> Result<(Metadata, OpenerSealed<R>), Error> {
         let mut ar = ArchiveReader::<R, [u8; MAX_METADATA_SIZE]>::new(r);
 
         let prelude = ar.read_bytes_strict(PRELUDE.len())?;
@@ -46,15 +44,15 @@ impl<R: Readable> OpenerSealed<R> {
 
         let metadata_buf = ar.read_bytes_strict(meta_len.into())?;
 
-        let metadata = serde_json::from_slice(metadata_buf).or(Err(Error::FormatViolation))?;
+        let metadata = postcard::from_bytes(metadata_buf).or(Err(Error::FormatViolation))?;
 
-        Ok(OpenerSealed { metadata, ar })
+        Ok((metadata, OpenerSealed { ar }))
     }
 
     /// Will unseal the stream continuation and yield a plaintext bytestream.
-    pub fn unseal(self, usk: &UserSecretKey) -> Result<OpenerUnsealed<R>, Error> {
+    pub fn unseal(self, metadata: &Metadata, usk: &UserSecretKey) -> Result<OpenerUnsealed<R>, Error> {
         let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(
-                array_ref!(self.metadata.ciphertext.as_slice(), 0, CIPHERTEXT_SIZE)
+                array_ref!(metadata.ciphertext.as_slice(), 0, CIPHERTEXT_SIZE)
             ))
             .ok_or(Error::FormatViolation)?;
 
@@ -66,12 +64,11 @@ impl<R: Readable> OpenerSealed<R> {
         let (headerbuf, r) = self.ar.disclose();
         hmac.input(&headerbuf);
 
-        let iv: &[u8; IVSIZE] = array_ref!(self.metadata.iv.as_slice(), 0, IVSIZE);
+        let iv: &[u8; IVSIZE] = array_ref!(metadata.iv.as_slice(), 0, IVSIZE);
 
         let aes = SymCrypt::new(&skey.into(), &(*iv).into());
 
         Ok(OpenerUnsealed {
-            metadata: self.metadata,
             aes,
             hmac,
             r,

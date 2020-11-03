@@ -3,17 +3,12 @@ use crate::util::SliceReader;
 use crate::*;
 
 use arrayvec::ArrayVec;
-use arrayvec::ArrayString;
 use rand::RngCore;
-use serde_json;
 
 type BigBuf = ArrayVec<[u8; 65536]>;
-type StrBuf = ArrayString<[u8; 256]>;
 
 struct DefaultProps {
     pub i: Identity,
-    pub data_type: StrBuf,
-    pub data_metadata: serde_json::Value,
     pub pk: ibe::kiltz_vahlis_one::PublicKey,
     pub sk: ibe::kiltz_vahlis_one::SecretKey,
 }
@@ -28,22 +23,19 @@ impl Default for DefaultProps {
         )
         .unwrap();
 
-        let data_type = StrBuf::from("test data").unwrap();
-        let data_metadata = serde_json::json!({ "an": "object" });
-
         let (pk, sk) = ibe::kiltz_vahlis_one::setup(&mut rng);
 
-        DefaultProps { i, data_type, data_metadata, pk, sk }
+        DefaultProps { i, pk, sk }
     }
 }
 
 fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
     let mut rng = rand::thread_rng();
-    let DefaultProps { i, data_type: _, data_metadata: _, pk, sk: _ } = props;
+    let DefaultProps { i, pk, sk: _ } = props;
 
     let mut buf = BigBuf::new();
     {
-        let mut s = Sealer::new("test_data", serde_json::Value::Null, &i, &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
+        let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
         s.write(&content).unwrap();
     } // Force Drop of s.
 
@@ -52,21 +44,17 @@ fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
 
 fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
     let mut rng = rand::thread_rng();
-    let DefaultProps { i, data_type: _, data_metadata: _, pk, sk } = props;
+    let DefaultProps { i, pk, sk } = props;
 
     let bufr = SliceReader::new(&buf);
-    let o = OpenerSealed::new(bufr).unwrap();
-    let m = &o.metadata.clone();
-    let i2 = &o.metadata.identity;
+    let (m, o) = OpenerSealed::new(bufr).unwrap();
+    let i2 = &m.identity;
 
     assert_eq!(&i, &i2);
 
     let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
 
-    let mut o2 = o.unseal(&UserSecretKey(usk)).unwrap();
-    let m2 = &o2.metadata.clone();
-
-    assert_eq!(&m, &m2);
+    let mut o2 = o.unseal(&m, &UserSecretKey(usk)).unwrap();
 
     let mut dst = BigBuf::new();
     o2.write_to(&mut dst).unwrap();
@@ -89,9 +77,8 @@ fn do_test(props: &DefaultProps, content: &mut [u8]) {
 
 #[test]
 fn reflection_sealer_opener() {
-    let mut props = DefaultProps::default();
+    let props = DefaultProps::default();
 
-    // Do test with additional metadata
     do_test(&props, &mut [0u8; 0]);
     do_test(&props, &mut [0u8; 1]);
     do_test(&props, &mut [0u8; 511]);
@@ -99,10 +86,6 @@ fn reflection_sealer_opener() {
     do_test(&props, &mut [0u8; 1008]);
     do_test(&props, &mut [0u8; 1023]);
     do_test(&props, &mut [0u8; 60000]);
-
-    // Do test without additional metadata  
-    props.data_metadata = serde_json::json!(null);
-    do_test(&props, &mut [0u8; 1008]);
 }
 
 #[test]

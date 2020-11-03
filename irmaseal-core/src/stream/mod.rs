@@ -18,4 +18,4 @@ pub(crate) const PRELUDE: [u8; 4] = [0x14, 0x8A, 0x8E, 0xA7];
 
 /// The stack buffer size that `opener` and `sealer` will use to yield chunks of plaintext and ciphertext.
 pub const BLOCKSIZE: usize = 512;
-pub const MAX_METADATA_SIZE: usize = 16384;
+pub const MAX_METADATA_SIZE: usize = 8192;
