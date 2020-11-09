@@ -3,8 +3,8 @@
 mod artifacts;
 mod identity;
 
-pub mod util;
 pub mod api;
+pub mod util;
 
 #[cfg(feature = "stream")]
 pub mod stream;
