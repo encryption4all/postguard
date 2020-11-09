@@ -6,7 +6,7 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
-irmaseal-core = "0.1"
+irmaseal-core = { path = "../irmaseal-core" }
 ibe = "0.1"
 irma = "0.0"
 

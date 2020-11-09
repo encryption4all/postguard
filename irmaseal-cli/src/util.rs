@@ -1,4 +1,5 @@
 use irmaseal_core::{Error, Readable, Writable};
+use irmaseal_core::stream::{Sealer, OpenerUnsealed};
 
 pub struct FileWriter {
     os: std::fs::File,
@@ -45,5 +46,64 @@ impl Readable for FileReader {
         let len = self.is.read(dst).unwrap();
 
         Ok(&dst[0..len])
+    }
+}
+
+type FileSealer<'a> = Sealer<'a, FileWriter>;
+
+pub struct FileSealerWrite<'a> {
+    s: FileSealer<'a>,
+}
+
+impl<'a> FileSealerWrite<'a> {
+    pub fn new(s: FileSealer<'a>) -> FileSealerWrite<'a> {
+        FileSealerWrite { s }
+    }
+}
+
+impl<'a> std::io::Write for FileSealerWrite<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.s.write(buf).unwrap();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+type FileUnsealer = OpenerUnsealed<FileReader>;
+
+pub struct FileUnsealerRead {
+    ou: FileUnsealer,
+    buf: Vec<u8>
+}
+
+impl FileUnsealerRead {
+    pub fn new(ou: FileUnsealer) -> FileUnsealerRead {
+        FileUnsealerRead { ou, buf: vec![] }
+    }
+}
+
+impl std::io::Read for FileUnsealerRead {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.buf.len() == 0 {
+            let rbuf_r = match self.ou.read() {
+                // End of file is indicated as read with 0 bytes
+                Err(Error::EndOfStream) => Ok(&[] as &[u8]),
+                e => e
+            }.unwrap();
+            self.buf.extend_from_slice(rbuf_r);
+        }
+
+        let min = std::cmp::min(self.buf.len(), buf.len());
+        // Better way to do this?
+        for n in 0..min {
+            buf[n] = self.buf[n];
+        }
+
+        self.buf.drain(0 .. min);
+
+        Ok(min)
     }
 }

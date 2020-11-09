@@ -1,6 +1,7 @@
 use clap::ArgMatches;
 use irmaseal_core::api::*;
 use irmaseal_core::stream::OpenerSealed;
+use tar::Archive;
 
 use std::time::Duration;
 use tokio::time::delay_for;
@@ -38,23 +39,23 @@ async fn wait_on_session(
 
 pub async fn exec(m: &ArgMatches<'_>) {
     let input = m.value_of("INPUT").unwrap();
-    let output = m.value_of("OUTPUT").unwrap();
     let server = m.value_of("server").unwrap();
 
     eprintln!("Opening {}", input);
 
     let r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
 
-    let (identity, o) = OpenerSealed::new(r).unwrap();
-    let timestamp = identity.timestamp;
+    let (metadata, sealed) = OpenerSealed::new(r).unwrap();
 
+    let timestamp = metadata.identity.timestamp;
+    
     let client = Client::new(server).unwrap();
 
-    eprintln!("Requesting private key for {:#?}", identity.attribute);
+    eprintln!("Requesting private key for {:#?}", metadata.identity.attribute);
 
     let sp: OwnedKeyChallenge = client
         .request(&KeyRequest {
-            attribute: identity.attribute,
+            attribute: metadata.identity.attribute.clone(),
         })
         .await
         .unwrap();
@@ -64,14 +65,16 @@ pub async fn exec(m: &ArgMatches<'_>) {
     print_qr(&sp.qr);
 
     if let Some(r) = wait_on_session(client, &sp, timestamp).await.unwrap() {
-        eprintln!("Disclosure successful, decrypting {} to {}", input, output);
+        eprintln!("Disclosure successful, decrypting {}", input);
 
-        let mut o = o.unseal(&r.key.unwrap()).unwrap();
+        let unsealed = crate::util::FileUnsealerRead::new(
+            sealed.unseal(&metadata, &r.key.unwrap()).unwrap()
+        ); 
 
-        let mut of = crate::util::FileWriter::new(std::fs::File::create(output).unwrap());
-        o.write_to(&mut of).unwrap();
+        let mut tar = Archive::new(unsealed);
+        tar.unpack("./").unwrap();
 
-        eprintln!("Succesfully decrypted {}", output);
+        eprintln!("Succesfully decrypted.");
     } else {
         eprintln!("Did not scan the QR code and disclose in time");
     };
