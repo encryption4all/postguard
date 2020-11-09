@@ -1,0 +1,51 @@
+on: [push, pull_request]
+
+name: Continuous integration
+
+jobs:
+  build-core:
+    name: Build-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          args: --manifest-path irmaseal-core/Cargo.toml
+          command: build
+
+  test-core:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          args: --manifest-path irmaseal-core/Cargo.toml
+          command: test
+
+  fmt-core:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: rustup component add rustfmt
+      - uses: actions-rs/cargo@v1
+        with:
+          args: --manifest-path irmaseal-core/Cargo.toml --all -- --check
+          command: fmt
+
