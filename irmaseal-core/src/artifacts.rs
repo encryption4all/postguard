@@ -28,8 +28,7 @@ impl<'de> Deserialize<'de> for PublicKey {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = <&'de str>::deserialize(deserializer)?;
 
-        PublicKey::from_base64(s)
-            .ok_or_else(|| serde::de::Error::custom("Not a waters public key"))
+        PublicKey::from_base64(s).ok_or_else(|| serde::de::Error::custom("Not a waters public key"))
     }
 }
 
