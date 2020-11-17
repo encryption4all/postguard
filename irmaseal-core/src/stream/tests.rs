@@ -1,8 +1,8 @@
 use crate::stream::*;
-use crate::util::SliceReader;
 use crate::*;
 
 use arrayvec::ArrayVec;
+use futures::executor::block_on;
 use rand::RngCore;
 
 type BigBuf = ArrayVec<[u8; 65536]>;
@@ -29,47 +29,44 @@ impl Default for DefaultProps {
     }
 }
 
-fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
+async fn seal<'a>(props: &DefaultProps, content: &[u8]) -> BigBuf {
     let mut rng = rand::thread_rng();
     let DefaultProps { i, pk, sk: _ } = props;
 
-    let mut buf = BigBuf::new();
-    {
-        let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
-        s.write(&content).unwrap();
-    } // Force Drop of s.
+    let mut buf_writer = IntoAsyncWrite::from(BigBuf::new());
 
-    buf
+    let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf_writer)
+        .await
+        .unwrap();
+    s.seal(content).await.unwrap();
+
+    buf_writer.into_inner()
 }
 
-fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
+async fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
     let mut rng = rand::thread_rng();
     let DefaultProps { i, pk, sk } = props;
 
-    let bufr = SliceReader::new(&buf);
-    let (m, o) = OpenerSealed::new(bufr).unwrap();
+    let (m, o) = OpenerSealed::new(buf).await.unwrap();
     let i2 = &m.identity;
 
     assert_eq!(&i, &i2);
 
     let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
+    let mut dst = IntoAsyncWrite::from(BigBuf::new());
+    let validated = o.unseal(&m, &UserSecretKey(usk), &mut dst).await.unwrap();
 
-    let mut o2 = o.unseal(&m, &UserSecretKey(usk)).unwrap();
-
-    let mut dst = BigBuf::new();
-    o2.write_to(&mut dst).unwrap();
-
-    (dst, o2.validate())
+    (dst.into_inner(), validated)
 }
 
-fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {
-    let buf = seal(props, content);
-    unseal(props, &buf)
+async fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {
+    let buf = seal(props, content).await;
+    unseal(props, &buf).await
 }
 
 fn do_test(props: &DefaultProps, content: &mut [u8]) {
     rand::thread_rng().fill_bytes(content);
-    let (dst, valid) = seal_and_unseal(props, content);
+    let (dst, valid) = block_on(seal_and_unseal(props, content));
 
     assert_eq!(&content.as_ref(), &dst.as_slice());
     assert!(valid);
@@ -95,12 +92,14 @@ fn corrupt_body() {
     let mut content = [0u8; 60000];
     rand::thread_rng().fill_bytes(&mut content);
 
-    let mut buf = seal(&props, &content);
-    buf[1000] += 0x02;
-    let (dst, valid) = unseal(&props, &buf);
+    block_on(async {
+        let mut buf = seal(&props, &content).await;
+        buf[1000] += 0x02;
+        let (dst, valid) = unseal(&props, &buf).await;
 
-    assert_ne!(&content.as_ref(), &dst.as_slice());
-    assert!(!valid);
+        assert_ne!(&content.as_ref(), &dst.as_slice());
+        assert!(!valid);
+    })
 }
 
 #[test]
@@ -110,11 +109,13 @@ fn corrupt_hmac() {
     let mut content = [0u8; 60000];
     rand::thread_rng().fill_bytes(&mut content);
 
-    let mut buf = seal(&props, &content);
-    let mutation_point = buf.len() - 5;
-    buf[mutation_point] += 0x02;
-    let (dst, valid) = unseal(&props, &buf);
+    block_on(async {
+        let mut buf = seal(&props, &content).await;
+        let mutation_point = buf.len() - 5;
+        buf[mutation_point] += 0x02;
+        let (dst, valid) = unseal(&props, &buf).await;
 
-    assert_eq!(&content.as_ref(), &dst.as_slice());
-    assert!(!valid);
+        assert_eq!(&content.as_ref(), &dst.as_slice());
+        assert!(!valid);
+    })
 }

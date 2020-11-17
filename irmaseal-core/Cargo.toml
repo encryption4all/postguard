@@ -26,6 +26,8 @@ postcard = "0.5.1"
 base64 = "0.12"
 ibe = "0.1.3"
 
+futures = "0.3.6"
+
 [features]
 default = ["stream"]
 

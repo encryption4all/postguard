@@ -14,15 +14,39 @@ pub use artifacts::*;
 pub use identity::*;
 pub use metadata::*;
 
+use core::pin::Pin;
+use core::task::{Context, Poll};
+use futures::AsyncWrite;
+
 #[derive(Debug)]
 pub enum Error {
     NotIRMASEAL,
     IncorrectVersion,
     ConstraintViolation,
     FormatViolation,
-    UpstreamWritableError,
-    EndOfStream,
-    PrematureEndError,
+    ReadError(futures::io::Error),
+    WriteError(futures::io::Error),
+}
+
+impl From<Error> for futures::io::Error {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::ReadError(e) => e,
+            Error::WriteError(e) => e,
+            Error::NotIRMASEAL => {
+                futures::io::Error::new(futures::io::ErrorKind::Other, "NotIRMASEAL")
+            }
+            Error::IncorrectVersion => {
+                futures::io::Error::new(futures::io::ErrorKind::Other, "IncorrectVersion")
+            }
+            Error::ConstraintViolation => {
+                futures::io::Error::new(futures::io::ErrorKind::Other, "ConstraintViolation")
+            }
+            Error::FormatViolation => {
+                futures::io::Error::new(futures::io::ErrorKind::Other, "FormatViolation")
+            }
+        }
+    }
 }
 
 /// A writable resource that accepts chunks of a bytestream.
@@ -31,23 +55,48 @@ pub trait Writable {
     fn write(&mut self, buf: &[u8]) -> Result<(), Error>;
 }
 
-/// A readable resource that yields chunks of a bytestream.
-pub trait Readable {
-    /// Read exactly one byte. Will throw `Error::EndOfStream` if that byte
-    /// is not available.
-    fn read_byte(&mut self) -> Result<u8, Error>;
+impl<W: Writable> From<W> for IntoAsyncWrite<W> {
+    fn from(w: W) -> Self {
+        IntoAsyncWrite { inner: w }
+    }
+}
 
-    /// Read **up to** `n` bytes. May yield a slice with a lower number of bytes.
-    fn read_bytes(&mut self, n: usize) -> Result<&[u8], Error>;
+pub struct IntoAsyncWrite<W> {
+    inner: W,
+}
 
-    /// Read **exactly** `n` bytes.
-    fn read_bytes_strict(&mut self, n: usize) -> Result<&[u8], Error> {
-        let res = self.read_bytes(n)?;
+impl<W> IntoAsyncWrite<W> {
+    pub fn into_inner(self) -> W {
+        self.inner
+    }
+}
 
-        if res.len() < n {
-            Err(Error::PrematureEndError)
-        } else {
-            Ok(res)
-        }
+impl<'a, W: Writable + Unpin> AsyncWrite for IntoAsyncWrite<W> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, futures::io::Error>> {
+        let this = &mut (*self);
+        Poll::Ready(
+            this.inner
+                .write(buf)
+                .map(|_| buf.len())
+                .map_err(|err| futures::io::Error::from(err)),
+        )
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+    ) -> Poll<Result<(), futures::io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+    ) -> Poll<Result<(), futures::io::Error>> {
+        Poll::Ready(Ok(()))
     }
 }
