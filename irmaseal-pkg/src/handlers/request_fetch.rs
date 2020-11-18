@@ -75,8 +75,7 @@ pub fn request_fetch(
                     Some(i) => {
                         let k = i.derive().map_err(|_e| crate::Error::Unexpected)?;
                         let mut rng = rand::thread_rng();
-                        let usk =
-                            ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &k, &mut rng);
+                        let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &k, &mut rng);
 
                         KeyResponse {
                             status: KeyStatus::DoneValid,

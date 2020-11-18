@@ -1,5 +1,5 @@
+use irmaseal_core::stream::{OpenerUnsealed, Sealer};
 use irmaseal_core::{Error, Readable, Writable};
-use irmaseal_core::stream::{Sealer, OpenerUnsealed};
 
 pub struct FileWriter {
     os: std::fs::File,
@@ -76,7 +76,7 @@ type FileUnsealer = OpenerUnsealed<FileReader>;
 
 pub struct FileUnsealerRead {
     ou: FileUnsealer,
-    buf: Vec<u8>
+    buf: Vec<u8>,
 }
 
 impl FileUnsealerRead {
@@ -91,8 +91,9 @@ impl std::io::Read for FileUnsealerRead {
             let rbuf_r = match self.ou.read() {
                 // End of file is indicated as read with 0 bytes
                 Err(Error::EndOfStream) => Ok(&[] as &[u8]),
-                e => e
-            }.unwrap();
+                e => e,
+            }
+            .unwrap();
             self.buf.extend_from_slice(rbuf_r);
         }
 
@@ -102,7 +103,7 @@ impl std::io::Read for FileUnsealerRead {
             buf[n] = self.buf[n];
         }
 
-        self.buf.drain(0 .. min);
+        self.buf.drain(0..min);
 
         Ok(min)
     }

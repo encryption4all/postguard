@@ -1,5 +1,5 @@
 use crate::*;
-use arrayvec::{ArrayVec};
+use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -13,7 +13,7 @@ pub(crate) const CIPHERTEXT_SIZE: usize = 144;
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Version {
-    V1_0
+    V1_0,
 }
 
 /// Metadata which contains the version
@@ -33,11 +33,19 @@ impl Metadata {
         version: Version,
         ciphertext: &[u8; CIPHERTEXT_SIZE],
         iv: &[u8; IVSIZE],
-        identity: Identity
+        identity: Identity,
     ) -> Result<Self, Error> {
-        let ciphertext = ciphertext.iter().cloned().collect::<ArrayVec::<[u8; CIPHERTEXT_SIZE]>>();
-        let iv = iv.iter().cloned().collect::<ArrayVec::<[u8; IVSIZE]>>();
+        let ciphertext = ciphertext
+            .iter()
+            .cloned()
+            .collect::<ArrayVec<[u8; CIPHERTEXT_SIZE]>>();
+        let iv = iv.iter().cloned().collect::<ArrayVec<[u8; IVSIZE]>>();
 
-        Ok(Metadata { version, ciphertext, iv, identity })
+        Ok(Metadata {
+            version,
+            ciphertext,
+            iv,
+            identity,
+        })
     }
 }

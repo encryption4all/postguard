@@ -2,8 +2,8 @@ use crate::stream::util::ArchiveReader;
 use crate::stream::*;
 use crate::*;
 
-use core::convert::TryInto;
 use arrayref::array_ref;
+use core::convert::TryInto;
 use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
 
@@ -37,7 +37,11 @@ impl<R: Readable> OpenerSealed<R> {
             return Err(Error::NotIRMASEAL);
         }
 
-        let meta_len = u16::from_be_bytes(ar.read_bytes_strict(core::mem::size_of::<u16>())?.try_into().unwrap());
+        let meta_len = u16::from_be_bytes(
+            ar.read_bytes_strict(core::mem::size_of::<u16>())?
+                .try_into()
+                .unwrap(),
+        );
         if usize::from(meta_len) > MAX_METADATA_SIZE {
             return Err(Error::FormatViolation);
         }
@@ -50,11 +54,17 @@ impl<R: Readable> OpenerSealed<R> {
     }
 
     /// Will unseal the stream continuation and yield a plaintext bytestream.
-    pub fn unseal(self, metadata: &Metadata, usk: &UserSecretKey) -> Result<OpenerUnsealed<R>, Error> {
-        let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(
-                array_ref!(metadata.ciphertext.as_slice(), 0, CIPHERTEXT_SIZE)
-            ))
-            .ok_or(Error::FormatViolation)?;
+    pub fn unseal(
+        self,
+        metadata: &Metadata,
+        usk: &UserSecretKey,
+    ) -> Result<OpenerUnsealed<R>, Error> {
+        let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref!(
+            metadata.ciphertext.as_slice(),
+            0,
+            CIPHERTEXT_SIZE
+        )))
+        .ok_or(Error::FormatViolation)?;
 
         let m = ibe::kiltz_vahlis_one::decrypt(&usk.0, &c);
         let (skey, mackey) = crate::stream::util::derive_keys(&m);

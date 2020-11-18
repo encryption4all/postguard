@@ -1,8 +1,8 @@
+use core::convert::TryFrom;
 use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
-use rand::{CryptoRng, Rng};
-use core::convert::TryFrom;
 use postcard::to_slice;
+use rand::{CryptoRng, Rng};
 
 use crate::stream::*;
 use crate::*;
@@ -37,7 +37,8 @@ impl<'a, W: Writable> Sealer<'a, W> {
         let meta_bytes = to_slice(&metadata, &mut deser_buf).or(Err(Error::FormatViolation))?;
 
         let metadata_len = u16::try_from(meta_bytes.len())
-            .or(Err(Error::FormatViolation))?.to_be_bytes();
+            .or(Err(Error::FormatViolation))?
+            .to_be_bytes();
 
         hmac.write(&PRELUDE)?;
         w.write(&PRELUDE)?;
@@ -50,8 +51,7 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         if metadata_len.len() > MAX_METADATA_SIZE {
             Err(Error::FormatViolation)
-        }
-        else {
+        } else {
             Ok(Sealer { aes, hmac, w })
         }
     }
