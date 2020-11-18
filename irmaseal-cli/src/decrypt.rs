@@ -48,10 +48,13 @@ pub async fn exec(m: &ArgMatches<'_>) {
     let (metadata, sealed) = OpenerSealed::new(r).unwrap();
 
     let timestamp = metadata.identity.timestamp;
-    
+
     let client = Client::new(server).unwrap();
 
-    eprintln!("Requesting private key for {:#?}", metadata.identity.attribute);
+    eprintln!(
+        "Requesting private key for {:#?}",
+        metadata.identity.attribute
+    );
 
     let sp: OwnedKeyChallenge = client
         .request(&KeyRequest {
@@ -67,9 +70,8 @@ pub async fn exec(m: &ArgMatches<'_>) {
     if let Some(r) = wait_on_session(client, &sp, timestamp).await.unwrap() {
         eprintln!("Disclosure successful, decrypting {}", input);
 
-        let unsealed = crate::util::FileUnsealerRead::new(
-            sealed.unseal(&metadata, &r.key.unwrap()).unwrap()
-        ); 
+        let unsealed =
+            crate::util::FileUnsealerRead::new(sealed.unseal(&metadata, &r.key.unwrap()).unwrap());
 
         let mut tar = Archive::new(unsealed);
         tar.unpack("./").unwrap();
