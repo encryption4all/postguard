@@ -5,7 +5,7 @@ use arrayvec::ArrayVec;
 use futures::executor::block_on;
 use rand::RngCore;
 
-type BigBuf = ArrayVec<[u8; 65536]>;
+type BigBuf = ArrayVec<[u8; 32768]>;
 
 struct DefaultProps {
     pub i: Identity,
@@ -82,14 +82,14 @@ fn reflection_sealer_opener() {
     do_test(&props, &mut [0u8; 512]);
     do_test(&props, &mut [0u8; 1008]);
     do_test(&props, &mut [0u8; 1023]);
-    do_test(&props, &mut [0u8; 60000]);
+    do_test(&props, &mut [0u8; 30000]);
 }
 
 #[test]
 fn corrupt_body() {
     let props = DefaultProps::default();
 
-    let mut content = [0u8; 60000];
+    let mut content = [0u8; 30000];
     rand::thread_rng().fill_bytes(&mut content);
 
     block_on(async {
@@ -106,7 +106,7 @@ fn corrupt_body() {
 fn corrupt_hmac() {
     let props = DefaultProps::default();
 
-    let mut content = [0u8; 60000];
+    let mut content = [0u8; 30000];
     rand::thread_rng().fill_bytes(&mut content);
 
     block_on(async {
