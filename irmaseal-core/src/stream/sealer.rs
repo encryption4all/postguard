@@ -12,7 +12,7 @@ use crate::*;
 pub struct Sealer<W: AsyncWrite + Unpin> {
     aes: SymCrypt,
     hmac: Verifier,
-    output_writer: W,
+    w: W,
 }
 
 impl<W: AsyncWrite + Unpin> Sealer<W> {
@@ -55,15 +55,11 @@ impl<W: AsyncWrite + Unpin> Sealer<W> {
         if metadata_len.len() > MAX_METADATA_SIZE {
             Err(Error::FormatViolation)
         } else {
-            Ok(Sealer {
-                aes,
-                hmac,
-                output_writer: w,
-            })
+            Ok(Sealer { aes, hmac, w })
         }
     }
 
-    pub async fn seal<R: AsyncRead + Unpin>(&mut self, mut r: R) -> Result<(), Error> {
+    pub async fn seal<R: AsyncRead + Unpin>(mut self, mut r: R) -> Result<(), Error> {
         let mut buf = [0u8; BLOCKSIZE];
 
         loop {
@@ -77,16 +73,13 @@ impl<W: AsyncWrite + Unpin> Sealer<W> {
             self.aes.encrypt(data).await;
             self.hmac.input(data);
 
-            self.output_writer
+            self.w
                 .write_all(data)
                 .map_err(|err| WriteError(err))
                 .await?;
         }
 
         let code = self.hmac.result_reset().code();
-        self.output_writer
-            .write_all(&code)
-            .map_err(|err| WriteError(err))
-            .await
+        self.w.write_all(&code).map_err(|err| WriteError(err)).await
     }
 }

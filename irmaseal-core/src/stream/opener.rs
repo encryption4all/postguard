@@ -10,9 +10,10 @@ use hmac::Mac;
 /// Opener of an IRMAseal encrypted bytestream.
 /// It reads the IRMAseal header, and yields the recipient Identity for which the content is intended.
 ///
-/// Enables the library user to lookup the UserSecretKey corresponding to this Identity before continuing.
+/// Enables the library user to lookup the UserSecretKey corresponding to this Identity
+/// and offers the unseal method to start decrypting the encrypted content of the bytestream.
 pub struct OpenerSealed<R: AsyncRead + Unpin> {
-    input_reader: R,
+    r: R,
     metadata_buf: ArrayVec<[u8; MAX_METADATA_SIZE]>,
 }
 
@@ -48,13 +49,7 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
         let metadata =
             postcard::from_bytes(metadata_buf.as_slice()).or(Err(Error::FormatViolation))?;
 
-        Ok((
-            metadata,
-            OpenerSealed {
-                input_reader: r,
-                metadata_buf,
-            },
-        ))
+        Ok((metadata, OpenerSealed { r, metadata_buf }))
     }
 
     /// Will unseal the stream continuation and write the plaintext in the given writer.
@@ -62,7 +57,7 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
         mut self,
         metadata: &Metadata,
         usk: &UserSecretKey,
-        mut output: W,
+        mut w: W,
     ) -> Result<bool, Error> {
         let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref!(
             metadata.ciphertext.as_slice(),
@@ -89,7 +84,7 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
         let mut buf = [0u8; BLOCKSIZE + MACSIZE];
 
         // The input buffer must at least contain enough bytes for a MAC to be included.
-        self.input_reader
+        self.r
             .read_exact(&mut buf[..MACSIZE])
             .map_err(|err| Error::ReadError(err))
             .await?;
@@ -97,7 +92,7 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
         let mut buf_tail = MACSIZE;
         loop {
             let input_length = self
-                .input_reader
+                .r
                 .read(&mut buf[buf_tail..])
                 .map_err(|err| Error::ReadError(err))
                 .await?;
@@ -112,8 +107,7 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
                 hmac.input(&mut block);
                 aes.decrypt(&mut block).await;
 
-                output
-                    .write_all(&mut block)
+                w.write_all(&mut block)
                     .map_err(|err| Error::WriteError(err))
                     .await?;
 

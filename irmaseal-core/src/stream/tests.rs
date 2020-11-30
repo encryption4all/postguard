@@ -35,7 +35,7 @@ async fn seal<'a>(props: &DefaultProps, content: &[u8]) -> BigBuf {
 
     let mut buf_writer = IntoAsyncWrite::from(BigBuf::new());
 
-    let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf_writer)
+    let s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf_writer)
         .await
         .unwrap();
     s.seal(content).await.unwrap();
