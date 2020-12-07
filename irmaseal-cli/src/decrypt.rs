@@ -74,7 +74,7 @@ pub async fn exec(m: &ArgMatches<'_>) {
             crate::util::FileUnsealerRead::new(sealed.unseal(&metadata, &r.key.unwrap()).unwrap());
 
         let mut tar = Archive::new(unsealed);
-        tar.unpack("./").unwrap();
+        tar.unpack(".").unwrap();
 
         eprintln!("Succesfully decrypted.");
     } else {

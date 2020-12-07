@@ -44,7 +44,7 @@ pub async fn exec(m: &ArgMatches<'_>) {
     let file_name_path = input_path.file_name().unwrap();
     let file_name = file_name_path.to_str().unwrap();
 
-    let output = format!("{}.irma", file_name);
+    let output = format!("{}.{}", file_name. crate::util::IRMASEALEXT);
 
     let mut w = crate::util::FileWriter::new(std::fs::File::create(&output).unwrap());
 

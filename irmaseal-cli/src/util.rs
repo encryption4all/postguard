@@ -1,6 +1,8 @@
 use irmaseal_core::stream::{OpenerUnsealed, Sealer};
 use irmaseal_core::{Error, Readable, Writable};
 
+pub static IRMASEALEXT: &'static str = "irma";
+
 pub struct FileWriter {
     os: std::fs::File,
 }

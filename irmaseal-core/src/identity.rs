@@ -1,10 +1,10 @@
-use super::{Error, Writable};
+use super::{Error};
 use arrayvec::{ArrayString, ArrayVec};
 use serde::{Deserialize, Serialize};
 
 const IDENTITY_UNSET: u8 = 0xFF;
 
-// Must be at least 8+255+1+254 = 518
+// Must be at least 8+255+254 = 517
 #[allow(dead_code)]
 type IdentityBuf = ArrayVec<[u8; 1024]>;
 
@@ -53,12 +53,15 @@ impl Identity {
     pub fn derive(&self) -> Result<ibe::kiltz_vahlis_one::Identity, Error> {
         let mut buf = IdentityBuf::new();
 
-        buf.write(&self.timestamp.to_be_bytes())?;
+        buf.try_extend_from_slice(&self.timestamp.to_be_bytes())
+            .map_err(|_| Error::ConstraintViolation)?;
 
-        buf.write(self.attribute.atype.as_bytes())?;
+        buf.try_extend_from_slice(&self.attribute.atype.as_bytes())
+            .map_err(|_| Error::ConstraintViolation)?;
 
         match self.attribute.value {
-            None => buf.write(&[IDENTITY_UNSET]),
+            None => buf.try_extend_from_slice(&[IDENTITY_UNSET])
+                        .map_err(|_| Error::ConstraintViolation),
             Some(i) => {
                 let i = i.as_bytes();
 
@@ -66,7 +69,8 @@ impl Identity {
                     return Err(Error::ConstraintViolation);
                 }
 
-                buf.write(i)
+                buf.try_extend_from_slice(&i)
+                    .map_err(|_| Error::ConstraintViolation)
             }
         }?;
 
@@ -80,7 +84,21 @@ mod tests {
 
     #[test]
     fn eq_write_read() {
-        let mut buf: [u8; 1024] = [0; 1024];
+        let mut buf = IdentityBuf::new();
+
+        // using the arrayvec as a slice uses amount
+        // of valid elements in the arrayvec as the slice
+        // slice length. Since we want to write into it
+        // using postcard we fill it with dummy data
+        // first. Alternative is to use unsafe and
+        // force the capacity to a certain size.
+        for _ in 0..buf.capacity() {
+            buf.push(0);
+        }
+
+        unsafe {
+            buf.set_len(buf.capacity());
+        }
 
         let i = Identity::new(
             1566722350,
@@ -89,7 +107,7 @@ mod tests {
         )
         .unwrap();
 
-        let identity_bytes = postcard::to_slice(&i, &mut buf).unwrap();
+        let identity_bytes = postcard::to_slice(&i, buf.as_mut_slice()).unwrap();
 
         let i2 = postcard::from_bytes(identity_bytes).unwrap();
 
