@@ -1,4 +1,4 @@
-use super::{Error};
+use super::Error;
 use arrayvec::{ArrayString, ArrayVec};
 use serde::{Deserialize, Serialize};
 
@@ -60,8 +60,9 @@ impl Identity {
             .map_err(|_| Error::ConstraintViolation)?;
 
         match self.attribute.value {
-            None => buf.try_extend_from_slice(&[IDENTITY_UNSET])
-                        .map_err(|_| Error::ConstraintViolation),
+            None => buf
+                .try_extend_from_slice(&[IDENTITY_UNSET])
+                .map_err(|_| Error::ConstraintViolation),
             Some(i) => {
                 let i = i.as_bytes();
 
