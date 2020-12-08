@@ -35,10 +35,9 @@ async fn seal<'a>(props: &DefaultProps, content: &[u8]) -> BigBuf {
 
     let mut buf_writer = IntoAsyncWrite::from(BigBuf::new());
 
-    let s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf_writer)
-        .await
-        .unwrap();
-    s.seal(content).await.unwrap();
+    let wrapped_pk = PublicKey(pk.clone());
+    let mut s = Sealer::new(&wrapped_pk, &mut rng);
+    s.seal(i.clone(), content, &mut buf_writer).await.unwrap();
 
     buf_writer.into_inner()
 }
@@ -47,14 +46,14 @@ async fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
     let mut rng = rand::thread_rng();
     let DefaultProps { i, pk, sk } = props;
 
-    let (m, o) = OpenerSealed::new(buf).await.unwrap();
-    let i2 = &m.identity;
+    let o = OpenerSealed::new(buf).await.unwrap();
+    let i2 = o.get_identity();
 
     assert_eq!(&i, &i2);
 
     let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
     let mut dst = IntoAsyncWrite::from(BigBuf::new());
-    let validated = o.unseal(&m, &UserSecretKey(usk), &mut dst).await.unwrap();
+    let validated = o.unseal(&UserSecretKey(usk), &mut dst).await.unwrap();
 
     (dst.into_inner(), validated)
 }

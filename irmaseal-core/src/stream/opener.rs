@@ -8,20 +8,25 @@ use core::convert::TryInto;
 use hmac::Mac;
 
 /// Opener of an IRMAseal encrypted bytestream.
-/// It reads the IRMAseal header, and yields the recipient Identity for which the content is intended.
+/// It reads the IRMAseal header and other metadata from the bytestream and
+/// yields an OpenerSealed instance.
 ///
-/// Enables the library user to lookup the UserSecretKey corresponding to this Identity
-/// and offers the unseal method to start decrypting the encrypted content of the bytestream.
+/// OpenerSealed offers the get_identity method to enable the library user
+/// to retrieve the Identity of the recipient for whom the bytestream is encrypted.
+///
+/// Using the Identity, the library user is able to lookup the UserSecretKey corresponding
+/// to the recipient's Identity. OpenerSealed then offers the unseal method to start decrypting
+/// the encrypted content of the bytestream and write this to the given writer.
 pub struct OpenerSealed<R: AsyncRead + Unpin> {
     r: R,
+    metadata: Metadata,
     metadata_buf: ArrayVec<[u8; MAX_METADATA_SIZE]>,
 }
 
 impl<R: AsyncRead + Unpin> OpenerSealed<R> {
     /// Starts interpreting a bytestream as an IRMAseal stream.
-    /// Will immediately detect whether the bytestream actually is such a stream, and will yield
-    /// the identity for which the stream is intended, as well as the stream continuation.
-    pub async fn new(mut r: R) -> Result<(Metadata, Self), Error> {
+    /// Will immediately detect whether the bytestream actually is such a stream.
+    pub async fn new(mut r: R) -> Result<Self, Error> {
         let mut buffer = [0u8; 4 + core::mem::size_of::<u16>()];
         r.read_exact(&mut buffer)
             .map_err(|err| Error::ReadError(err))
@@ -49,18 +54,30 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
         let metadata =
             postcard::from_bytes(metadata_buf.as_slice()).or(Err(Error::FormatViolation))?;
 
-        Ok((metadata, OpenerSealed { r, metadata_buf }))
+        Ok(OpenerSealed {
+            r,
+            metadata,
+            metadata_buf,
+        })
     }
 
-    /// Will unseal the stream continuation and write the plaintext in the given writer.
+    /// Will return the recipient Identity for which this stream is encrypted.
+    /// This Identity can be used to derive the right UserSecretKey for unseal.
+    pub fn get_identity(&self) -> &Identity {
+        &self.metadata.identity
+    }
+
+    /// Will unseal the encrypted bytestream, write the plaintext in the given async writer
+    /// and returns whether the integrity of the decryption is valid.
+    /// Method consumes OpenerSealed since it fully decrypts the encrypted
+    /// bytestream from the async reader within.
     pub async fn unseal<W: AsyncWrite + Unpin>(
         mut self,
-        metadata: &Metadata,
         usk: &UserSecretKey,
         mut w: W,
     ) -> Result<bool, Error> {
         let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref!(
-            metadata.ciphertext.as_slice(),
+            self.metadata.ciphertext.as_slice(),
             0,
             CIPHERTEXT_SIZE
         )))
@@ -76,7 +93,7 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
             .to_be_bytes();
         hmac.input(&metadata_len);
 
-        let iv: &[u8; IVSIZE] = array_ref!(metadata.iv.as_slice(), 0, IVSIZE);
+        let iv: &[u8; IVSIZE] = array_ref!(self.metadata.iv.as_slice(), 0, IVSIZE);
 
         hmac.input(self.metadata_buf.as_slice());
 

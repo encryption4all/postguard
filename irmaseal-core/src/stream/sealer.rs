@@ -2,31 +2,33 @@ use core::convert::TryFrom;
 use futures::{AsyncReadExt, AsyncWriteExt};
 use hmac::Mac;
 use postcard::to_slice;
-use rand::{CryptoRng, Rng};
+use rand::{CryptoRng, RngCore};
 
 use crate::stream::*;
 use crate::Error::{ReadError, WriteError};
 use crate::*;
 
 /// Sealer for an bytestream, which converts it into an IRMAseal encrypted bytestream.
-pub struct Sealer<W: AsyncWrite + Unpin> {
-    aes: SymCrypt,
-    hmac: Verifier,
-    w: W,
+pub struct Sealer<'a, Rng: CryptoRng + RngCore> {
+    pk: &'a PublicKey,
+    rng: &'a mut Rng,
 }
 
-impl<W: AsyncWrite + Unpin> Sealer<W> {
-    pub async fn new<R: Rng + CryptoRng>(
+impl<'a, Rng: CryptoRng + RngCore> Sealer<'a, Rng> {
+    pub fn new(pk: &'a PublicKey, rng: &'a mut Rng) -> Sealer<'a, Rng> {
+        Sealer { pk, rng }
+    }
+
+    async fn prepare_for_seal<W: AsyncWrite + Unpin>(
+        &mut self,
         i: Identity,
-        pk: &PublicKey,
-        rng: &mut R,
         mut w: W,
-    ) -> Result<Self, Error> {
+    ) -> Result<(SymCrypt, Verifier), Error> {
         let derived = i.derive()?;
-        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
+        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&self.pk.0, &derived, self.rng);
 
         let (aeskey, mackey) = crate::stream::util::derive_keys(&k);
-        let iv = crate::stream::util::generate_iv(rng);
+        let iv = crate::stream::util::generate_iv(self.rng);
 
         let aes = SymCrypt::new(&aeskey.into(), &iv.into()).await;
         let mut hmac = Verifier::new_varkey(&mackey).unwrap();
@@ -52,14 +54,17 @@ impl<W: AsyncWrite + Unpin> Sealer<W> {
         hmac.input(meta_bytes);
         w.write_all(meta_bytes).map_err(|e| WriteError(e)).await?;
 
-        if metadata_len.len() > MAX_METADATA_SIZE {
-            Err(Error::FormatViolation)
-        } else {
-            Ok(Sealer { aes, hmac, w })
-        }
+        Ok((aes, hmac))
     }
 
-    pub async fn seal<R: AsyncRead + Unpin>(mut self, mut r: R) -> Result<(), Error> {
+    pub async fn seal<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+        &mut self,
+        i: Identity,
+        mut r: R,
+        mut w: W,
+    ) -> Result<(), Error> {
+        let (mut aes, mut hmac) = self.prepare_for_seal(i, &mut w).await?;
+
         let mut buf = [0u8; BLOCKSIZE];
 
         loop {
@@ -70,16 +75,13 @@ impl<W: AsyncWrite + Unpin> Sealer<W> {
             let data = &mut buf[..input_length];
 
             // Encrypt-then-MAC
-            self.aes.encrypt(data).await;
-            self.hmac.input(data);
+            aes.encrypt(data).await;
+            hmac.input(data);
 
-            self.w
-                .write_all(data)
-                .map_err(|err| WriteError(err))
-                .await?;
+            w.write_all(data).map_err(|err| WriteError(err)).await?;
         }
 
-        let code = self.hmac.result_reset().code();
-        self.w.write_all(&code).map_err(|err| WriteError(err)).await
+        let code = hmac.result_reset().code();
+        w.write_all(&code).map_err(|err| WriteError(err)).await
     }
 }
