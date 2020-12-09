@@ -1,21 +1,28 @@
 use crate::*;
 use arrayvec::{Array, ArrayVec};
+use futures::io::{Error, ErrorKind};
 
-impl<A: Array<Item = u8>> Writable for ArrayVec<A> {
-    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
-        unsafe {
-            let len = self.len();
-
-            if len + data.len() > A::CAPACITY {
-                return Err(Error::ConstraintViolation);
+impl<'a, A: Array<Item = u8>> AsyncWritable for ArrayVec<A> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
+        if self.is_full() {
+            Err(Error::new(
+                ErrorKind::WriteZero,
+                "ArrayVec reached its capacity",
+            ))
+        } else {
+            let mut data = buf;
+            if data.len() > self.remaining_capacity() {
+                data = &buf[..self.remaining_capacity()];
             }
+            let len = self.len();
+            unsafe {
+                let tail = core::slice::from_raw_parts_mut(self.get_unchecked_mut(len), buf.len());
+                tail.copy_from_slice(buf);
 
-            let tail = core::slice::from_raw_parts_mut(self.get_unchecked_mut(len), data.len());
-            tail.copy_from_slice(data);
-
-            self.set_len(len + data.len());
+                self.set_len(len + buf.len());
+            }
+            Ok(data.len())
         }
-        Ok(())
     }
 }
 

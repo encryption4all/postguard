@@ -28,62 +28,24 @@ pub enum Error {
     WriteError(futures::io::Error),
 }
 
-impl From<Error> for futures::io::Error {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::ReadError(e) => e,
-            Error::WriteError(e) => e,
-            Error::NotIRMASEAL => {
-                futures::io::Error::new(futures::io::ErrorKind::Other, "NotIRMASEAL")
-            }
-            Error::IncorrectVersion => {
-                futures::io::Error::new(futures::io::ErrorKind::Other, "IncorrectVersion")
-            }
-            Error::ConstraintViolation => {
-                futures::io::Error::new(futures::io::ErrorKind::Other, "ConstraintViolation")
-            }
-            Error::FormatViolation => {
-                futures::io::Error::new(futures::io::ErrorKind::Other, "FormatViolation")
-            }
-        }
-    }
+/// Trait to implement AsyncWrite for a non-async data type.
+/// When this trait is implemented, IntoAsyncWrite can be used
+/// to convert it to AsyncWrite.
+pub trait AsyncWritable {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, futures::io::Error>;
 }
 
-/// A writable resource that accepts chunks of a bytestream.
-pub trait Writable {
-    /// Write the argument slice to the underlying resource. Needs to consume the entire slice.
-    fn write(&mut self, buf: &[u8]) -> Result<(), Error>;
-}
+/// Struct to convert AsyncWritable into AsyncWrite
+pub struct IntoAsyncWrite<W: AsyncWritable + Unpin>(W);
 
-impl<W: Writable> From<W> for IntoAsyncWrite<W> {
-    fn from(w: W) -> Self {
-        IntoAsyncWrite { inner: w }
-    }
-}
-
-pub struct IntoAsyncWrite<W> {
-    inner: W,
-}
-
-impl<W> IntoAsyncWrite<W> {
-    pub fn into_inner(self) -> W {
-        self.inner
-    }
-}
-
-impl<'a, W: Writable + Unpin> AsyncWrite for IntoAsyncWrite<W> {
+impl<'a, W: AsyncWritable + Unpin> AsyncWrite for IntoAsyncWrite<W> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         _: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, futures::io::Error>> {
         let this = &mut (*self);
-        Poll::Ready(
-            this.inner
-                .write(buf)
-                .map(|_| buf.len())
-                .map_err(|err| futures::io::Error::from(err)),
-        )
+        Poll::Ready(this.0.write(buf))
     }
 
     fn poll_flush(
@@ -98,5 +60,17 @@ impl<'a, W: Writable + Unpin> AsyncWrite for IntoAsyncWrite<W> {
         _: &mut Context<'_>,
     ) -> Poll<Result<(), futures::io::Error>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<W: AsyncWritable + Unpin> From<W> for IntoAsyncWrite<W> {
+    fn from(w: W) -> Self {
+        IntoAsyncWrite { 0: w }
+    }
+}
+
+impl<W: AsyncWritable + Unpin> IntoAsyncWrite<W> {
+    pub fn into_inner(self) -> W {
+        self.0
     }
 }
