@@ -1,12 +1,15 @@
+use super::{IVSIZE, KEYSIZE};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::{prelude::*, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{AesCtrParams, CryptoKey, SubtleCrypto};
+use web_sys::{AesCtrParams, Crypto, CryptoKey};
 
+// JS web workers do not support accessing web-sys::window(), so
+// we have to import crypto using a custom binding.
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = crypto)]
-    fn get_subtle_crypto() -> SubtleCrypto;
+    #[wasm_bindgen(js_namespace = crypto, js_name = valueOf)]
+    fn get_crypto() -> Crypto;
 }
 
 pub struct SymCrypt {
@@ -14,9 +17,10 @@ pub struct SymCrypt {
     current_nonce: Uint8Array,
 }
 
+// TODO: Maybe create some kind of fallback to aes_lib for browsers where crypto is not available (like IE)
 impl SymCrypt {
     pub async fn new(key: &[u8; KEYSIZE], nonce: &[u8; IVSIZE]) -> Self {
-        let subtle_crypto = get_subtle_crypto();
+        let subtle_crypto = get_crypto().subtle();
         let algorithm: JsValue = Object::new().into();
         Reflect::set(
             &algorithm,
@@ -42,7 +46,7 @@ impl SymCrypt {
 
     pub async fn encrypt(&mut self, data: &mut [u8]) {
         let params = AesCtrParams::new("AES-CTR", &self.current_nonce, 128);
-        let subtle_crypto = get_subtle_crypto();
+        let subtle_crypto = get_crypto().subtle();
         let result = subtle_crypto.encrypt_with_object_and_u8_array(&params, &self.key, data);
         let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
         let encrypted = Uint8Array::new(&array_buffer);
@@ -51,7 +55,7 @@ impl SymCrypt {
 
     pub async fn decrypt(&mut self, data: &mut [u8]) {
         let params = AesCtrParams::new("AES-CTR", &self.current_nonce, 128);
-        let subtle_crypto = get_subtle_crypto();
+        let subtle_crypto = get_crypto().subtle();
         let result = subtle_crypto.decrypt_with_object_and_u8_array(&params, &self.key, data);
         let array_buffer = JsFuture::from(result.unwrap()).await.unwrap().into();
         let decrypted = Uint8Array::new(&array_buffer);
