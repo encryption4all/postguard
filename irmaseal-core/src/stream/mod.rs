@@ -28,10 +28,13 @@ pub(crate) type Verifier = hmac::Hmac<sha3::Sha3_256>;
 /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
 pub(crate) const PRELUDE: [u8; 4] = [0x14, 0x8A, 0x8E, 0xA7];
 
-/// The stack buffer size that `opener` and `sealer` will use to yield chunks of plaintext and ciphertext.
+/// The number of blocks that `opener` and `sealer` will cache to yield the plaintext and ciphertext.
 /// TODO: In case of aes_wasm the buffer needs to be bigger to reduce cross-platform calls.
 ///       Make this a bit more nice, because in aes_lib scenarios this buffer can remain small.
-pub const BLOCKSIZE: usize = 32768;
+pub const CHUNKS: usize = 2048;
+
+/// The size of one block in AES
+pub(crate) const BLOCKSIZE: usize = 16;
 
 // According to calculations, this size can be a lot smaller:
 //

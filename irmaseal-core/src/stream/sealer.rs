@@ -65,20 +65,33 @@ impl<'a, Rng: CryptoRng + RngCore> Sealer<'a, Rng> {
     ) -> Result<(), Error> {
         let (mut aes, mut hmac) = self.prepare_for_seal(i, &mut w).await?;
 
-        let mut buf = [0u8; BLOCKSIZE];
+        let mut buf = [0u8; BLOCKSIZE * CHUNKS];
+        let mut buf_tail = 0;
 
         loop {
-            let input_length = r.read(&mut buf).map_err(|err| ReadError(err)).await?;
+            let input_length = r
+                .read(&mut buf[buf_tail..])
+                .map_err(|err| ReadError(err))
+                .await?;
+            buf_tail += input_length;
+
+            // Start encrypting when our buffer is full or when the input stream
+            // is exhausted and we still have data left to encrypt.
+            if buf_tail == BLOCKSIZE * CHUNKS || buf_tail > 0 && input_length == 0 {
+                let data = &mut buf[..buf_tail];
+
+                // Encrypt-then-MAC
+                aes.encrypt(data).await;
+                hmac.input(data);
+
+                w.write_all(data).map_err(|err| WriteError(err)).await?;
+
+                buf_tail = 0;
+            }
+
             if input_length == 0 {
                 break;
             }
-            let data = &mut buf[..input_length];
-
-            // Encrypt-then-MAC
-            aes.encrypt(data).await;
-            hmac.input(data);
-
-            w.write_all(data).map_err(|err| WriteError(err)).await?;
         }
 
         let code = hmac.result_reset().code();

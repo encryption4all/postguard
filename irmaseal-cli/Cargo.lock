@@ -636,6 +636,7 @@ dependencies = [
  "base64",
  "ctr",
  "digest",
+ "futures",
  "hmac",
  "ibe",
  "postcard",

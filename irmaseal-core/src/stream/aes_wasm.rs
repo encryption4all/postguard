@@ -4,6 +4,8 @@ use wasm_bindgen::{prelude::*, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{AesCtrParams, Crypto, CryptoKey};
 
+use crate::stream::BLOCKSIZE;
+
 // JS web workers do not support accessing web-sys::window(), so
 // we have to import crypto using a custom binding.
 #[wasm_bindgen]
@@ -14,7 +16,9 @@ extern "C" {
 
 pub struct SymCrypt {
     key: CryptoKey,
-    current_nonce: Uint8Array,
+    nonce: [u8; IVSIZE],
+    counter: u128,
+    block_index: u32,
 }
 
 // TODO: Maybe create some kind of fallback to aes_lib for browsers where crypto is not available (like IE)
@@ -40,25 +44,77 @@ impl SymCrypt {
         let key_object = JsFuture::from(key_promise.unwrap()).await.unwrap();
         SymCrypt {
             key: key_object.into(),
-            current_nonce: nonce.as_ref().into(),
+            nonce: nonce.clone(),
+            counter: 0,
+            block_index: 0,
         }
     }
 
+    fn get_aes_params(&self) -> AesCtrParams {
+        let iv = self.counter.wrapping_add(u128::from_be_bytes(self.nonce));
+        let iv_arr: Uint8Array = iv.to_be_bytes().as_ref().into();
+        AesCtrParams::new("AES-CTR", &iv_arr, 128)
+    }
+
+    fn align_data(&self, data: &mut [u8]) -> Uint8Array {
+        match self.block_index {
+            0 => Uint8Array::from(&*data),
+            block_index => {
+                let data_len = data.len() as u32;
+                let arr = Uint8Array::new_with_length(data_len + block_index);
+                // TODO: set does a memcopy in JS, so maybe check whether this can be done more memory
+                //       efficient (be aware that more efficiency might require use of unsafe methods).
+                arr.set(&Uint8Array::from(&*data), block_index);
+                arr
+            }
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        // Update our bookkeeping, do checked_add to prevent re-use of counters.
+        let new_counter = self.counter.checked_add((data.len() / BLOCKSIZE) as u128);
+        self.counter = new_counter.unwrap();
+        let data_len = data.len() as u32;
+        self.block_index = (self.block_index + data_len) % (BLOCKSIZE as u32);
+    }
+
     pub async fn encrypt(&mut self, data: &mut [u8]) {
-        let params = AesCtrParams::new("AES-CTR", &self.current_nonce, 128);
-        let subtle_crypto = get_crypto().subtle();
-        let result = subtle_crypto.encrypt_with_object_and_u8_array(&params, &self.key, data);
-        let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
+        let params = self.get_aes_params();
+        let subtle = get_crypto().subtle();
+
+        // Introduce zero-padding at begin if block is not nicely aligned.
+        let aligned = self.align_data(data);
+
+        // Encrypt
+        let result = subtle.encrypt_with_object_and_buffer_source(&params, &self.key, &aligned);
+
+        // Parse result and remove zero-padding again.
+        let array_buffer = JsFuture::from(result.unwrap()).await.unwrap().into();
         let encrypted = Uint8Array::new(&array_buffer);
-        encrypted.copy_to(data);
+        encrypted
+            .subarray(self.block_index, encrypted.length())
+            .copy_to(data);
+
+        self.update(data);
     }
 
     pub async fn decrypt(&mut self, data: &mut [u8]) {
-        let params = AesCtrParams::new("AES-CTR", &self.current_nonce, 128);
-        let subtle_crypto = get_crypto().subtle();
-        let result = subtle_crypto.decrypt_with_object_and_u8_array(&params, &self.key, data);
+        let params = self.get_aes_params();
+        let subtle = get_crypto().subtle();
+
+        // Introduce zero-padding at begin if block is not nicely aligned.
+        let aligned = self.align_data(data);
+
+        // Decrypt
+        let result = subtle.decrypt_with_object_and_buffer_source(&params, &self.key, &aligned);
+
+        // Parse result and remove zero-padding again.
         let array_buffer = JsFuture::from(result.unwrap()).await.unwrap().into();
         let decrypted = Uint8Array::new(&array_buffer);
-        decrypted.copy_to(data);
+        decrypted
+            .subarray(self.block_index, decrypted.length())
+            .copy_to(data);
+
+        self.update(data);
     }
 }

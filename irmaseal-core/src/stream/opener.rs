@@ -98,7 +98,9 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
         hmac.input(self.metadata_buf.as_slice());
 
         let mut aes = SymCrypt::new(&skey.into(), &iv).await;
-        let mut buf = [0u8; BLOCKSIZE + MACSIZE];
+
+        const BUFSIZE: usize = BLOCKSIZE * CHUNKS + MACSIZE;
+        let mut buf = [0u8; BUFSIZE];
 
         // The input buffer must at least contain enough bytes for a MAC to be included.
         self.r
@@ -115,9 +117,9 @@ impl<R: AsyncRead + Unpin> OpenerSealed<R> {
                 .await?;
             buf_tail += input_length;
 
-            // Start encrypting when we have read enough data to put aside a new MAC
-            // or when we have hit EOF when reading and we still have data left to encrypt.
-            if buf_tail >= 2 * MACSIZE || input_length == 0 && buf_tail > MACSIZE {
+            // Start encrypting when our buffer is full or when the input stream
+            // is exhausted and we still have data left to decrypt.
+            if buf_tail == BUFSIZE || input_length == 0 && buf_tail > MACSIZE {
                 let mut block = &mut buf[0..buf_tail - MACSIZE];
 
                 // Decrypt according to encrypt-than-MAC
