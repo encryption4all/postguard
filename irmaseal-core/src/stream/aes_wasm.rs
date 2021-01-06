@@ -72,10 +72,10 @@ impl SymCrypt {
 
     fn update(&mut self, data: &[u8]) {
         // Update our bookkeeping, do checked_add to prevent re-use of counters.
-        let new_counter = self.counter.checked_add((data.len() / BLOCKSIZE) as u128);
+        let new_len = (self.block_index as usize) + data.len();
+        let new_counter = self.counter.checked_add((new_len / BLOCKSIZE) as u128);
         self.counter = new_counter.unwrap();
-        let data_len = data.len() as u32;
-        self.block_index = (self.block_index + data_len) % (BLOCKSIZE as u32);
+        self.block_index = (new_len % BLOCKSIZE) as u32;
     }
 
     pub async fn encrypt(&mut self, data: &mut [u8]) {
