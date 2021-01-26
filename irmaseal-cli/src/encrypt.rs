@@ -21,7 +21,7 @@ pub async fn exec(m: &ArgMatches<'_>) {
 
     let i = match (email, bsn) {
         (Some(email), None) => {
-            Identity::new(timestamp, "pbdf.pbdf.email.email", Some(email)).unwrap()
+            Identity::new(timestamp, "pbdf.sidn-pbdf.email.email", Some(email)).unwrap()
         }
         (None, Some(bsn)) => {
             Identity::new(timestamp, "pbdf.gemeente.personalData.bsn", Some(bsn)).unwrap()
