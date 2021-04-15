@@ -1,8 +1,8 @@
 use crate::*;
 use arrayvec::ArrayVec;
-use serde::de::Visitor;
-use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use core::fmt;
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[allow(dead_code)]
 pub(crate) const KEYSIZE: usize = 32;
@@ -47,7 +47,10 @@ impl<'de> Visitor<'de> for VersionVisitor {
     }
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a byte buffer with 2 bytes indicating the IRMASEAL version.")
+        write!(
+            formatter,
+            "a byte buffer with 2 bytes indicating the IRMASEAL version."
+        )
     }
 }
 
