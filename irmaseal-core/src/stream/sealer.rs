@@ -21,6 +21,8 @@ impl<'a, W: Writable> Sealer<'a, W> {
         rng: &mut R,
         w: &'a mut W,
     ) -> Result<Sealer<'a, W>, Error> {
+        let version_buf = version_tobytes(&Version::V1_0);
+
         let derived = i.derive()?;
         let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
 
@@ -32,7 +34,7 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         let ciphertext = c.to_bytes();
 
-        let metadata = Metadata::new(Version::V1_0, &ciphertext, &iv, i)?;
+        let metadata = Metadata::new(&ciphertext, &iv, i)?;
         let mut deser_buf = [0; MAX_METADATA_SIZE];
         let meta_bytes = to_slice(&metadata, &mut deser_buf).or(Err(Error::FormatViolation))?;
 
@@ -42,6 +44,9 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         hmac.write(&PRELUDE)?;
         w.write(&PRELUDE)?;
+
+        hmac.write(&version_buf)?;
+        w.write(&version_buf)?;
 
         hmac.write(&metadata_len)?;
         w.write(&metadata_len)?;

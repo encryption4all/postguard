@@ -1,6 +1,7 @@
 use super::Error;
 use arrayvec::{ArrayString, ArrayVec};
 use serde::{Deserialize, Serialize};
+use core::convert::TryFrom;
 
 const IDENTITY_UNSET: u8 = 0xFF;
 
@@ -56,7 +57,14 @@ impl Identity {
         buf.try_extend_from_slice(&self.timestamp.to_be_bytes())
             .map_err(|_| Error::ConstraintViolation)?;
 
-        buf.try_extend_from_slice(&self.attribute.atype.as_bytes())
+        let at = self.attribute.atype.as_bytes();
+        let at_len = u8::try_from(at.len())
+            .map_err(|_| Error::ConstraintViolation)?;
+
+        buf.try_extend_from_slice(&[at_len])
+            .map_err(|_| Error::ConstraintViolation)?;
+
+        buf.try_extend_from_slice(&at)
             .map_err(|_| Error::ConstraintViolation)?;
 
         match self.attribute.value {
@@ -65,10 +73,17 @@ impl Identity {
                 .map_err(|_| Error::ConstraintViolation),
             Some(i) => {
                 let i = i.as_bytes();
+                let i_len = i.len();
 
-                if i.len() >= usize::from(IDENTITY_UNSET) {
+                if i_len >= usize::from(IDENTITY_UNSET) {
                     return Err(Error::ConstraintViolation);
                 }
+
+                let i_len_u8 = u8::try_from(i_len)
+                    .map_err(|_| Error::ConstraintViolation)?;
+        
+                buf.try_extend_from_slice(&[i_len_u8])
+                    .map_err(|_| Error::ConstraintViolation)?;
 
                 buf.try_extend_from_slice(&i)
                     .map_err(|_| Error::ConstraintViolation)

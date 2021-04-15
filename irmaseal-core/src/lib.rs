@@ -14,7 +14,7 @@ pub use artifacts::*;
 pub use identity::*;
 pub use metadata::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     NotIRMASEAL,
     IncorrectVersion,
