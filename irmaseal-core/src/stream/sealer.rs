@@ -21,7 +21,7 @@ impl<'a, W: Writable> Sealer<'a, W> {
         rng: &mut R,
         w: &'a mut W,
     ) -> Result<Sealer<'a, W>, Error> {
-        let version_buf = version_tobytes(&Version::V1_0);
+        let version_buf = VERSION_V1.to_be_bytes();
 
         let derived = i.derive()?;
         let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);

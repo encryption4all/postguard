@@ -1,7 +1,6 @@
 use crate::stream::util::ArchiveReader;
 use crate::stream::*;
 use crate::*;
-use arrayvec::ArrayVec;
 
 use arrayref::array_ref;
 use core::convert::TryInto;
@@ -38,11 +37,11 @@ impl<R: Readable> OpenerSealed<R> {
             return Err(Error::NotIRMASEAL);
         }
 
-        let version_buf = ar
-            .read_bytes_strict(VERSION_SIZE)
-            .map(|b| b.iter().cloned().collect::<ArrayVec<[u8; VERSION_SIZE]>>())?;
-
-        let _version = version_frombytes(&version_buf)?;
+        let _version = u16::from_be_bytes(
+            ar.read_bytes_strict(core::mem::size_of::<u16>())?
+                .try_into()
+                .unwrap(),
+        );
         // Later we can do different things here depending on the version.
 
         let meta_len = u16::from_be_bytes(
