@@ -3,7 +3,6 @@ use digest::{Digest, FixedOutput};
 use ibe::kiltz_vahlis_one::SymmetricKey;
 use rand::{CryptoRng, Rng};
 
-use crate::stream::*;
 use crate::*;
 
 pub(crate) fn derive_keys(key: &SymmetricKey) -> ([u8; KEYSIZE], [u8; KEYSIZE]) {

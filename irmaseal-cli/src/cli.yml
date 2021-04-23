@@ -35,10 +35,6 @@ subcommands:
         help: Sets the input file to use
         required: true
         index: 1
-    - OUTPUT:
-        help: Sets the output file to use
-        required: true
-        index: 2
     - server:
         short: s
         long: server

@@ -35,7 +35,7 @@ fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
 
     let mut buf = BigBuf::new();
     {
-        let mut s = Sealer::new(&i, &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
+        let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
         s.write(&content).unwrap();
     } // Force Drop of s.
 
@@ -47,18 +47,19 @@ fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
     let DefaultProps { i, pk, sk } = props;
 
     let bufr = SliceReader::new(&buf);
-    let (i2, o) = OpenerSealed::new(bufr).unwrap();
+    let (m, o) = OpenerSealed::new(bufr).unwrap();
+    let i2 = &m.identity;
 
-    assert_eq!(i, &i2);
+    assert_eq!(&i, &i2);
 
-    let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive(), &mut rng);
+    let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
 
-    let mut o = o.unseal(&UserSecretKey(usk)).unwrap();
+    let mut o2 = o.unseal(&m, &UserSecretKey(usk)).unwrap();
 
     let mut dst = BigBuf::new();
-    o.write_to(&mut dst).unwrap();
+    o2.write_to(&mut dst).unwrap();
 
-    (dst, o.validate())
+    (dst, o2.validate())
 }
 
 fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {

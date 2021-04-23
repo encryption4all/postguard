@@ -1,7 +1,9 @@
 use clap::ArgMatches;
 use irmaseal_core::stream::Sealer;
 use irmaseal_core::Identity;
+use std::path::Path;
 use std::time::SystemTime;
+use tar::Builder;
 
 fn now() -> u64 {
     SystemTime::now()
@@ -38,32 +40,25 @@ pub async fn exec(m: &ArgMatches<'_>) {
     eprintln!("Fetched parameters from {}", server);
     eprintln!("Encrypting for recipient {:#?}", i);
 
-    let output = format!("{}.irma", input);
+    let input_path = Path::new(input);
+    let file_name_path = input_path.file_name().unwrap();
+    let file_name = file_name_path.to_str().unwrap();
+
+    let output = format!("{}.{}", file_name, crate::util::IRMASEALEXT);
+
     let mut w = crate::util::FileWriter::new(std::fs::File::create(&output).unwrap());
 
-    let mut sealer = Sealer::new(&i, &parameters.public_key, &mut rng, &mut w).unwrap();
-
-    use std::io::Read;
-    let mut src = std::fs::File::open(input).unwrap();
-    let mut buf = [0u8; 512];
+    let sealer_write = crate::util::FileSealerWrite::new(
+        Sealer::new(i, &parameters.public_key, &mut rng, &mut w).unwrap(),
+    );
 
     eprintln!("Encrypting {}...", input);
 
-    let mut total_len = 0;
-    loop {
-        let len = src.read(&mut buf).unwrap();
-        total_len += len;
+    let mut archive = Builder::new(sealer_write);
+    archive
+        .append_path_with_name(input_path, file_name_path)
+        .unwrap();
+    archive.finish().unwrap();
 
-        if len == 0 {
-            break;
-        }
-
-        use irmaseal_core::Writable;
-        sealer.write(&buf[0..len]).unwrap();
-    }
-
-    eprintln!(
-        "Encrypted {} bytes, written result to {}",
-        total_len, output
-    );
+    eprintln!("Finished encrypting.");
 }

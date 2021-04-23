@@ -3,6 +3,7 @@ use crate::stream::*;
 use crate::*;
 
 use arrayref::array_ref;
+use core::convert::TryInto;
 use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
 
@@ -11,7 +12,7 @@ use hmac::Mac;
 ///
 /// Enables the library user to lookup the UserSecretKey corresponding to this Identity before continuing.
 pub struct OpenerSealed<R: Readable> {
-    ar: ArchiveReader<R, [u8; 2048]>,
+    ar: ArchiveReader<R, [u8; MAX_METADATA_SIZE]>,
 }
 
 /// Second stage opener of an IRMAseal encrypted bytestream.
@@ -28,34 +29,48 @@ impl<R: Readable> OpenerSealed<R> {
     /// Starts interpreting a bytestream as an IRMAseal stream.
     /// Will immediately detect whether the bytestream actually is such a stream, and will yield
     /// the identity for which the stream is intended, as well as the stream continuation.
-    pub fn new(r: R) -> Result<(Identity, OpenerSealed<R>), Error> {
-        let mut ar = ArchiveReader::<R, [u8; 2048]>::new(r);
+    pub fn new(r: R) -> Result<(Metadata, OpenerSealed<R>), Error> {
+        let mut ar = ArchiveReader::<R, [u8; MAX_METADATA_SIZE]>::new(r);
 
         let prelude = ar.read_bytes_strict(PRELUDE.len())?;
         if prelude != PRELUDE {
             return Err(Error::NotIRMASEAL);
         }
 
-        let format_version = ar.read_byte()?;
-        if format_version != FORMAT_VERSION {
-            return Err(Error::IncorrectVersion);
+        let _version = u16::from_be_bytes(
+            ar.read_bytes_strict(core::mem::size_of::<u16>())?
+                .try_into()
+                .unwrap(),
+        );
+        // Later we can do different things here depending on the version.
+
+        let meta_len = u16::from_be_bytes(
+            ar.read_bytes_strict(core::mem::size_of::<u16>())?
+                .try_into()
+                .unwrap(),
+        );
+        if usize::from(meta_len) > MAX_METADATA_SIZE {
+            return Err(Error::FormatViolation);
         }
 
-        let i = Identity::read_from(&mut ar)?;
+        let metadata_buf = ar.read_bytes_strict(meta_len.into())?;
 
-        Ok((i, OpenerSealed { ar }))
+        let metadata = postcard::from_bytes(metadata_buf).or(Err(Error::FormatViolation))?;
+
+        Ok((metadata, OpenerSealed { ar }))
     }
 
     /// Will unseal the stream continuation and yield a plaintext bytestream.
-    pub fn unseal(mut self, usk: &UserSecretKey) -> Result<OpenerUnsealed<R>, Error> {
-        const CIPHERTEXT_SIZE: usize = 144;
-
-        let cbuf = self.ar.read_bytes_strict(CIPHERTEXT_SIZE)?;
-        let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref![
-            cbuf,
+    pub fn unseal(
+        self,
+        metadata: &Metadata,
+        usk: &UserSecretKey,
+    ) -> Result<OpenerUnsealed<R>, Error> {
+        let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref!(
+            metadata.ciphertext.as_slice(),
             0,
             CIPHERTEXT_SIZE
-        ]))
+        )))
         .ok_or(Error::FormatViolation)?;
 
         let m = ibe::kiltz_vahlis_one::decrypt(&usk.0, &c);
@@ -63,12 +78,10 @@ impl<R: Readable> OpenerSealed<R> {
 
         let mut hmac = Verifier::new_varkey(&mackey).unwrap();
 
-        let (headerbuf, mut r) = self.ar.disclose();
+        let (headerbuf, r) = self.ar.disclose();
         hmac.input(&headerbuf);
 
-        let iv = r.read_bytes_strict(IVSIZE)?;
-        let iv: &[u8; IVSIZE] = array_ref![&iv, 0, IVSIZE];
-        hmac.input(iv);
+        let iv: &[u8; IVSIZE] = array_ref!(metadata.iv.as_slice(), 0, IVSIZE);
 
         let aes = SymCrypt::new(&skey.into(), &(*iv).into());
 

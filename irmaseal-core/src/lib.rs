@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod identity;
+mod metadata;
 
 pub mod api;
 pub mod util;
@@ -11,8 +12,9 @@ pub mod stream;
 
 pub use artifacts::*;
 pub use identity::*;
+pub use metadata::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     NotIRMASEAL,
     IncorrectVersion,

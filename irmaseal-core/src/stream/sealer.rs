@@ -1,5 +1,7 @@
+use core::convert::TryFrom;
 use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use hmac::Mac;
+use postcard::to_slice;
 use rand::{CryptoRng, Rng};
 
 use crate::stream::*;
@@ -14,12 +16,15 @@ pub struct Sealer<'a, W: Writable> {
 
 impl<'a, W: Writable> Sealer<'a, W> {
     pub fn new<R: Rng + CryptoRng>(
-        i: &Identity,
+        i: Identity,
         pk: &PublicKey,
         rng: &mut R,
         w: &'a mut W,
     ) -> Result<Sealer<'a, W>, Error> {
-        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &i.derive(), rng);
+        let version_buf = VERSION_V1.to_be_bytes();
+
+        let derived = i.derive()?;
+        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
 
         let (aeskey, mackey) = crate::stream::util::derive_keys(&k);
         let iv = crate::stream::util::generate_iv(rng);
@@ -29,22 +34,31 @@ impl<'a, W: Writable> Sealer<'a, W> {
 
         let ciphertext = c.to_bytes();
 
-        hmac.input(&PRELUDE);
+        let metadata = Metadata::new(&ciphertext, &iv, i)?;
+        let mut deser_buf = [0; MAX_METADATA_SIZE];
+        let meta_bytes = to_slice(&metadata, &mut deser_buf).or(Err(Error::FormatViolation))?;
+
+        let metadata_len = u16::try_from(meta_bytes.len())
+            .or(Err(Error::FormatViolation))?
+            .to_be_bytes();
+
+        hmac.write(&PRELUDE)?;
         w.write(&PRELUDE)?;
 
-        hmac.input(&[FORMAT_VERSION]);
-        w.write(&[FORMAT_VERSION])?;
+        hmac.write(&version_buf)?;
+        w.write(&version_buf)?;
 
-        i.write_to(&mut hmac)?;
-        i.write_to(w)?;
+        hmac.write(&metadata_len)?;
+        w.write(&metadata_len)?;
 
-        hmac.input(&ciphertext);
-        w.write(&ciphertext)?;
+        hmac.write(&meta_bytes)?;
+        w.write(meta_bytes)?;
 
-        hmac.input(&iv);
-        w.write(&iv)?;
-
-        Ok(Sealer { aes, hmac, w })
+        if metadata_len.len() > MAX_METADATA_SIZE {
+            Err(Error::FormatViolation)
+        } else {
+            Ok(Sealer { aes, hmac, w })
+        }
     }
 }
 
