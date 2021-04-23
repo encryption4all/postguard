@@ -1,64 +1,11 @@
 use crate::*;
-use arrayvec::{Array, ArrayVec};
+use digest::{Digest, FixedOutput};
+use ibe::kiltz_vahlis_one::SymmetricKey;
+use rand::{CryptoRng, Rng};
 
-pub struct SliceReader<'a, T> {
-    buf: &'a [T],
-    i: usize,
-}
-
-impl<'a, T> SliceReader<'a, T> {
-    pub fn new(buf: &'a [T]) -> SliceReader<'a, T> {
-        SliceReader { buf, i: 0 }
-    }
-}
-
-impl<'a> Readable for SliceReader<'a, u8> {
-    fn read_byte(&mut self) -> Result<u8, Error> {
-        if self.buf.len() < self.i {
-            return Err(Error::EndOfStream);
-        }
-
-        unsafe {
-            let res = *self.buf.get_unchecked(self.i);
-            self.i += 1;
-
-            Ok(res)
-        }
-    }
-
-    fn read_bytes(&mut self, n: usize) -> Result<&[u8], Error> {
-        if self.i >= self.buf.len() {
-            return Err(Error::EndOfStream);
-        }
-
-        let mut end = self.i + n; // Non-inclusive
-        if self.buf.len() < end {
-            end = self.buf.len();
-        }
-
-        let res = &self.buf[self.i..end];
-        self.i += n;
-
-        Ok(res)
-    }
-}
-
-impl<A: Array<Item = u8>> Writable for ArrayVec<A> {
-    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
-        unsafe {
-            let len = self.len();
-
-            if len + data.len() > A::CAPACITY {
-                return Err(Error::UpstreamWritableError);
-            }
-
-            let tail = core::slice::from_raw_parts_mut(self.get_unchecked_mut(len), data.len());
-            tail.copy_from_slice(data);
-
-            self.set_len(len + data.len());
-        }
-        Ok(())
-    }
+pub struct KeySet {
+    pub aes_key: [u8; KEYSIZE],
+    pub mac_key: [u8; KEYSIZE],
 }
 
 pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
@@ -67,4 +14,28 @@ pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     } else {
         None
     }
+}
+
+pub(crate) fn derive_keys(key: &SymmetricKey) -> KeySet {
+    let mut h = sha3::Sha3_512::new();
+    h.input(key.to_bytes().as_ref());
+    let buf = h.fixed_result();
+
+    let mut aes_key = [0u8; KEYSIZE];
+    let mut mac_key = [0u8; KEYSIZE];
+
+    let (a, b) = buf.as_slice().split_at(KEYSIZE);
+    aes_key.copy_from_slice(&a);
+    mac_key.copy_from_slice(&b);
+
+    KeySet {
+        aes_key: aes_key,
+        mac_key: mac_key,
+    }
+}
+
+pub(crate) fn generate_iv<R: Rng + CryptoRng>(r: &mut R) -> [u8; IVSIZE] {
+    let mut res = [0u8; IVSIZE];
+    r.fill_bytes(&mut res);
+    res
 }

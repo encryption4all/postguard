@@ -3,16 +3,18 @@
 mod artifacts;
 mod identity;
 mod metadata;
+mod metadata_reader;
 
 pub mod api;
 pub mod util;
 
-#[cfg(feature = "stream")]
-pub mod stream;
+use core::mem;
 
+use arrayvec::ArrayVec;
 pub use artifacts::*;
 pub use identity::*;
 pub use metadata::*;
+pub use metadata_reader::*;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -20,34 +22,34 @@ pub enum Error {
     IncorrectVersion,
     ConstraintViolation,
     FormatViolation,
-    UpstreamWritableError,
-    EndOfStream,
-    PrematureEndError,
 }
 
-/// A writable resource that accepts chunks of a bytestream.
-pub trait Writable {
-    /// Write the argument slice to the underlying resource. Needs to consume the entire slice.
-    fn write(&mut self, buf: &[u8]) -> Result<(), Error>;
-}
+/// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
+pub(crate) const PRELUDE_LEN: usize = 4;
+pub(crate) const PRELUDE: [u8; PRELUDE_LEN] = [0x14, 0x8A, 0x8E, 0xA7];
 
-/// A readable resource that yields chunks of a bytestream.
-pub trait Readable {
-    /// Read exactly one byte. Will throw `Error::EndOfStream` if that byte
-    /// is not available.
-    fn read_byte(&mut self) -> Result<u8, Error>;
+// PREAMBLE contains the following:
+//
+// * Prelude: 4 bytes
+// * Version identifier: 2 bytes
+// * Size of metadata: 4 bytes
+// * Totalling: 4 + 2 + 4 = 8 bytes
+pub(crate) const PREAMBLE_SIZE: usize = PRELUDE_LEN + mem::size_of::<u16>() + mem::size_of::<u32>();
 
-    /// Read **up to** `n` bytes. May yield a slice with a lower number of bytes.
-    fn read_bytes(&mut self, n: usize) -> Result<&[u8], Error>;
+// According to calculations, this size can be a lot smaller:
+//
+// * ciphertext's length needs 2 bytes, ciphertext itself 144.
+// * iv's length needs 1 byte, iv itself needs 16
+// * identity's length needs 2 bytes, the buff itself needs 1024.
+// * Totalling: 2 + 144 + 1 + 16 + 2 + 1024 = 1191
+//
+// But for now we will keep this size this large as it will grow in the future
+// anyway. We use 8182 because together with the PREAMBLE it is 8192 bytes
+// Which means the array trait is implemented and we can use it in
+// fixed size structs.
+pub(crate) const MAX_METADATA_SIZE: usize = 8182;
 
-    /// Read **exactly** `n` bytes.
-    fn read_bytes_strict(&mut self, n: usize) -> Result<&[u8], Error> {
-        let res = self.read_bytes(n)?;
+// Headerbuf is the preamble size plus the metadata
+pub const MAX_HEADERBUF_SIZE: usize = PREAMBLE_SIZE + MAX_METADATA_SIZE;
 
-        if res.len() < n {
-            Err(Error::PrematureEndError)
-        } else {
-            Ok(res)
-        }
-    }
-}
+type HeaderBuf = ArrayVec<[u8; MAX_HEADERBUF_SIZE]>;
