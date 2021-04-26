@@ -130,7 +130,11 @@ mod tests {
                 unconsumed: u,
                 header: h2,
                 metadata: m2,
-            } => panic!("Saturated"),
+            } => {
+                assert_eq!(&h, &h2);
+                assert_eq!(&m, &m2);
+                assert_eq!(u, 0);
+            },
         }
     }
 }

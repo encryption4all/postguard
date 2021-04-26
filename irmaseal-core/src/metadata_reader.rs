@@ -95,23 +95,20 @@ impl MetadataReader {
             return Err(Error::IncorrectVersion);
         }
 
-        let meta_len = u32::from_be_bytes(
+        let meta_len:usize = u32::from_be_bytes(
             header_slice[PRELUDE_SIZE + mem::size_of::<u16>()
                 ..PRELUDE_SIZE + mem::size_of::<u16>() + mem::size_of::<u32>()]
                 .try_into()
                 .unwrap(),
         )
         .try_into()
-        .or(Err(Error::FormatViolation))?;
+        .or(Err(Error::ConstraintViolation))?;
 
         if meta_len > MAX_METADATA_SIZE {
             return Err(Error::FormatViolation);
         }
 
-        let metadata_buf = &header_slice[PREAMBLE_SIZE..meta_len];
-        if metadata_buf.len() != meta_len {
-            panic!("dadsa")
-        }
+        let metadata_buf = &header_slice[PREAMBLE_SIZE..PREAMBLE_SIZE + meta_len];
 
         let metadata = postcard::from_bytes(metadata_buf).or(Err(Error::FormatViolation))?;
 
