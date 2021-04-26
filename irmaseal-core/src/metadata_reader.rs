@@ -37,7 +37,7 @@ impl MetadataReader {
         }
     }
 
-    pub fn write(mut self, buf: &[u8]) -> Result<MetadataReaderResult, Error> {
+    pub fn write(&mut self, buf: &[u8]) -> Result<MetadataReaderResult, Error> {
         let mut consumed: usize = 0;
         let buf_size = buf.len();
 

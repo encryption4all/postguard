@@ -3,8 +3,8 @@ mod sealer;
 mod unsealer;
 mod util;
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
 
 pub use sealer::*;
 pub use unsealer::*;

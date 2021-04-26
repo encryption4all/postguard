@@ -3,8 +3,8 @@ use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
 use digest::Digest;
 use rand::{CryptoRng, Rng};
 
-use crate::{stream::*, util::KeySet};
 use crate::*;
+use crate::{stream::*, util::KeySet};
 
 /// Sealer for an bytestream, which converts it into an IRMAseal encrypted bytestream.
 pub struct Sealer<'a, W: Writable> {
@@ -23,10 +23,7 @@ impl<'a, W: Writable> Sealer<'a, W> {
         let MetadataCreateResult {
             metadata: m,
             header: h,
-            keys: KeySet {
-                aes_key,
-                mac_key
-            },
+            keys: KeySet { aes_key, mac_key },
         } = Metadata::new(i, pk, rng)?;
 
         let iv: &[u8; IVSIZE] = array_ref!(m.iv.as_slice(), 0, IVSIZE);
@@ -35,11 +32,12 @@ impl<'a, W: Writable> Sealer<'a, W> {
         let mut verifier = Verifier::default();
         verifier.input(&mac_key);
         verifier.input(&h);
+        w.write(&h).map_err(|_| Error::ConstraintViolation)?;
 
         Ok(Sealer {
             encrypter,
             verifier,
-            w
+            w,
         })
     }
 }

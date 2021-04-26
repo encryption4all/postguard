@@ -114,7 +114,7 @@ mod tests {
         )
         .unwrap();
 
-        let (pk, sk) = ibe::kiltz_vahlis_one::setup(&mut rng);
+        let (pk, _) = ibe::kiltz_vahlis_one::setup(&mut rng);
 
         let MetadataCreateResult {
             metadata: m,
@@ -122,7 +122,7 @@ mod tests {
             keys: _,
         } = Metadata::new(i.clone(), &PublicKey(pk.clone()), &mut rng).unwrap();
 
-        let reader = MetadataReader::new();
+        let mut reader = MetadataReader::new();
         match reader.write(&h.as_slice()).unwrap() {
             MetadataReaderResult::Hungry => panic!("Hungry"),
             MetadataReaderResult::Saturated {

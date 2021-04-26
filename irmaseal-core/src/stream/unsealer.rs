@@ -91,8 +91,8 @@ impl<R: Readable> Unsealer<R> {
         match self.resultbuf {
             None => false,
             Some(resultbuf) => {
-                let expected = &resultbuf
-                    [SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
+                let expected =
+                    &resultbuf[SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
                 let got = self.verifier.result();
                 expected == got.as_slice()
             }
