@@ -46,11 +46,11 @@ impl<R: Readable> Unsealer<R> {
         let (resultsize, macbuf) = match self.resultbuf.as_mut() {
             None => (SYMMETRIC_CRYPTO_BLOCKSIZE, None),
             Some(dst) => {
-                let mut macbuf = [0u8; VERIFIER_SIZE];
+                let mut macbuf = [0u8; MAC_SIZE];
                 macbuf.copy_from_slice(
-                    &dst[SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE],
+                    &dst[SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE],
                 );
-                (SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE, Some(macbuf))
+                (SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE, Some(macbuf))
             }
         };
 
@@ -71,13 +71,13 @@ impl<R: Readable> Unsealer<R> {
         let dststart = match macbuf {
             None => dstmid,
             Some(macbuf) => {
-                let dststart = dstmid - VERIFIER_SIZE;
+                let dststart = dstmid - MAC_SIZE;
                 dst[dststart..dstmid].copy_from_slice(&macbuf);
                 dststart
             }
         };
 
-        let mut content = &mut dst[dststart..SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE];
+        let mut content = &mut dst[dststart..SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE];
         self.verifier.input(&content);
         self.decrypter.decrypt(&mut content);
 
@@ -92,7 +92,7 @@ impl<R: Readable> Unsealer<R> {
             None => false,
             Some(resultbuf) => {
                 let expected = &resultbuf
-                    [SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
+                    [SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
                 let got = self.verifier.result();
                 expected == got.as_slice()
             }

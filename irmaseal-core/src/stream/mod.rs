@@ -1,12 +1,12 @@
 //! Implementation of the IRMAseal stream format. Includes zero-allocation streaming encryption and decryption.
-// mod sealer;
+mod sealer;
 mod unsealer;
 mod util;
 
 // #[cfg(test)]
 // mod tests;
 
-// pub use sealer::*;
+pub use sealer::*;
 pub use unsealer::*;
 pub use util::*;
 
