@@ -45,42 +45,39 @@ impl Metadata {
         let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
 
         let keys = derive_keys(&k);
-        let iv = generate_iv(rng)
-            .iter()
-            .cloned()
-            .collect::<ArrayVec<[u8; IVSIZE]>>();
-
-        let ciphertext = c
-            .to_bytes()
-            .iter()
-            .cloned()
-            .collect::<ArrayVec<[u8; CIPHERTEXT_SIZE]>>();
+        let iv = ArrayVec::try_from(generate_iv(rng)).unwrap();
+        let ciphertext = ArrayVec::try_from(c.to_bytes()).unwrap();
 
         let metadata = Metadata {
             ciphertext,
             iv,
             identity,
         };
-        let mut header = HeaderBuf::new();
+        let mut header = HeaderBuf::try_from([0; MAX_HEADERBUF_SIZE]).unwrap();
+
         let header_slice: &mut [u8] = header.as_mut_slice();
 
         let prelude_off_start = 0;
-        let prelude_off_end = prelude_off_start + PRELUDE_LEN;
+        let prelude_off_end = prelude_off_start + PRELUDE_SIZE;
         let version_off_start = prelude_off_end;
         let version_off_end = version_off_start + mem::size_of::<u16>();
         let meta_len_off_start = version_off_end;
         let meta_len_off_end = version_off_end + mem::size_of::<u32>();
 
         let meta_bytes = postcard::to_slice(&metadata, &mut header_slice[PREAMBLE_SIZE..])
-            .or(Err(Error::FormatViolation))?;
+            .or(Err(Error::ConstraintViolation))?;
 
-        let metadata_len = u32::try_from(meta_bytes.len())
-            .or(Err(Error::FormatViolation))?
+        let metadata_len = meta_bytes.len();
+
+        let metadata_len_buf = u32::try_from(metadata_len)
+            .or(Err(Error::ConstraintViolation))?
             .to_be_bytes();
 
         header_slice[prelude_off_start..prelude_off_end].clone_from_slice(&PRELUDE);
         header_slice[version_off_start..version_off_end].clone_from_slice(&version_buf);
-        header_slice[meta_len_off_start..meta_len_off_end].clone_from_slice(&metadata_len);
+        header_slice[meta_len_off_start..meta_len_off_end].clone_from_slice(&metadata_len_buf);
+
+        header.truncate(PREAMBLE_SIZE + metadata_len);
 
         Ok(MetadataCreateResult {
             header: header,
@@ -100,5 +97,40 @@ impl Metadata {
         let m = ibe::kiltz_vahlis_one::decrypt(&usk.0, &c);
 
         Ok(derive_keys(&m))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eq_write_read() {
+        let mut rng = rand::thread_rng();
+
+        let i = Identity::new(
+            1566722350,
+            "pbdf.pbdf.email.email",
+            Some("w.geraedts@sarif.nl"),
+        )
+        .unwrap();
+
+        let (pk, sk) = ibe::kiltz_vahlis_one::setup(&mut rng);
+
+        let MetadataCreateResult {
+            metadata: m,
+            header: h,
+            keys: keys,
+        } = Metadata::new(i.clone(), &PublicKey(pk.clone()), &mut rng).unwrap();
+
+        let mut reader = MetadataReader::new();
+        match reader.write(&h.as_slice()).unwrap() {
+            MetadataReaderResult::Hungry => panic!("Unsaturated"),
+            MetadataReaderResult::Saturated {
+                unconsumed: u,
+                header: h2,
+                metadata: m2,
+            } => panic!("Saturated"),
+        }
     }
 }

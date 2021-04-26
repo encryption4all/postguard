@@ -25,8 +25,8 @@ pub enum Error {
 }
 
 /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
-pub(crate) const PRELUDE_LEN: usize = 4;
-pub(crate) const PRELUDE: [u8; PRELUDE_LEN] = [0x14, 0x8A, 0x8E, 0xA7];
+pub(crate) const PRELUDE_SIZE: usize = 4;
+pub(crate) const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
 
 // PREAMBLE contains the following:
 //
@@ -34,7 +34,8 @@ pub(crate) const PRELUDE: [u8; PRELUDE_LEN] = [0x14, 0x8A, 0x8E, 0xA7];
 // * Version identifier: 2 bytes
 // * Size of metadata: 4 bytes
 // * Totalling: 4 + 2 + 4 = 8 bytes
-pub(crate) const PREAMBLE_SIZE: usize = PRELUDE_LEN + mem::size_of::<u16>() + mem::size_of::<u32>();
+pub(crate) const PREAMBLE_SIZE: usize =
+    PRELUDE_SIZE + mem::size_of::<u16>() + mem::size_of::<u32>();
 
 // According to calculations, this size can be a lot smaller:
 //
