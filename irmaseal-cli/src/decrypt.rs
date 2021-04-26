@@ -1,9 +1,13 @@
 use clap::ArgMatches;
-use irmaseal_core::api::*;
-use irmaseal_core::stream::OpenerSealed;
+use irmaseal_core::stream::Unsealer;
+use irmaseal_core::{api::*, stream::Readable, MetadataReader, MetadataReaderResult};
 use tar::Archive;
 
-use std::time::Duration;
+use std::{
+    convert::TryInto,
+    io::{Seek, SeekFrom},
+    time::Duration,
+};
 use tokio::time::delay_for;
 
 use crate::client::{Client, ClientError, OwnedKeyChallenge};
@@ -43,9 +47,30 @@ pub async fn exec(m: &ArgMatches<'_>) {
 
     eprintln!("Opening {}", input);
 
-    let r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
+    let mut r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
 
-    let (metadata, sealed) = OpenerSealed::new(r).unwrap();
+    let read_blocks_size = 32;
+    let mut meta_reader = MetadataReader::new();
+
+    let (unconsumed, header, metadata) = loop {
+        match meta_reader
+            .write(r.read_bytes_strict(read_blocks_size).unwrap())
+            .unwrap()
+        {
+            MetadataReaderResult::Hungry => continue,
+            MetadataReaderResult::Saturated {
+                unconsumed,
+                header,
+                metadata,
+            } => break (unconsumed, header, metadata),
+        }
+    };
+
+    // Rewind filestream
+    if unconsumed != 0 {
+        let unconsumed: i64 = unconsumed.try_into().unwrap();
+        r.seek(SeekFrom::Current(-unconsumed)).unwrap();
+    }
 
     let timestamp = metadata.identity.timestamp;
 
@@ -67,14 +92,15 @@ pub async fn exec(m: &ArgMatches<'_>) {
 
     print_qr(&sp.qr);
 
-    if let Some(r) = wait_on_session(client, &sp, timestamp).await.unwrap() {
+    if let Some(kr) = wait_on_session(client, &sp, timestamp).await.unwrap() {
         eprintln!("Disclosure successful, decrypting {}", input);
 
-        let unsealed =
-            crate::util::FileUnsealerRead::new(sealed.unseal(&metadata, &r.key.unwrap()).unwrap());
+        let unsealer = Unsealer::new(&metadata, header, &kr.key.unwrap(), r).unwrap();
+
+        let unsealed = crate::util::FileUnsealerRead::new(unsealer);
 
         let mut tar = Archive::new(unsealed);
-        tar.unpack(".").unwrap();
+        tar.unpack("./unsealed").unwrap();
 
         eprintln!("Succesfully decrypted.");
     } else {

@@ -1,5 +1,7 @@
-use irmaseal_core::stream::{OpenerUnsealed, Sealer};
-use irmaseal_core::{Error, Readable, Writable};
+use std::io::{self, Seek, SeekFrom};
+
+use irmaseal_core::stream::{Readable, StreamError, Writable};
+use irmaseal_core::stream::{Sealer, Unsealer};
 
 pub static IRMASEALEXT: &'static str = "irma";
 
@@ -14,7 +16,7 @@ impl FileWriter {
 }
 
 impl Writable for FileWriter {
-    fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), StreamError> {
         use std::io::Write;
         self.os.write_all(bytes).unwrap();
         Ok(())
@@ -32,12 +34,18 @@ impl FileReader {
     }
 }
 
+impl Seek for FileReader {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.is.seek(pos)
+    }
+}
+
 impl Readable for FileReader {
-    fn read_byte(&mut self) -> Result<u8, Error> {
+    fn read_byte(&mut self) -> Result<u8, StreamError> {
         Ok(self.read_bytes(1)?[0])
     }
 
-    fn read_bytes(&mut self, n: usize) -> Result<&[u8], Error> {
+    fn read_bytes(&mut self, n: usize) -> Result<&[u8], StreamError> {
         use std::io::Read;
 
         if self.buf.len() < n {
@@ -74,7 +82,7 @@ impl<'a> std::io::Write for FileSealerWrite<'a> {
     }
 }
 
-type FileUnsealer = OpenerUnsealed<FileReader>;
+type FileUnsealer = Unsealer<FileReader>;
 
 pub struct FileUnsealerRead {
     ou: FileUnsealer,
@@ -92,7 +100,7 @@ impl std::io::Read for FileUnsealerRead {
         if self.buf.len() == 0 {
             let rbuf_r = match self.ou.read() {
                 // End of file is indicated as read with 0 bytes
-                Err(Error::EndOfStream) => Ok(&[] as &[u8]),
+                Err(StreamError::EndOfStream) => Ok(&[] as &[u8]),
                 e => e,
             }
             .unwrap();
