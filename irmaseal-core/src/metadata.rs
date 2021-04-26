@@ -12,9 +12,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) const KEYSIZE: usize = 32;
 pub(crate) const IVSIZE: usize = 16;
 #[allow(dead_code)]
-pub(crate) const MACSIZE: usize = 32;
+pub(crate) const VERIFIER_SIZE: usize = 32;
 pub(crate) const CIPHERTEXT_SIZE: usize = 144;
-pub(crate) const VERSION_V1: u16 = 0;
 
 /// Metadata which contains the version
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -86,7 +85,7 @@ impl Metadata {
         })
     }
 
-    pub fn derive_keys(self, usk: &UserSecretKey) -> Result<KeySet, Error> {
+    pub fn derive_keys(&self, usk: &UserSecretKey) -> Result<KeySet, Error> {
         let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref!(
             self.ciphertext.as_slice(),
             0,
@@ -120,12 +119,12 @@ mod tests {
         let MetadataCreateResult {
             metadata: m,
             header: h,
-            keys: keys,
+            keys: _,
         } = Metadata::new(i.clone(), &PublicKey(pk.clone()), &mut rng).unwrap();
 
-        let mut reader = MetadataReader::new();
+        let reader = MetadataReader::new();
         match reader.write(&h.as_slice()).unwrap() {
-            MetadataReaderResult::Hungry => panic!("Unsaturated"),
+            MetadataReaderResult::Hungry => panic!("Hungry"),
             MetadataReaderResult::Saturated {
                 unconsumed: u,
                 header: h2,
@@ -134,7 +133,7 @@ mod tests {
                 assert_eq!(&h, &h2);
                 assert_eq!(&m, &m2);
                 assert_eq!(u, 0);
-            },
+            }
         }
     }
 }

@@ -95,7 +95,7 @@ impl MetadataReader {
             return Err(Error::IncorrectVersion);
         }
 
-        let meta_len:usize = u32::from_be_bytes(
+        let meta_len: usize = u32::from_be_bytes(
             header_slice[PRELUDE_SIZE + mem::size_of::<u16>()
                 ..PRELUDE_SIZE + mem::size_of::<u16>() + mem::size_of::<u32>()]
                 .try_into()

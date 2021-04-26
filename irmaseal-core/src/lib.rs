@@ -8,13 +8,16 @@ mod metadata_reader;
 pub mod api;
 pub mod util;
 
-use core::mem;
+#[cfg(feature = "stream")]
+pub mod stream;
 
-use arrayvec::ArrayVec;
 pub use artifacts::*;
 pub use identity::*;
 pub use metadata::*;
 pub use metadata_reader::*;
+
+use arrayvec::ArrayVec;
+use core::mem;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -23,6 +26,9 @@ pub enum Error {
     ConstraintViolation,
     FormatViolation,
 }
+
+// Version identifier
+pub(crate) const VERSION_V1: u16 = 0;
 
 /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
 pub(crate) const PRELUDE_SIZE: usize = 4;
@@ -54,3 +60,15 @@ pub(crate) const MAX_METADATA_SIZE: usize = 8182;
 pub const MAX_HEADERBUF_SIZE: usize = PREAMBLE_SIZE + MAX_METADATA_SIZE;
 
 type HeaderBuf = ArrayVec<[u8; MAX_HEADERBUF_SIZE]>;
+
+// How large a block is that has to be encrypted using
+// the symmetric crypto algorithm
+pub(crate) const SYMMETRIC_CRYPTO_BLOCKSIZE: usize = 16384;
+
+// Which symmetric crypto algorithm is used.
+#[allow(dead_code)]
+pub(crate) const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES256-CTR";
+
+// Which verification algorithm is used.
+#[allow(dead_code)]
+pub(crate) const VERIFIER_IDENTIFIER: &str = "SHA3-256";
