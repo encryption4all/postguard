@@ -1,5 +1,3 @@
-use std::io::{self, Seek, SeekFrom};
-
 use irmaseal_core::stream::{Readable, StreamError, Writable};
 use irmaseal_core::stream::{Sealer, Unsealer};
 
@@ -31,12 +29,6 @@ pub struct FileReader {
 impl FileReader {
     pub fn new(is: std::fs::File) -> FileReader {
         FileReader { is, buf: vec![] }
-    }
-}
-
-impl Seek for FileReader {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.is.seek(pos)
     }
 }
 

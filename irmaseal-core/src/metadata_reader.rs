@@ -37,6 +37,12 @@ impl MetadataReader {
         }
     }
 
+    // How many bytes can be written safely without
+    // writing too much
+    pub fn get_safe_write_size(&self) -> usize {
+        self.remaining_bytes
+    }
+
     pub fn write(&mut self, buf: &[u8]) -> Result<MetadataReaderResult, Error> {
         let mut consumed: usize = 0;
         let buf_size = buf.len();

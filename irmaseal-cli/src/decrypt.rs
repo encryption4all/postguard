@@ -1,13 +1,8 @@
 use clap::ArgMatches;
 use irmaseal_core::stream::Unsealer;
 use irmaseal_core::{api::*, stream::Readable, MetadataReader, MetadataReaderResult};
-use tar::Archive;
 
-use std::{
-    convert::TryInto,
-    io::{Seek, SeekFrom},
-    time::Duration,
-};
+use std::time::Duration;
 use tokio::time::delay_for;
 
 use crate::client::{Client, ClientError, OwnedKeyChallenge};
@@ -52,9 +47,10 @@ pub async fn exec(m: &ArgMatches<'_>) {
     let read_blocks_size = 32;
     let mut meta_reader = MetadataReader::new();
 
-    let (unconsumed, header, metadata) = loop {
+    let (_, header, metadata) = loop {
+        let read_size = std::cmp::min(read_blocks_size, meta_reader.get_safe_write_size());
         match meta_reader
-            .write(r.read_bytes_strict(read_blocks_size).unwrap())
+            .write(r.read_bytes_strict(read_size).unwrap())
             .unwrap()
         {
             MetadataReaderResult::Hungry => continue,
@@ -65,12 +61,6 @@ pub async fn exec(m: &ArgMatches<'_>) {
             } => break (unconsumed, header, metadata),
         }
     };
-
-    // Rewind filestream
-    if unconsumed != 0 {
-        let unconsumed: i64 = unconsumed.try_into().unwrap();
-        r.seek(SeekFrom::Current(-unconsumed)).unwrap();
-    }
 
     let timestamp = metadata.identity.timestamp;
 
@@ -95,12 +85,15 @@ pub async fn exec(m: &ArgMatches<'_>) {
     if let Some(kr) = wait_on_session(client, &sp, timestamp).await.unwrap() {
         eprintln!("Disclosure successful, decrypting {}", input);
 
-        let unsealer = Unsealer::new(&metadata, header, &kr.key.unwrap(), r).unwrap();
+        let mut unsealer = crate::util::FileUnsealerRead::new(
+            Unsealer::new(&metadata, header, &kr.key.unwrap(), r).unwrap(),
+        );
 
-        let unsealed = crate::util::FileUnsealerRead::new(unsealer);
-
-        let mut tar = Archive::new(unsealed);
-        tar.unpack("./unsealed").unwrap();
+        std::io::copy(
+            &mut unsealer,
+            &mut std::fs::File::create("./unsealed").unwrap(),
+        )
+        .unwrap();
 
         eprintln!("Succesfully decrypted.");
     } else {
