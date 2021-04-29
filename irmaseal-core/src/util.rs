@@ -3,6 +3,7 @@ use digest::{Digest, FixedOutput};
 use ibe::kiltz_vahlis_one::SymmetricKey;
 use rand::{CryptoRng, Rng};
 
+#[derive(Clone)]
 pub struct KeySet {
     pub aes_key: [u8; KEYSIZE],
     pub mac_key: [u8; KEYSIZE],
