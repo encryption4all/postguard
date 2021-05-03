@@ -2,7 +2,7 @@ use crate::*;
 use crate::{stream::*, util::KeySet};
 
 use arrayref::array_ref;
-use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
+use ctr::cipher::{NewCipher, StreamCipher};
 use digest::Digest;
 /// Unseal IRMAseal encrypted bytestream.
 ///
@@ -79,7 +79,7 @@ impl<R: Readable> Unsealer<R> {
 
         let mut content = &mut dst[dststart..SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE];
         self.verifier.input(&content);
-        self.decrypter.decrypt(&mut content);
+        self.decrypter.apply_keystream(&mut content);
 
         Ok(content)
     }

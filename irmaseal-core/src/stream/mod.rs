@@ -18,5 +18,5 @@ pub enum StreamError {
     PrematureEndError,
 }
 
-pub(crate) type SymCrypt = ctr::Ctr128<aes::Aes256>;
+pub(crate) type SymCrypt = ctr::Ctr32BE<aes::Aes256>;
 pub(crate) type Verifier = sha3::Sha3_256;
