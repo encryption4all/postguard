@@ -1,5 +1,5 @@
 use arrayref::array_ref;
-use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
+use ctr::cipher::{NewCipher, StreamCipher};
 use digest::Digest;
 use rand::{CryptoRng, Rng};
 
@@ -56,7 +56,7 @@ impl<'a, W: Writable> Writable for Sealer<'a, W> {
         for c in buf.chunks(MAC_SIZE) {
             let subtmp = &mut tmp[0..c.len()];
             subtmp.copy_from_slice(c);
-            self.encrypter.encrypt(subtmp);
+            self.encrypter.apply_keystream(subtmp);
             self.verifier.input(&subtmp);
             self.w.write(subtmp)?;
         }
