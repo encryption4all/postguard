@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) const KEYSIZE: usize = 32;
 pub(crate) const IVSIZE: usize = 16;
 #[allow(dead_code)]
-pub(crate) const MAC_SIZE: usize = 32;
+pub(crate) const VERIFIER_SIZE: usize = 32;
 pub(crate) const CIPHERTEXT_SIZE: usize = 144;
 
 /// Metadata which contains the version

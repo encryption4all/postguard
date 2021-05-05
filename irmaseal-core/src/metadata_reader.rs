@@ -72,7 +72,7 @@ impl MetadataReader {
         }
 
         if self.remaining_bytes == 0 {
-            let m = self.parse_meta_data()?;
+            let m = self.parse_metadata()?;
             self.remaining_bytes = PREAMBLE_SIZE;
             Ok(MetadataReaderResult::Saturated {
                 unconsumed: buf_size - consumed,
@@ -84,7 +84,7 @@ impl MetadataReader {
         }
     }
 
-    fn parse_meta_data(&self) -> Result<Metadata, Error> {
+    fn parse_metadata(&self) -> Result<Metadata, Error> {
         let header_slice: &[u8] = self.header_buf.as_slice();
 
         if header_slice[0..PRELUDE_SIZE] != PRELUDE {

@@ -63,11 +63,12 @@ type HeaderBuf = ArrayVec<[u8; MAX_HEADERBUF_SIZE]>;
 
 // How large a block is that has to be encrypted using
 // the symmetric crypto algorithm
-pub(crate) const SYMMETRIC_CRYPTO_BLOCKSIZE: usize = 16384;
+// 128 KiB
+pub(crate) const SYMMETRIC_CRYPTO_BLOCKSIZE: usize = 131072;
 
 // Which symmetric crypto algorithm is used.
 #[allow(dead_code)]
-pub(crate) const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES256-CTR";
+pub(crate) const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES256-CTR64BE";
 
 // Which verification algorithm is used.
 #[allow(dead_code)]

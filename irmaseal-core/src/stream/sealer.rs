@@ -51,9 +51,9 @@ impl Writable for Verifier {
 
 impl<'a, W: Writable> Writable for Sealer<'a, W> {
     fn write(&mut self, buf: &[u8]) -> Result<(), StreamError> {
-        let mut tmp = [0u8; MAC_SIZE];
+        let mut tmp = [0u8; VERIFIER_SIZE];
 
-        for c in buf.chunks(MAC_SIZE) {
+        for c in buf.chunks(VERIFIER_SIZE) {
             let subtmp = &mut tmp[0..c.len()];
             subtmp.copy_from_slice(c);
             self.encrypter.apply_keystream(subtmp);
