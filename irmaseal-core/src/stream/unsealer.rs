@@ -9,7 +9,7 @@ use digest::Digest;
 /// **Warning**: will only validate the authenticity of the plaintext when calling `validate`.
 pub struct Unsealer<R: Readable> {
     decrypter: SymCrypt,
-    verifier: Verifier,
+    mac: Mac,
     r: R,
     resultbuf: Option<[u8; SYMMETRIC_CRYPTO_BLOCKSIZE]>,
 }
@@ -23,17 +23,17 @@ impl<R: Readable> Unsealer<R> {
     ) -> Result<Unsealer<R>, Error> {
         let KeySet { aes_key, mac_key } = metadata.derive_keys(usk)?;
 
-        let mut verifier = Verifier::default();
-        verifier.input(&mac_key);
-        verifier.input(&header);
+        let mut mac = Mac::default();
+        mac.input(&mac_key);
+        mac.input(&header);
 
-        let iv: &[u8; IVSIZE] = array_ref!(metadata.iv.as_slice(), 0, IVSIZE);
+        let iv: &[u8; IV_SIZE] = array_ref!(metadata.iv.as_slice(), 0, IV_SIZE);
 
         let decrypter = SymCrypt::new(&aes_key.into(), &(*iv).into());
 
         Ok(Unsealer {
             decrypter,
-            verifier,
+            mac,
             r,
             resultbuf: None,
         })
@@ -46,11 +46,11 @@ impl<R: Readable> Unsealer<R> {
         let (resultsize, macbuf) = match self.resultbuf.as_mut() {
             None => (SYMMETRIC_CRYPTO_BLOCKSIZE, None),
             Some(dst) => {
-                let mut macbuf = [0u8; VERIFIER_SIZE];
+                let mut macbuf = [0u8; MAC_SIZE];
                 macbuf.copy_from_slice(
-                    &dst[SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE],
+                    &dst[SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE],
                 );
-                (SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE, Some(macbuf))
+                (SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE, Some(macbuf))
             }
         };
 
@@ -71,29 +71,29 @@ impl<R: Readable> Unsealer<R> {
         let dststart = match macbuf {
             None => dstmid,
             Some(macbuf) => {
-                let dststart = dstmid - VERIFIER_SIZE;
+                let dststart = dstmid - MAC_SIZE;
                 dst[dststart..dstmid].copy_from_slice(&macbuf);
                 dststart
             }
         };
 
-        let mut content = &mut dst[dststart..SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE];
-        self.verifier.input(&content);
+        let mut content = &mut dst[dststart..SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE];
+        self.mac.input(&content);
         self.decrypter.apply_keystream(&mut content);
 
         Ok(content)
     }
 
-    /// Will check the HMAC once the entire stream is exhausted.
+    /// Will check the tag once the entire stream is exhausted.
     /// Will only yield the correct value once the **entire** stream is read
     /// using `write_to`, or by manually calling `write` until `Error::EndOfStream` is yielded.
     pub fn validate(self) -> bool {
         match self.resultbuf {
             None => false,
             Some(resultbuf) => {
-                let expected = &resultbuf
-                    [SYMMETRIC_CRYPTO_BLOCKSIZE - VERIFIER_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
-                let got = self.verifier.result();
+                let expected =
+                    &resultbuf[SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
+                let got = self.mac.result();
                 expected == got.as_slice()
             }
         }

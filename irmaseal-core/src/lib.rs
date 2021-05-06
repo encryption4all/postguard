@@ -57,19 +57,26 @@ pub(crate) const PREAMBLE_SIZE: usize =
 pub(crate) const MAX_METADATA_SIZE: usize = 8182;
 
 // Headerbuf is the preamble size plus the metadata
-pub const MAX_HEADERBUF_SIZE: usize = PREAMBLE_SIZE + MAX_METADATA_SIZE;
+pub(crate) const MAX_HEADERBUF_SIZE: usize = PREAMBLE_SIZE + MAX_METADATA_SIZE;
 
 type HeaderBuf = ArrayVec<[u8; MAX_HEADERBUF_SIZE]>;
 
 // How large a block is that has to be encrypted using
 // the symmetric crypto algorithm
 // 128 KiB
-pub(crate) const SYMMETRIC_CRYPTO_BLOCKSIZE: usize = 131072;
+pub const SYMMETRIC_CRYPTO_BLOCKSIZE: usize = 131072;
 
 // Which symmetric crypto algorithm is used.
 #[allow(dead_code)]
-pub(crate) const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES256-CTR64BE";
+pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES256-CTR64BE";
 
 // Which verification algorithm is used.
 #[allow(dead_code)]
-pub(crate) const VERIFIER_IDENTIFIER: &str = "SHA3-256";
+pub const MAC_IDENTIFIER: &str = "SHA3-256";
+
+#[allow(dead_code)]
+pub const KEY_SIZE: usize = 32;
+pub const IV_SIZE: usize = 16;
+#[allow(dead_code)]
+pub const MAC_SIZE: usize = 32;
+pub const CIPHERTEXT_SIZE: usize = 144;

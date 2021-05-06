@@ -122,7 +122,7 @@ fn corrupt_body() {
 }
 
 #[test]
-fn corrupt_hmac() {
+fn corrupt_mac() {
     let props = DefaultProps::default();
 
     let mut content = [0u8; 60000];
