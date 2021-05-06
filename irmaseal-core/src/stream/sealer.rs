@@ -1,16 +1,15 @@
-use core::convert::TryFrom;
-use ctr::stream_cipher::{NewStreamCipher, StreamCipher};
-use hmac::Mac;
-use postcard::to_slice;
+use arrayref::array_ref;
+use ctr::cipher::{NewCipher, StreamCipher};
+use digest::Digest;
 use rand::{CryptoRng, Rng};
 
-use crate::stream::*;
 use crate::*;
+use crate::{stream::*, util::KeySet};
 
 /// Sealer for an bytestream, which converts it into an IRMAseal encrypted bytestream.
 pub struct Sealer<'a, W: Writable> {
-    aes: SymCrypt,
-    hmac: Verifier,
+    encrypter: SymCrypt,
+    verifier: Verifier,
     w: &'a mut W,
 }
 
@@ -21,63 +20,44 @@ impl<'a, W: Writable> Sealer<'a, W> {
         rng: &mut R,
         w: &'a mut W,
     ) -> Result<Sealer<'a, W>, Error> {
-        let version_buf = VERSION_V1.to_be_bytes();
+        let MetadataCreateResult {
+            metadata: m,
+            header: h,
+            keys: KeySet { aes_key, mac_key },
+        } = Metadata::new(i, pk, rng)?;
 
-        let derived = i.derive()?;
-        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
+        let iv: &[u8; IVSIZE] = array_ref!(m.iv.as_slice(), 0, IVSIZE);
 
-        let (aeskey, mackey) = crate::stream::util::derive_keys(&k);
-        let iv = crate::stream::util::generate_iv(rng);
+        let encrypter = SymCrypt::new(&aes_key.into(), &(*iv).into());
+        let mut verifier = Verifier::default();
+        verifier.input(&mac_key);
+        verifier.input(&h);
+        w.write(&h).map_err(|_| Error::ConstraintViolation)?;
 
-        let aes = SymCrypt::new(&aeskey.into(), &iv.into());
-        let mut hmac = Verifier::new_varkey(&mackey).unwrap();
-
-        let ciphertext = c.to_bytes();
-
-        let metadata = Metadata::new(&ciphertext, &iv, i)?;
-        let mut deser_buf = [0; MAX_METADATA_SIZE];
-        let meta_bytes = to_slice(&metadata, &mut deser_buf).or(Err(Error::FormatViolation))?;
-
-        let metadata_len = u16::try_from(meta_bytes.len())
-            .or(Err(Error::FormatViolation))?
-            .to_be_bytes();
-
-        hmac.write(&PRELUDE)?;
-        w.write(&PRELUDE)?;
-
-        hmac.write(&version_buf)?;
-        w.write(&version_buf)?;
-
-        hmac.write(&metadata_len)?;
-        w.write(&metadata_len)?;
-
-        hmac.write(&meta_bytes)?;
-        w.write(meta_bytes)?;
-
-        if metadata_len.len() > MAX_METADATA_SIZE {
-            Err(Error::FormatViolation)
-        } else {
-            Ok(Sealer { aes, hmac, w })
-        }
+        Ok(Sealer {
+            encrypter,
+            verifier,
+            w,
+        })
     }
 }
 
 impl Writable for Verifier {
-    fn write(&mut self, buf: &[u8]) -> Result<(), Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<(), StreamError> {
         self.input(buf);
         Ok(())
     }
 }
 
 impl<'a, W: Writable> Writable for Sealer<'a, W> {
-    fn write(&mut self, buf: &[u8]) -> Result<(), Error> {
-        let mut tmp = [0u8; BLOCKSIZE];
+    fn write(&mut self, buf: &[u8]) -> Result<(), StreamError> {
+        let mut tmp = [0u8; VERIFIER_SIZE];
 
-        for c in buf.chunks(BLOCKSIZE) {
+        for c in buf.chunks(VERIFIER_SIZE) {
             let subtmp = &mut tmp[0..c.len()];
             subtmp.copy_from_slice(c);
-            self.aes.encrypt(subtmp);
-            self.hmac.input(subtmp);
+            self.encrypter.apply_keystream(subtmp);
+            self.verifier.input(&subtmp);
             self.w.write(subtmp)?;
         }
 
@@ -87,7 +67,7 @@ impl<'a, W: Writable> Writable for Sealer<'a, W> {
 
 impl<'a, W: Writable> Drop for Sealer<'a, W> {
     fn drop(&mut self) {
-        let code = self.hmac.result_reset().code();
+        let code = self.verifier.result_reset();
         self.w.write(&code).unwrap()
     }
 }

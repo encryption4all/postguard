@@ -1,60 +1,89 @@
+use crate::stream::*;
 use arrayvec::{Array, ArrayVec};
-use digest::{Digest, FixedOutput};
-use ibe::kiltz_vahlis_one::SymmetricKey;
-use rand::{CryptoRng, Rng};
 
-use crate::*;
-
-pub(crate) fn derive_keys(key: &SymmetricKey) -> ([u8; KEYSIZE], [u8; KEYSIZE]) {
-    let mut h = sha3::Sha3_512::new();
-    h.input(key.to_bytes().as_ref());
-    let buf = h.fixed_result();
-
-    let mut aeskey = [0u8; KEYSIZE];
-    let mut mackey = [0u8; KEYSIZE];
-
-    let (a, b) = buf.as_slice().split_at(KEYSIZE);
-    aeskey.copy_from_slice(&a);
-    mackey.copy_from_slice(&b);
-
-    (aeskey, mackey)
+/// A writable resource that accepts chunks of a bytestream.
+pub trait Writable {
+    /// Write the argument slice to the underlying resource. Needs to consume the entire slice.
+    fn write(&mut self, buf: &[u8]) -> Result<(), StreamError>;
 }
 
-pub(crate) fn generate_iv<R: Rng + CryptoRng>(r: &mut R) -> [u8; IVSIZE] {
-    let mut res = [0u8; IVSIZE];
-    r.fill_bytes(&mut res);
-    res
+/// A readable resource that yields chunks of a bytestream.
+pub trait Readable {
+    /// Read exactly one byte. Will throw `Error::EndOfStream` if that byte
+    /// is not available.
+    fn read_byte(&mut self) -> Result<u8, StreamError>;
+
+    /// Read **up to** `n` bytes. May yield a slice with a lower number of bytes.
+    fn read_bytes(&mut self, n: usize) -> Result<&[u8], StreamError>;
+
+    /// Read **exactly** `n` bytes.
+    fn read_bytes_strict(&mut self, n: usize) -> Result<&[u8], StreamError> {
+        let res = self.read_bytes(n)?;
+
+        if res.len() < n {
+            Err(StreamError::PrematureEndError)
+        } else {
+            Ok(res)
+        }
+    }
 }
 
-/// Nested Reader that archives all bytes passing through in buf.
-pub(crate) struct ArchiveReader<R: Readable, A: Array> {
-    buf: ArrayVec<A>,
-    r: R,
+pub struct SliceReader<'a, T> {
+    buf: &'a [T],
+    i: usize,
 }
 
-impl<R: Readable, A: Array> ArchiveReader<R, A> {
-    pub fn new(r: R) -> ArchiveReader<R, A> {
-        ArchiveReader {
-            buf: ArrayVec::<A>::new(),
-            r,
+impl<'a, T> SliceReader<'a, T> {
+    pub fn new(buf: &'a [T]) -> SliceReader<'a, T> {
+        SliceReader { buf, i: 0 }
+    }
+}
+
+impl<'a> Readable for SliceReader<'a, u8> {
+    fn read_byte(&mut self) -> Result<u8, StreamError> {
+        if self.buf.len() < self.i {
+            return Err(StreamError::EndOfStream);
+        }
+
+        unsafe {
+            let res = *self.buf.get_unchecked(self.i);
+            self.i += 1;
+
+            Ok(res)
         }
     }
 
-    pub fn disclose(self) -> (ArrayVec<A>, R) {
-        (self.buf, self.r)
+    fn read_bytes(&mut self, n: usize) -> Result<&[u8], StreamError> {
+        if self.i >= self.buf.len() {
+            return Err(StreamError::EndOfStream);
+        }
+
+        let mut end = self.i + n; // Non-inclusive
+        if self.buf.len() < end {
+            end = self.buf.len();
+        }
+
+        let res = &self.buf[self.i..end];
+        self.i += n;
+
+        Ok(res)
     }
 }
 
-impl<R: Readable, A: Array<Item = u8>> Readable for ArchiveReader<R, A> {
-    fn read_byte(&mut self) -> Result<u8, Error> {
-        let res = self.r.read_byte()?;
-        self.buf.push(res);
-        Ok(res)
-    }
+impl<A: Array<Item = u8>> Writable for ArrayVec<A> {
+    fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+        unsafe {
+            let len = self.len();
 
-    fn read_bytes(&mut self, n: usize) -> Result<&[u8], Error> {
-        let res = self.r.read_bytes(n)?;
-        self.buf.write(res)?;
-        Ok(res)
+            if len + data.len() > A::CAPACITY {
+                return Err(StreamError::UpstreamWritableError);
+            }
+
+            let tail = core::slice::from_raw_parts_mut(self.get_unchecked_mut(len), data.len());
+            tail.copy_from_slice(data);
+
+            self.set_len(len + data.len());
+        }
+        Ok(())
     }
 }

@@ -1,5 +1,5 @@
-use crate::stream::util::SliceReader;
-use crate::stream::*;
+use crate::*;
+use crate::util::SliceReader;
 use crate::*;
 
 use arrayvec::ArrayVec;
@@ -38,6 +38,7 @@ fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
         let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
         s.write(&content).unwrap();
     } // Force Drop of s.
+
     buf
 }
 
@@ -45,39 +46,20 @@ fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
     let mut rng = rand::thread_rng();
     let DefaultProps { i, pk, sk } = props;
 
-    let mut mr = MetadataReader::new();
-    let mut mrr = None;
+    let bufr = SliceReader::new(&buf);
+    let (m, o) = OpenerSealed::new(bufr).unwrap();
+    let i2 = &m.identity;
 
-    let mut written = 0;
-    for b in buf {
-        written += 1;
-        match mr.write(&[*b]).unwrap() {
-            MetadataReaderResult::Hungry => continue,
-            MetadataReaderResult::Saturated {
-                unconsumed,
-                header,
-                metadata,
-            } => {
-                assert_eq!(unconsumed, 0);
-                mrr = Some((header, metadata));
-                break;
-            }
-        }
-    }
-
-    let (header, metadata) = mrr.unwrap();
-
-    let i2 = &metadata.identity;
     assert_eq!(&i, &i2);
+
     let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
-    let usk = &UserSecretKey(usk);
 
-    let bufr = SliceReader::new(&buf[written..]);
-    let mut unsealer = Unsealer::new(&metadata, header, usk, bufr).unwrap();
+    let mut o2 = o.unseal(&m, &UserSecretKey(usk)).unwrap();
+
     let mut dst = BigBuf::new();
-    unsealer.write_to(&mut dst).unwrap();
+    o2.write_to(&mut dst).unwrap();
 
-    (dst, unsealer.validate())
+    (dst, o2.validate())
 }
 
 fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {

@@ -3,7 +3,6 @@ use irmaseal_core::stream::Sealer;
 use irmaseal_core::Identity;
 use std::path::Path;
 use std::time::SystemTime;
-use tar::Builder;
 
 fn now() -> u64 {
     SystemTime::now()
@@ -48,17 +47,17 @@ pub async fn exec(m: &ArgMatches<'_>) {
 
     let mut w = crate::util::FileWriter::new(std::fs::File::create(&output).unwrap());
 
-    let sealer_write = crate::util::FileSealerWrite::new(
+    let mut sealer_write = crate::util::FileSealerWrite::new(
         Sealer::new(i, &parameters.public_key, &mut rng, &mut w).unwrap(),
     );
 
     eprintln!("Encrypting {}...", input);
 
-    let mut archive = Builder::new(sealer_write);
-    archive
-        .append_path_with_name(input_path, file_name_path)
-        .unwrap();
-    archive.finish().unwrap();
+    std::io::copy(
+        &mut std::fs::File::open(input_path).unwrap(),
+        &mut sealer_write,
+    )
+    .unwrap();
 
     eprintln!("Finished encrypting.");
 }
