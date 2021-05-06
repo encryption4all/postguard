@@ -22,8 +22,7 @@ pub enum MetadataReaderResult {
         // to the metadata
         unconsumed: usize,
         // The raw header buffer
-        // must be used to start the
-        // MAC
+        // must be used to start the MAC
         header: HeaderBuf,
         // The metadata
         metadata: Metadata,
