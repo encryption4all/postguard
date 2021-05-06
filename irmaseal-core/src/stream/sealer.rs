@@ -9,7 +9,7 @@ use crate::{stream::*, util::KeySet};
 /// Sealer for an bytestream, which converts it into an IRMAseal encrypted bytestream.
 pub struct Sealer<'a, W: Writable> {
     encrypter: SymCrypt,
-    verifier: Verifier,
+    mac: Mac,
     w: &'a mut W,
 }
 
@@ -26,23 +26,19 @@ impl<'a, W: Writable> Sealer<'a, W> {
             keys: KeySet { aes_key, mac_key },
         } = Metadata::new(i, pk, rng)?;
 
-        let iv: &[u8; IVSIZE] = array_ref!(m.iv.as_slice(), 0, IVSIZE);
+        let iv: &[u8; IV_SIZE] = array_ref!(m.iv.as_slice(), 0, IV_SIZE);
 
         let encrypter = SymCrypt::new(&aes_key.into(), &(*iv).into());
-        let mut verifier = Verifier::default();
-        verifier.input(&mac_key);
-        verifier.input(&h);
+        let mut mac = Mac::default();
+        mac.input(&mac_key);
+        mac.input(&h);
         w.write(&h).map_err(|_| Error::ConstraintViolation)?;
 
-        Ok(Sealer {
-            encrypter,
-            verifier,
-            w,
-        })
+        Ok(Sealer { encrypter, mac, w })
     }
 }
 
-impl Writable for Verifier {
+impl Writable for Mac {
     fn write(&mut self, buf: &[u8]) -> Result<(), StreamError> {
         self.input(buf);
         Ok(())
@@ -51,13 +47,13 @@ impl Writable for Verifier {
 
 impl<'a, W: Writable> Writable for Sealer<'a, W> {
     fn write(&mut self, buf: &[u8]) -> Result<(), StreamError> {
-        let mut tmp = [0u8; VERIFIER_SIZE];
+        let mut tmp = [0u8; MAC_SIZE];
 
-        for c in buf.chunks(VERIFIER_SIZE) {
+        for c in buf.chunks(MAC_SIZE) {
             let subtmp = &mut tmp[0..c.len()];
             subtmp.copy_from_slice(c);
             self.encrypter.apply_keystream(subtmp);
-            self.verifier.input(&subtmp);
+            self.mac.input(&subtmp);
             self.w.write(subtmp)?;
         }
 
@@ -67,7 +63,7 @@ impl<'a, W: Writable> Writable for Sealer<'a, W> {
 
 impl<'a, W: Writable> Drop for Sealer<'a, W> {
     fn drop(&mut self) {
-        let code = self.verifier.result_reset();
+        let code = self.mac.result_reset();
         self.w.write(&code).unwrap()
     }
 }

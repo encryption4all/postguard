@@ -5,8 +5,8 @@ use rand::{CryptoRng, Rng};
 
 #[derive(Clone)]
 pub struct KeySet {
-    pub aes_key: [u8; KEYSIZE],
-    pub mac_key: [u8; KEYSIZE],
+    pub aes_key: [u8; KEY_SIZE],
+    pub mac_key: [u8; MAC_SIZE],
 }
 
 pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
@@ -22,10 +22,10 @@ pub(crate) fn derive_keys(key: &SymmetricKey) -> KeySet {
     h.input(key.to_bytes().as_ref());
     let buf = h.fixed_result();
 
-    let mut aes_key = [0u8; KEYSIZE];
-    let mut mac_key = [0u8; KEYSIZE];
+    let mut aes_key = [0u8; KEY_SIZE];
+    let mut mac_key = [0u8; KEY_SIZE];
 
-    let (a, b) = buf.as_slice().split_at(KEYSIZE);
+    let (a, b) = buf.as_slice().split_at(KEY_SIZE);
     aes_key.copy_from_slice(&a);
     mac_key.copy_from_slice(&b);
 
@@ -35,8 +35,8 @@ pub(crate) fn derive_keys(key: &SymmetricKey) -> KeySet {
     }
 }
 
-pub(crate) fn generate_iv<R: Rng + CryptoRng>(r: &mut R) -> [u8; IVSIZE] {
-    let mut res = [0u8; IVSIZE];
+pub(crate) fn generate_iv<R: Rng + CryptoRng>(r: &mut R) -> [u8; IV_SIZE] {
+    let mut res = [0u8; IV_SIZE];
     r.fill_bytes(&mut res);
     res
 }

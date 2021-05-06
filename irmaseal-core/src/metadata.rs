@@ -8,18 +8,11 @@ use core::convert::TryFrom;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 
-#[allow(dead_code)]
-pub(crate) const KEYSIZE: usize = 32;
-pub(crate) const IVSIZE: usize = 16;
-#[allow(dead_code)]
-pub(crate) const VERIFIER_SIZE: usize = 32;
-pub(crate) const CIPHERTEXT_SIZE: usize = 144;
-
 /// Metadata which contains the version
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Metadata {
     pub ciphertext: ArrayVec<[u8; CIPHERTEXT_SIZE]>,
-    pub iv: ArrayVec<[u8; IVSIZE]>,
+    pub iv: ArrayVec<[u8; IV_SIZE]>,
     pub identity: Identity,
 }
 

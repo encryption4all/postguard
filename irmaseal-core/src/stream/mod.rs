@@ -19,4 +19,4 @@ pub enum StreamError {
 }
 
 pub(crate) type SymCrypt = ctr::Ctr64BE<aes::Aes256>;
-pub(crate) type Verifier = sha3::Sha3_256;
+pub(crate) type Mac = sha3::Sha3_256;
