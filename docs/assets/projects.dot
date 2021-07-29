@@ -1,0 +1,8 @@
+digraph D {
+    bls12_381 -> ibe;
+    ibe -> "irmaseal-core";
+    "irmaseal-core" -> "irmaseal-cli";
+    {"irmaseal-core", "irmars" -> "irmaseal-pkgd"};
+    irmago -> "irmaseal-pkgd" [style=dashed];
+    {"irmaseal-core", "irmajs" -> "irmaseal-thunderbird"};
+}
