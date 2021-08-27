@@ -25,6 +25,4 @@ base64 = "0.12"
 ibe = "0.1.4"
 
 [features]
-default = ["stream"]
-
-stream = ["aes", "ctr" ]
+stream = ["aes", "ctr"]
