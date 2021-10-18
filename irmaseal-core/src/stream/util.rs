@@ -1,5 +1,5 @@
 use crate::stream::*;
-use arrayvec::{Array, ArrayVec};
+use arrayvec::ArrayVec;
 
 /// A writable resource that accepts chunks of a bytestream.
 pub trait Writable {
@@ -70,12 +70,12 @@ impl<'a> Readable for SliceReader<'a, u8> {
     }
 }
 
-impl<A: Array<Item = u8>> Writable for ArrayVec<A> {
+impl<const CAP: usize> Writable for ArrayVec<u8, CAP> {
     fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
         unsafe {
             let len = self.len();
 
-            if len + data.len() > A::CAPACITY {
+            if len + data.len() > CAP {
                 return Err(StreamError::UpstreamWritableError);
             }
 

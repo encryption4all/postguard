@@ -5,12 +5,14 @@ use crate::*;
 use arrayvec::ArrayVec;
 use rand::RngCore;
 
-type BigBuf = ArrayVec<[u8; 65536]>;
+use ibe::kem::{cgw_fo::CGWFO, IBKEM};
+
+type BigBuf = ArrayVec<u8, 65536>;
 
 struct DefaultProps {
     pub i: Identity,
-    pub pk: ibe::kiltz_vahlis_one::PublicKey,
-    pub sk: ibe::kiltz_vahlis_one::SecretKey,
+    pub pk: <CGWFO as IBKEM>::Pk,
+    pub sk: <CGWFO as IBKEM>::Sk,
 }
 
 impl Default for DefaultProps {
@@ -23,7 +25,7 @@ impl Default for DefaultProps {
         )
         .unwrap();
 
-        let (pk, sk) = ibe::kiltz_vahlis_one::setup(&mut rng);
+        let (pk, sk) = CGWFO::setup(&mut rng);
 
         DefaultProps { i, pk, sk }
     }
@@ -57,8 +59,10 @@ fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
                 unconsumed,
                 header,
                 metadata,
+                version: v,
             } => {
                 assert_eq!(unconsumed, 0);
+                assert_eq!(v, VERSION_V2);
                 mrr = Some((header, metadata));
                 break;
             }
@@ -67,17 +71,33 @@ fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
 
     let (header, metadata) = mrr.unwrap();
 
-    let i2 = &metadata.identity;
+    let i2 = match metadata {
+        #[cfg(feature = "v1")]
+        Metadata::V1(ref x) => &x.identity,
+        Metadata::V2(ref x) => &x.identity,
+    };
+
     assert_eq!(&i, &i2);
-    let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
-    let usk = &UserSecretKey(usk);
+    let usk = UserSecretKey(CGWFO::extract_usk(
+        Some(&pk),
+        &sk,
+        &i2.derive::<CGWFO>().unwrap(),
+        &mut rng,
+    ));
+
+    let pk = PublicKey(*pk);
 
     let bufr = SliceReader::new(&buf[written..]);
-    let mut unsealer = Unsealer::new(&metadata, header, usk, bufr).unwrap();
-    let mut dst = BigBuf::new();
-    unsealer.write_to(&mut dst).unwrap();
+    if let Metadata::V2(m) = metadata {
+        let mut unsealer = Unsealer::new_v2(&m, header, &usk, &pk, bufr).unwrap();
+        let mut dst = BigBuf::new();
+        unsealer.write_to(&mut dst).unwrap();
 
-    (dst, unsealer.validate())
+        (dst, unsealer.validate())
+    } else {
+        // this else is required when feature "v1" is enabled
+        panic!("Should be v2")
+    }
 }
 
 fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {

@@ -1,10 +1,10 @@
-use arrayref::array_ref;
 use ctr::cipher::{NewCipher, StreamCipher};
 use digest::Digest;
 use rand::{CryptoRng, Rng};
 
 use crate::*;
 use crate::{stream::*, util::KeySet};
+use ibe::kem::cgw_fo::CGWFO;
 
 /// Sealer for an bytestream, which converts it into an IRMAseal encrypted bytestream.
 pub struct Sealer<'a, W: Writable> {
@@ -16,7 +16,7 @@ pub struct Sealer<'a, W: Writable> {
 impl<'a, W: Writable> Sealer<'a, W> {
     pub fn new<R: Rng + CryptoRng>(
         i: Identity,
-        pk: &PublicKey,
+        pk: &PublicKey<CGWFO>,
         rng: &mut R,
         w: &'a mut W,
     ) -> Result<Sealer<'a, W>, Error> {
@@ -25,16 +25,17 @@ impl<'a, W: Writable> Sealer<'a, W> {
             header: h,
             keys: KeySet { aes_key, mac_key },
         } = Metadata::new(i, pk, rng)?;
+        if let Metadata::V2(x) = m {
+            let encrypter = SymCrypt::new(&aes_key.into(), &x.iv.into());
+            let mut mac = Mac::default();
+            mac.input(&mac_key);
+            mac.input(&h);
+            w.write(&h).map_err(|_| Error::ConstraintViolation)?;
 
-        let iv: &[u8; IV_SIZE] = array_ref!(m.iv.as_slice(), 0, IV_SIZE);
-
-        let encrypter = SymCrypt::new(&aes_key.into(), &(*iv).into());
-        let mut mac = Mac::default();
-        mac.input(&mac_key);
-        mac.input(&h);
-        w.write(&h).map_err(|_| Error::ConstraintViolation)?;
-
-        Ok(Sealer { encrypter, mac, w })
+            Ok(Sealer { encrypter, mac, w })
+        } else {
+            Err(Error::ConstraintViolation)
+        }
     }
 }
 

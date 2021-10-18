@@ -12,17 +12,18 @@ categories = ["cryptography", "no-std"]
 [dependencies]
 aes = { version = "0.7.0", optional = true }
 ctr = { version = "0.7.0", optional = true }
-
 digest = { version = "0.8.1" }
-rand = { version = "0.7.0" }
+rand = { version = "0.8.4" }
 sha3 = { version = "0.8.2" }
 arrayref = "0.3.5"
-arrayvec = { version = "0.5", features = ["array-sizes-129-255", "serde"] }
+arrayvec = { version = "0.7.1", features = ["serde"] }
 subtle = "2.3"
-serde = { version = "1.0.99", features = ["derive"] }
-postcard = "0.5.1"
+postcard = "0.7.2"
 base64 = "0.12"
-ibe = "0.1.4"
+ibe = { path = "../../ibe", features = ["cgwfo"] }
+serde-big-array = { version = "0.3.2", features = ["const-generics"] }
+serde = { version = "1.0.126", features = ["derive"] }
 
 [features]
 stream = ["aes", "ctr"]
+v1 = ["ibe/kv1"]

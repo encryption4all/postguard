@@ -1,16 +1,19 @@
 use actix_web::web::{Data, HttpResponse, Json};
 use futures::future::Future;
+use ibe::kem::IBKEM;
 use irmaseal_core::api::{KeyChallenge, KeyRequest};
 
 use irma::client::Client;
 use irma::request::*;
 
-use crate::server::AppState;
+use crate::server::MasterKeyPair;
 
-pub fn request(
-    state: Data<AppState>,
+pub fn request<K: IBKEM>(
+    state: Data<(String, MasterKeyPair<K>)>,
     value: Json<KeyRequest>,
 ) -> impl Future<Item = HttpResponse, Error = crate::Error> {
+    let (irma_url, _) = state.get_ref().clone();
+
     let kr = value.into_inner();
     let a = kr.attribute;
 
@@ -25,7 +28,7 @@ pub fn request(
         labels: None,
     };
 
-    let client = Client::new(state.irma_server_host.clone()).unwrap();
+    let client = Client::new(irma_url.clone()).unwrap();
 
     client.request(&dr).then(move |sp| {
         let sp = sp.or(Err(crate::Error::UpstreamError))?;

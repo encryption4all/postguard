@@ -2,30 +2,29 @@ use core::convert::TryInto;
 
 use crate::*;
 
-/// First stage of opening an irmaseal encrypted bytestream.
-/// It reads the IRMAseal header and yields the complete header
-/// buffer and the metadata.
+/// First stage of opening an irmaseal encrypted bytestream.  It reads the IRMAseal header and
+/// yields the complete header buffer and the metadata.
 pub struct MetadataReader {
-    // Used to keep track of complete
+    /// Used to keep track of complete header buffer.
     header_buf: HeaderBuf,
-    // How many bytes we still need to read at least
+    /// How many bytes we still need to read at least.
     remaining_bytes: usize,
 }
 
 pub enum MetadataReaderResult {
     Hungry,
     Saturated {
-        // If more bytes where written
-        // then where necessary for the
-        // metadata this indicates
-        // how many bytes do not belong
-        // to the metadata
+        /// If more bytes where written then where necessary for the metadata this indicates how
+        /// many bytes do not belong to the metadata.
         unconsumed: usize,
-        // The raw header buffer
-        // must be used to start the MAC
+        /// The raw header can be used as associated data in an AEAD scheme,
+        /// therefore it is useful to return it as well.
         header: HeaderBuf,
-        // The metadata
+        /// The metadata.
         metadata: Metadata,
+        /// Version.
+        // TODO: this is kind of redundant now that Metadata is an enum
+        version: u16,
     },
 }
 
@@ -37,8 +36,7 @@ impl MetadataReader {
         }
     }
 
-    // How many bytes can be written safely without
-    // writing too much
+    /// How many bytes can be written safely without writing too much
     pub fn get_safe_write_size(&self) -> usize {
         self.remaining_bytes
     }
@@ -72,33 +70,34 @@ impl MetadataReader {
         }
 
         if self.remaining_bytes == 0 {
-            let m = self.parse_metadata()?;
+            let (m, v) = self.parse_metadata()?;
             self.remaining_bytes = PREAMBLE_SIZE;
             Ok(MetadataReaderResult::Saturated {
                 unconsumed: buf_size - consumed,
                 header: core::mem::take(&mut self.header_buf),
                 metadata: m,
+                version: v,
             })
         } else {
             Ok(MetadataReaderResult::Hungry)
         }
     }
 
-    fn parse_metadata(&self) -> Result<Metadata, Error> {
+    fn parse_metadata(&self) -> Result<(Metadata, u16), Error> {
         let header_slice: &[u8] = self.header_buf.as_slice();
 
         if header_slice[0..PRELUDE_SIZE] != PRELUDE {
-            return Err(Error::NotIRMASEAL);
+            Err(Error::NotIRMASEAL)?;
         }
 
-        let _version = u16::from_be_bytes(
+        let version = u16::from_be_bytes(
             header_slice[PRELUDE_SIZE..PRELUDE_SIZE + mem::size_of::<u16>()]
                 .try_into()
                 .unwrap(),
         );
 
-        if _version != VERSION_V1 {
-            return Err(Error::IncorrectVersion);
+        if version != VERSION_V1 && version != VERSION_V2 {
+            Err(Error::IncorrectVersion)?;
         }
 
         let meta_len: usize = u32::from_be_bytes(
@@ -116,8 +115,19 @@ impl MetadataReader {
 
         let metadata_buf = &header_slice[PREAMBLE_SIZE..PREAMBLE_SIZE + meta_len];
 
-        let metadata = postcard::from_bytes(metadata_buf).or(Err(Error::FormatViolation))?;
+        let metadata = match version {
+            #[cfg(feature = "v1")]
+            VERSION_V1 => {
+                // We have to wrap the first version in the Metadata enum.
+                Metadata::V1(postcard::from_bytes(metadata_buf).or(Err(Error::FormatViolation))?)
+            }
+            VERSION_V2..=VERSION_V2 => {
+                // From version 2 and onward we use postcard to serialize the enum
+                postcard::from_bytes(metadata_buf).or(Err(Error::FormatViolation))?
+            }
+            _ => Err(Error::IncorrectVersion)?, // should not be possible
+        };
 
-        Ok(metadata)
+        Ok((metadata, version))
     }
 }

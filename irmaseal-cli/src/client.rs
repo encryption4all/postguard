@@ -1,7 +1,16 @@
+use ibe::kem::{Scheme, IBKEM};
+use irmaseal_core::{api::*, PublicKey};
 use reqwest::{ClientBuilder, Url};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use irmaseal_core::api::*;
+// TODO: Maybe move this to core?
+fn version<K: IBKEM>() -> &'static str {
+    match K::SCHEME {
+        Scheme::KV1 => "v1",
+        Scheme::CGWFO => "v2",
+    }
+}
 
 pub struct Client<'a> {
     baseurl: &'a str,
@@ -17,8 +26,8 @@ pub struct OwnedKeyChallenge {
 }
 
 impl<'a> Client<'a> {
-    pub fn new(baseurl: &'a str) -> Result<Client, reqwest::Error> {
-        let client = ClientBuilder::new().build().unwrap();
+    pub fn new(baseurl: &'a str) -> Result<Client, ClientError> {
+        let client = ClientBuilder::new().build()?;
 
         Ok(Client { baseurl, client })
     }
@@ -27,19 +36,23 @@ impl<'a> Client<'a> {
         Url::parse(&self.baseurl).unwrap().join(u).unwrap()
     }
 
-    pub async fn parameters(&self) -> Result<Parameters, ClientError> {
+    pub async fn parameters<K>(&self) -> Result<Parameters<K>, ClientError>
+    where
+        K: IBKEM,
+        PublicKey<K>: DeserializeOwned,
+    {
         self.client
-            .get(self.create_url("v1/parameters"))
+            .get(self.create_url(&format!("{}/parameters", version::<K>())))
             .send()
             .await?
             .error_for_status()?
-            .json::<Parameters>()
+            .json::<Parameters<K>>()
             .await
     }
 
     pub async fn request(&self, kr: &KeyRequest) -> Result<OwnedKeyChallenge, ClientError> {
         self.client
-            .post(self.create_url("v1/request"))
+            .post(self.create_url("v2/request"))
             .json(kr)
             .send()
             .await?
@@ -48,17 +61,25 @@ impl<'a> Client<'a> {
             .await
     }
 
-    pub async fn result(&self, token: &str, timestamp: u64) -> Result<KeyResponse, ClientError> {
+    pub async fn result<K>(
+        &self,
+        token: &str,
+        timestamp: u64,
+    ) -> Result<KeyResponse<K>, ClientError>
+    where
+        K: IBKEM,
+        KeyResponse<K>: DeserializeOwned,
+    {
         self.client
             .get(
-                self.create_url("v1/request/")
+                self.create_url(&format!("{}/request/", version::<K>()))
                     .join(&format!("{}/{}", token, timestamp))
                     .unwrap(),
             )
             .send()
             .await?
             .error_for_status()?
-            .json::<KeyResponse>()
+            .json::<KeyResponse<K>>()
             .await
     }
 }

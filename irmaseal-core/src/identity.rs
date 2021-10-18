@@ -1,20 +1,22 @@
 use super::Error;
 use arrayvec::{ArrayString, ArrayVec};
 use core::convert::TryFrom;
+use ibe::kem::IBKEM;
+use ibe::Derive;
 use serde::{Deserialize, Serialize};
 
 const IDENTITY_UNSET: u8 = 0xFF;
 
 // Must be at least 8+255+254 = 517
 #[allow(dead_code)]
-type IdentityBuf = ArrayVec<[u8; 1024]>;
+type IdentityBuf = ArrayVec<u8, 1024>;
 
 /// An IRMAseal Attribute, which is a simple case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Attribute {
     #[serde(rename = "type")]
-    pub atype: ArrayString<[u8; 255]>,
-    pub value: Option<ArrayString<[u8; 254]>>,
+    pub atype: ArrayString<255>,
+    pub value: Option<ArrayString<254>>,
 }
 
 /// An IRMAseal identity, from which internally a Waters identity can be derived.
@@ -29,9 +31,9 @@ impl Attribute {
     ///
     /// Throws a ConstraintViolation when the type or value strings are too long.
     pub fn new(atype: &str, value: Option<&str>) -> Result<Self, Error> {
-        let atype = ArrayString::<[u8; 255]>::from(atype).or(Err(Error::ConstraintViolation))?;
+        let atype = ArrayString::<255>::from(atype).or(Err(Error::ConstraintViolation))?;
         let value = value
-            .map(|v| Ok(ArrayString::<[u8; 254]>::from(v).or(Err(Error::ConstraintViolation))?))
+            .map(|v| Ok(ArrayString::<254>::from(v).or(Err(Error::ConstraintViolation))?))
             .transpose()?;
 
         Ok(Attribute { atype, value })
@@ -51,7 +53,10 @@ impl Identity {
 
     /// Derive the corresponding Waters identity in a deterministic way.
     /// Uses `ibe::kiltz_vahlis_one::Identity:derive` internally.
-    pub fn derive(&self) -> Result<ibe::kiltz_vahlis_one::Identity, Error> {
+    pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error>
+    where
+        K::Id: Derive,
+    {
         let mut buf = IdentityBuf::new();
 
         buf.try_extend_from_slice(&self.timestamp.to_be_bytes())
@@ -88,7 +93,7 @@ impl Identity {
             }
         }?;
 
-        Ok(ibe::kiltz_vahlis_one::Identity::derive(&buf))
+        Ok(<K as IBKEM>::Id::derive(&buf))
     }
 }
 

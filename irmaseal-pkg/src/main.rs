@@ -1,20 +1,20 @@
 mod error;
 mod generate;
 mod handlers;
+mod opts;
 mod server;
 mod util;
 
 pub use crate::error::*;
 
-use clap::{load_yaml, App};
+use crate::opts::{Opts, Subcommand};
+use clap::Clap;
 
 fn main() {
-    let yaml = load_yaml!("cli.yml");
-    let matches = App::from_yaml(yaml).get_matches();
+    let opts = Opts::parse();
 
-    if let Some(matches) = matches.subcommand_matches("generate") {
-        crate::generate::exec(matches);
-    } else if let Some(matches) = matches.subcommand_matches("server") {
-        crate::server::exec(matches);
+    match opts.subcmd {
+        Subcommand::Gen(o) => crate::generate::exec(&o),
+        Subcommand::Server(o) => crate::server::exec(o),
     }
 }

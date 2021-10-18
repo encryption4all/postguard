@@ -1,4 +1,4 @@
-use clap::ArgMatches;
+use crate::opts::EncOpts;
 use irmaseal_core::stream::Sealer;
 use irmaseal_core::Identity;
 use std::path::Path;
@@ -11,35 +11,24 @@ fn now() -> u64 {
         .as_secs()
 }
 
-pub async fn exec(m: &ArgMatches<'_>) {
+pub async fn exec(enc_opts: EncOpts) {
     let mut rng = rand::thread_rng();
 
-    let input = m.value_of("INPUT").unwrap();
-    let email = m.value_of("email");
-    let bsn = m.value_of("bsn");
-    let server = m.value_of("server").unwrap();
-    let timestamp = now();
+    let EncOpts {
+        input,
+        identity,
+        pkg,
+    } = enc_opts;
 
-    let i = match (email, bsn) {
-        (Some(email), None) => {
-            Identity::new(timestamp, "pbdf.sidn-pbdf.email.email", Some(email)).unwrap()
-        }
-        (None, Some(bsn)) => {
-            Identity::new(timestamp, "pbdf.gemeente.personalData.bsn", Some(bsn)).unwrap()
-        }
-        _ => {
-            eprintln!("Expected either email or BSN");
-            return;
-        }
-    };
-
-    let client = crate::client::Client::new(server).unwrap();
+    // TODO: value should be optional
+    let i = Identity::new(now(), &identity.0, Some(&identity.1)).unwrap();
+    let client = crate::client::Client::new(&pkg).unwrap();
 
     let parameters = client.parameters().await.unwrap();
-    eprintln!("Fetched parameters from {}", server);
+    eprintln!("Fetched parameters from {}", pkg);
     eprintln!("Encrypting for recipient {:#?}", i);
 
-    let input_path = Path::new(input);
+    let input_path = Path::new(&input);
     let file_name_path = input_path.file_name().unwrap();
     let file_name = file_name_path.to_str().unwrap();
 

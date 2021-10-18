@@ -1,14 +1,19 @@
 //! Structs that define the IRMAseal REST API protocol.
 
 use crate::*;
+use ibe::kem::IBKEM;
 use serde::{Deserialize, Serialize};
 
 /// Set of public parameters for the Private Key Generator (PKG).
 #[derive(Serialize, Deserialize)]
-pub struct Parameters {
+#[serde(bound(
+    serialize = "PublicKey<K>: Serialize",
+    deserialize = "PublicKey<K>: Deserialize<'de>"
+))]
+pub struct Parameters<K: IBKEM> {
     pub format_version: u8,
     pub max_age: u64,
-    pub public_key: PublicKey,
+    pub public_key: PublicKey<K>,
 }
 
 /// A request for the user secret key for an identity.
@@ -48,10 +53,14 @@ pub enum KeyStatus {
 
 /// The response to the key request.
 #[derive(Serialize, Deserialize)]
-pub struct KeyResponse {
+pub struct KeyResponse<K: IBKEM> {
     /// The current status of the key request.
     pub status: KeyStatus,
     /// The key will remain `None` until the status is `DoneValid`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<UserSecretKey>,
+    #[serde(bound(
+        serialize = "UserSecretKey<K>: Serialize",
+        deserialize = "UserSecretKey<K>: Deserialize<'de>"
+    ))]
+    pub key: Option<UserSecretKey<K>>,
 }

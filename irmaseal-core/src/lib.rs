@@ -25,10 +25,21 @@ pub enum Error {
     IncorrectVersion,
     ConstraintViolation,
     FormatViolation,
+    DecapsulationError,
 }
 
-// Version identifier
-pub(crate) const VERSION_V1: u16 = 0;
+/// Version 1 (legacy).
+///
+/// This version used the Kiltz-Vahlis-1 scheme.
+pub const VERSION_V1: u16 = 0;
+
+/// Version 2.
+///
+/// This version uses the CGW anonymous IBE scheme to construct
+/// a KEM variant. This scheme can encapsulate the same shared
+/// secret for multiple recipients. For this version we needed to
+/// enlargen metadata header buffer.
+pub const VERSION_V2: u16 = 1;
 
 /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
 pub(crate) const PRELUDE_SIZE: usize = 4;
@@ -59,7 +70,7 @@ pub(crate) const MAX_METADATA_SIZE: usize = 8182;
 // Headerbuf is the preamble size plus the metadata
 pub(crate) const MAX_HEADERBUF_SIZE: usize = PREAMBLE_SIZE + MAX_METADATA_SIZE;
 
-type HeaderBuf = ArrayVec<[u8; MAX_HEADERBUF_SIZE]>;
+type HeaderBuf = ArrayVec<u8, MAX_HEADERBUF_SIZE>;
 
 // How large a block is that has to be encrypted using
 // the symmetric crypto algorithm

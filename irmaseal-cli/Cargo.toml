@@ -1,21 +1,49 @@
 [package]
-name = "irmaseal-cli"
-description = "Commandline interface for IRMAseal"
-version = "0.1.4"
 authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
+description = "Commandline interface for IRMAseal"
 edition = "2018"
 license = "MIT"
+name = "irmaseal-cli"
+version = "0.1.4"
 
 [dependencies]
-irmaseal-core = { path = "../irmaseal-core", features = ["stream"] }
-ibe = "0.1.3"
-
-tokio = { version = "0.2.5", features = ["rt-threaded", "time"] }
 futures = "0.3.4"
-qrcode = { version = "0.12.0", default-features = false }
-clap = { version = "2.33.0", features = ["yaml"] }
-rand = "0.7.3"
-arrayvec = { version = "0.5.1", features = ["array-sizes-129-255"] }
-serde = "1.0.104"
-serde_json = { version = "1.0.57" }
-reqwest = { version = "0.10.4", features = ["rustls-tls", "json"], default-features = false }
+rand = "0.8.4"
+
+[dependencies.arrayvec]
+features = ["serde"]
+version = "0.7.1"
+
+[dependencies.clap]
+features = ["derive"]
+version = "3.0.0-beta.4"
+
+[dependencies.ibe]
+path = "../../ibe"
+
+[dependencies.irmaseal-core]
+features = ["stream"]
+path = "../irmaseal-core"
+
+[dependencies.qrcode]
+default-features = false
+version = "0.12.0"
+
+[dependencies.reqwest]
+default-features = false
+features = ["rustls-tls", "json"]
+version = "0.10.4"
+
+[dependencies.serde]
+features = ["derive"]
+version = "*"
+
+[dependencies.serde_json]
+version = "1.0.57"
+
+[dependencies.tokio]
+features = ["rt-threaded", "time"]
+version = "0.2.5"
+
+[features]
+v1 = ["irmaseal-core/v1", "ibe/kv1"]

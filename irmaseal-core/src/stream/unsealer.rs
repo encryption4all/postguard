@@ -1,9 +1,43 @@
 use crate::*;
 use crate::{stream::*, util::KeySet};
-
-use arrayref::array_ref;
 use ctr::cipher::{NewCipher, StreamCipher};
 use digest::Digest;
+use ibe::kem::cgw_fo::CGWFO;
+
+#[cfg(feature = "v1")]
+mod v1 {
+    use super::*;
+    use crate::metadata::v1::V1Metadata;
+    use core::convert::TryInto;
+    use ibe::kem::kiltz_vahlis_one::KV1;
+
+    impl<R: Readable> Unsealer<R> {
+        pub fn new_v1(
+            metadata: &V1Metadata,
+            header: HeaderBuf,
+            usk: &UserSecretKey<KV1>,
+            r: R,
+        ) -> Result<Unsealer<R>, Error> {
+            let KeySet { aes_key, mac_key } = metadata.derive_keys(usk)?;
+
+            let mut mac = Mac::default();
+            mac.input(&mac_key);
+            mac.input(&header);
+
+            let iv: [u8; IV_SIZE] = metadata.iv.as_slice().try_into().unwrap();
+
+            let decrypter = SymCrypt::new(&aes_key.into(), &iv.into());
+
+            Ok(Unsealer {
+                decrypter,
+                mac,
+                r,
+                resultbuf: None,
+            })
+        }
+    }
+}
+
 /// Unseal IRMAseal encrypted bytestream.
 ///
 /// **Warning**: will only validate the authenticity of the plaintext when calling `validate`.
@@ -15,21 +49,20 @@ pub struct Unsealer<R: Readable> {
 }
 
 impl<R: Readable> Unsealer<R> {
-    pub fn new(
-        metadata: &Metadata,
+    pub fn new_v2(
+        metadata: &V2Metadata,
         header: HeaderBuf,
-        usk: &UserSecretKey,
+        usk: &UserSecretKey<CGWFO>,
+        mpk: &PublicKey<CGWFO>,
         r: R,
     ) -> Result<Unsealer<R>, Error> {
-        let KeySet { aes_key, mac_key } = metadata.derive_keys(usk)?;
+        let KeySet { aes_key, mac_key } = metadata.derive_keys(usk, mpk)?;
 
         let mut mac = Mac::default();
         mac.input(&mac_key);
         mac.input(&header);
 
-        let iv: &[u8; IV_SIZE] = array_ref!(metadata.iv.as_slice(), 0, IV_SIZE);
-
-        let decrypter = SymCrypt::new(&aes_key.into(), &(*iv).into());
+        let decrypter = SymCrypt::new(&aes_key.into(), &metadata.iv.into());
 
         Ok(Unsealer {
             decrypter,

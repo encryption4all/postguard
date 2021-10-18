@@ -1,0 +1,3 @@
+[workspace]
+
+members = ["irmaseal-core", "irmaseal-cli", "irmaseal-pkg"]

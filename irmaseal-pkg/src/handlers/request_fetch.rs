@@ -1,12 +1,13 @@
 use actix_web::web::{Data, HttpResponse, Path};
 use futures::future::{ok, Future};
+use ibe::kem::IBKEM;
 use irmaseal_core::api::{KeyResponse, KeyStatus};
-use irmaseal_core::Identity;
+use irmaseal_core::{Identity, UserSecretKey};
 
 use irma::client::Client;
 use irma::session::*;
 
-use crate::server::AppState;
+use crate::server::MasterKeyPair;
 use crate::Error;
 
 /// Fetch identity iff valid, or else yield nothing.
@@ -30,17 +31,12 @@ fn fetch_identity(
     Identity::new(timestamp, &disclosed.id, Some(&v)).ok()
 }
 
-pub fn request_fetch(
-    state: Data<AppState>,
+pub fn request_fetch<K: IBKEM>(
+    state: Data<(String, MasterKeyPair<K>)>,
     path: Path<(String, u64)>,
 ) -> impl Future<Item = HttpResponse, Error = crate::Error> {
     let (token, timestamp) = path.into_inner();
-
-    let AppState {
-        pk,
-        sk,
-        irma_server_host,
-    } = state.get_ref().clone();
+    let (irma_url, mpk) = state.get_ref().clone();
 
     ok(())
         .and_then(move |_| {
@@ -55,7 +51,7 @@ pub fn request_fetch(
             }
         })
         .and_then(move |_| {
-            let client = Client::new(irma_server_host).unwrap();
+            let client = Client::new(irma_url.to_string()).unwrap();
             client
                 .result(&SessionToken(token))
                 .map_err(|e| match e.status() {
@@ -73,13 +69,13 @@ pub fn request_fetch(
                 SessionStatus::Timeout => d(KeyStatus::Timeout),
                 SessionStatus::Done => match fetch_identity(timestamp, &r.disclosed) {
                     Some(i) => {
-                        let k = i.derive().map_err(|_e| crate::Error::Unexpected)?;
+                        let k = i.derive::<K>().map_err(|_e| crate::Error::Unexpected)?;
                         let mut rng = rand::thread_rng();
-                        let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &k, &mut rng);
+                        let usk = K::extract_usk(Some(&mpk.pk), &mpk.sk, &k, &mut rng);
 
                         KeyResponse {
                             status: KeyStatus::DoneValid,
-                            key: Some(usk.into()),
+                            key: Some(UserSecretKey::<K>(usk)),
                         }
                     }
                     None => d(KeyStatus::DoneInvalid),

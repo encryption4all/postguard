@@ -15,6 +15,7 @@ impl ResponseError for Error {
             Error::ChronologyError => HttpResponse::BadRequest(),
             Error::SessionNotFound => HttpResponse::NotFound(),
             Error::UpstreamError => HttpResponse::ServiceUnavailable(),
+            Error::VersionError => HttpResponse::BadRequest(),
             Error::Unexpected => HttpResponse::InternalServerError(),
         };
 
@@ -28,6 +29,7 @@ pub enum Error {
     ChronologyError,
     SessionNotFound,
     UpstreamError,
+    VersionError,
     Unexpected,
 }
 
@@ -41,6 +43,7 @@ impl Display for Error {
                 Error::ChronologyError => "chronology error",
                 Error::SessionNotFound => "session not found",
                 Error::UpstreamError => "upstream error",
+                Error::VersionError => "no such protocol version",
                 Error::Unexpected => "unexpected",
             }
         )

@@ -1,12 +1,20 @@
-use clap::ArgMatches;
-use irmaseal_core::stream::Unsealer;
-use irmaseal_core::{api::*, stream::Readable, MetadataReader, MetadataReaderResult};
-
 use core::panic;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::delay_for;
 
 use crate::client::{Client, ClientError, OwnedKeyChallenge};
+use crate::opts::DecOpts;
+use crate::util::*;
+
+use ibe::kem::cgw_fo::CGWFO;
+use ibe::kem::IBKEM;
+
+use irmaseal_core::stream::Unsealer;
+use irmaseal_core::{api::*, stream::Readable, Metadata, MetadataReader, MetadataReaderResult};
+
+#[cfg(feature = "v1")]
+use ibe::kem::kiltz_vahlis_one::KV1;
 
 fn print_qr(s: &str) {
     let code = qrcode::QrCode::new(s).unwrap();
@@ -19,13 +27,16 @@ fn print_qr(s: &str) {
     println!("\n\n{}", scode);
 }
 
-async fn wait_on_session(
-    client: Client<'_>,
+async fn wait_on_session<K: IBKEM>(
+    client: &Client<'_>,
     sp: &OwnedKeyChallenge,
     timestamp: u64,
-) -> Result<Option<KeyResponse>, ClientError> {
+) -> Result<Option<KeyResponse<K>>, ClientError>
+where
+    KeyResponse<K>: DeserializeOwned,
+{
     for _ in 0..120 {
-        let r: KeyResponse = client.result(&sp.token, timestamp).await?;
+        let r: KeyResponse<K> = client.result(&sp.token, timestamp).await?;
 
         if r.status != KeyStatus::DoneValid {
             delay_for(Duration::new(0, 500_000_000)).await;
@@ -37,9 +48,8 @@ async fn wait_on_session(
     Ok(None)
 }
 
-pub async fn exec(m: &ArgMatches<'_>) {
-    let input = m.value_of("INPUT").unwrap();
-    let server = m.value_of("server").unwrap();
+pub async fn exec(dec_opts: DecOpts) {
+    let DecOpts { input, pkg } = dec_opts;
 
     eprintln!("Opening {}", input);
 
@@ -51,12 +61,12 @@ pub async fn exec(m: &ArgMatches<'_>) {
         panic!("Input file name does not end with .irma")
     };
 
-    let mut r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
+    let mut r = crate::util::FileReader::new(std::fs::File::open(&input).unwrap());
 
     let read_blocks_size = 32;
     let mut meta_reader = MetadataReader::new();
 
-    let (_, header, metadata) = loop {
+    let (_, header, metadata, version) = loop {
         let read_size = std::cmp::min(read_blocks_size, meta_reader.get_safe_write_size());
         match meta_reader
             .write(r.read_bytes_strict(read_size).unwrap())
@@ -67,22 +77,27 @@ pub async fn exec(m: &ArgMatches<'_>) {
                 unconsumed,
                 header,
                 metadata,
-            } => break (unconsumed, header, metadata),
+                version,
+            } => break (unconsumed, header, metadata, version),
         }
     };
 
-    let timestamp = metadata.identity.timestamp;
+    eprintln!("IRMASeal format version: {:#?}", version + 1);
 
-    let client = Client::new(server).unwrap();
+    let identity = match metadata {
+        #[cfg(feature = "v1")]
+        Metadata::V1(ref m) => &m.identity,
+        Metadata::V2(ref m) => &m.identity,
+    };
 
-    eprintln!(
-        "Requesting private key for {:#?}",
-        metadata.identity.attribute
-    );
+    let timestamp = identity.timestamp;
+    let client = Client::new(&pkg).unwrap();
+
+    eprintln!("Requesting private key for {:#?}", identity.attribute);
 
     let sp: OwnedKeyChallenge = client
         .request(&KeyRequest {
-            attribute: metadata.identity.attribute.clone(),
+            attribute: identity.attribute.clone(),
         })
         .await
         .unwrap();
@@ -91,21 +106,33 @@ pub async fn exec(m: &ArgMatches<'_>) {
 
     print_qr(&sp.qr);
 
-    if let Some(kr) = wait_on_session(client, &sp, timestamp).await.unwrap() {
-        eprintln!("Disclosure successful, decrypting {}", input);
-
-        let mut unsealer = crate::util::FileUnsealerRead::new(
-            Unsealer::new(&metadata, header, &kr.key.unwrap(), r).unwrap(),
-        );
-
-        std::io::copy(
-            &mut unsealer,
-            &mut std::fs::File::create(out_file_name).unwrap(),
-        )
-        .unwrap();
-
-        eprintln!("Succesfully decrypted.");
-    } else {
-        eprintln!("Did not scan the QR code and disclose in time");
+    let mut unsealer = match metadata {
+        #[cfg(feature = "v1")]
+        Metadata::V1(m) => {
+            let kr = wait_on_session::<KV1>(&client, &sp, timestamp)
+                .await
+                .unwrap();
+            FileUnsealerRead::new(
+                Unsealer::new_v1(&m, header, &kr.unwrap().key.unwrap(), r).unwrap(),
+            )
+        }
+        Metadata::V2(m) => {
+            let kr = wait_on_session::<CGWFO>(&client, &sp, timestamp)
+                .await
+                .unwrap();
+            let pars = client.parameters::<CGWFO>().await.unwrap();
+            FileUnsealerRead::new(
+                Unsealer::new_v2(&m, header, &kr.unwrap().key.unwrap(), &pars.public_key, r)
+                    .unwrap(),
+            )
+        }
     };
+
+    std::io::copy(
+        &mut unsealer,
+        &mut std::fs::File::create(out_file_name).unwrap(),
+    )
+    .unwrap();
+
+    eprintln!("Successful decryption")
 }
