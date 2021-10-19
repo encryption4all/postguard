@@ -1,16 +1,8 @@
-use ibe::kem::{Scheme, IBKEM};
-use irmaseal_core::{api::*, PublicKey};
+use ibe::kem::IBKEM;
+use irmaseal_core::{api::*, util::version, PublicKey};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-
-// TODO: Maybe move this to core?
-fn version<K: IBKEM>() -> &'static str {
-    match K::SCHEME {
-        Scheme::KV1 => "v1",
-        Scheme::CGWFO => "v2",
-    }
-}
 
 pub struct Client<'a> {
     baseurl: &'a str,
@@ -42,7 +34,7 @@ impl<'a> Client<'a> {
         PublicKey<K>: DeserializeOwned,
     {
         self.client
-            .get(self.create_url(&format!("{}/parameters", version::<K>())))
+            .get(self.create_url(&format!("{}/parameters", version::<K>().unwrap())))
             .send()
             .await?
             .error_for_status()?
@@ -72,7 +64,7 @@ impl<'a> Client<'a> {
     {
         self.client
             .get(
-                self.create_url(&format!("{}/request/", version::<K>()))
+                self.create_url(&format!("{}/request/", version::<K>().unwrap()))
                     .join(&format!("{}/{}", token, timestamp))
                     .unwrap(),
             )

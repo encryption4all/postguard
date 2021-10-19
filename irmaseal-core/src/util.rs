@@ -1,8 +1,17 @@
 use core::convert::TryInto;
 
 use crate::*;
-use ibe::kem::SharedSecret;
+use ibe::kem::{SharedSecret, IBKEM};
 use rand::{CryptoRng, Rng};
+
+/// Maps schemes to protocol version
+pub fn version<K: IBKEM>() -> Result<&'static str, Error> {
+    match K::IDENTIFIER {
+        "kv1" => Ok("v1"),
+        "cgwfo" => Ok("v2"),
+        _ => Err(Error::VersionError),
+    }
+}
 
 #[derive(Clone)]
 pub struct KeySet {

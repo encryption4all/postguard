@@ -25,6 +25,8 @@ impl<'a, W: Writable> Sealer<'a, W> {
             header: h,
             keys: KeySet { aes_key, mac_key },
         } = Metadata::new(i, pk, rng)?;
+
+        #[allow(irrefutable_let_patterns)]
         if let Metadata::V2(x) = m {
             let encrypter = SymCrypt::new(&aes_key.into(), &x.iv.into());
             let mut mac = Mac::default();

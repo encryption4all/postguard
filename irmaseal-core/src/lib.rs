@@ -26,6 +26,7 @@ pub enum Error {
     ConstraintViolation,
     FormatViolation,
     DecapsulationError,
+    VersionError,
 }
 
 /// Version 1 (legacy).
