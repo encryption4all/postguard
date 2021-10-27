@@ -1,5 +1,6 @@
 use actix_web::web::{Data, HttpResponse, Json};
-use futures::future::Future;
+use actix_web::Responder;
+use futures::future::{ready, Ready};
 use ibe::kem::IBKEM;
 use irmaseal_core::api::{KeyChallenge, KeyRequest};
 
@@ -8,10 +9,21 @@ use irma::request::*;
 
 use crate::server::MasterKeyPair;
 
-pub fn request<K: IBKEM>(
+struct WrappedKeyChallenge<'a>(KeyChallenge<'a>);
+
+impl<'a> Responder for WrappedKeyChallenge<'a> {
+    type Error = crate::Error;
+    type Future = Ready<Result<HttpResponse, crate::Error>>;
+
+    fn respond_to(self, req: &actix_web::HttpRequest) -> Self::Future {
+        ready(Ok(HttpResponse::Ok().json(self.0)))
+    }
+}
+
+pub async fn request<K: IBKEM>(
     state: Data<(String, MasterKeyPair<K>)>,
     value: Json<KeyRequest>,
-) -> impl Future<Item = HttpResponse, Error = crate::Error> {
+) -> impl Responder {
     let (irma_url, _) = state.get_ref().clone();
 
     let kr = value.into_inner();
@@ -30,12 +42,17 @@ pub fn request<K: IBKEM>(
 
     let client = Client::new(irma_url.clone()).unwrap();
 
-    client.request(&dr).then(move |sp| {
-        let sp = sp.or(Err(crate::Error::UpstreamError))?;
-
-        let qr = &serde_json::to_string(&sp.session_ptr).or(Err(crate::Error::Unexpected))?;
-        let token: &str = (&sp.token).into();
-
-        Ok(HttpResponse::Ok().json(KeyChallenge { qr, token }))
+    //    client.request(&dr).then(move |sp| {
+    //        let sp = sp.or(Err(crate::Error::UpstreamError))?;
+    //
+    //        let qr = &serde_json::to_string(&sp.session_ptr).or(Err(crate::Error::Unexpected))?;
+    //        let token: &str = (&sp.token).into();
+    //
+    //        Ok(HttpResponse::Ok().json(KeyChallenge { qr, token }))
+    //    })
+    //
+    WrappedKeyChallenge(KeyChallenge {
+        qr: &"bla",
+        token: &"bla",
     })
 }

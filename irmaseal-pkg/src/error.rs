@@ -1,25 +1,26 @@
-use actix_web::{HttpResponse, ResponseError};
+use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use serde_json::json;
 use std::fmt::{Display, Formatter};
 
 /// Show the error as an HTTP response for Actix-web.
 impl ResponseError for Error {
-    fn render_response(&self) -> HttpResponse {
+    fn error_response(&self) -> HttpResponse {
         let body = json!({
             "error": true,
             "message": format!("{}", self),
         });
 
-        let mut response = match self {
-            Error::Core(_) => HttpResponse::InternalServerError(),
-            Error::ChronologyError => HttpResponse::BadRequest(),
-            Error::SessionNotFound => HttpResponse::NotFound(),
-            Error::UpstreamError => HttpResponse::ServiceUnavailable(),
-            Error::VersionError => HttpResponse::BadRequest(),
-            Error::Unexpected => HttpResponse::InternalServerError(),
-        };
+        HttpResponse::build(self.status_code()).json(body)
+    }
 
-        response.json(body)
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Error::Core(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ChronologyError | Error::VersionError => StatusCode::BAD_REQUEST,
+            Error::SessionNotFound => StatusCode::NOT_FOUND,
+            Error::UpstreamError => StatusCode::SERVICE_UNAVAILABLE,
+            Error::Unexpected => StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 }
 

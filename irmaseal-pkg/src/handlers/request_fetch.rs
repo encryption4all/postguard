@@ -1,5 +1,6 @@
 use actix_web::web::{Data, HttpResponse, Path};
-use futures::future::{ok, Future};
+use actix_web::Responder;
+use futures::future::{ok, ready, Future, Ready};
 use ibe::kem::IBKEM;
 use irmaseal_core::api::{KeyResponse, KeyStatus};
 use irmaseal_core::{Identity, UserSecretKey};
@@ -31,10 +32,21 @@ fn fetch_identity(
     Identity::new(timestamp, &disclosed.id, Some(&v)).ok()
 }
 
+struct WrappedUserSecretKey<K: IBKEM>(UserSecretKey<K>);
+
+impl<K: IBKEM> Responder for WrappedUserSecretKey<K> {
+    type Error = crate::Error;
+    type Future = Ready<Result<HttpResponse, crate::Error>>;
+
+    fn respond_to(self, req: &actix_web::HttpRequest) -> Self::Future {
+        ready(Ok(HttpResponse::Ok().json(self.0)))
+    }
+}
+
 pub fn request_fetch<K: IBKEM>(
     state: Data<(String, MasterKeyPair<K>)>,
     path: Path<(String, u64)>,
-) -> impl Future<Item = HttpResponse, Error = crate::Error> {
+) -> impl Responder {
     let (token, timestamp) = path.into_inner();
     let (irma_url, mpk) = state.get_ref().clone();
 

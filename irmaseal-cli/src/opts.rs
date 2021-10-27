@@ -1,8 +1,8 @@
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 use std::error::Error;
 
 /// Command line interface for IRMAseal, an Identity Based Encryption standard.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(
     name = "irmaseal-cli",
     version = "0.2",
@@ -13,7 +13,7 @@ pub struct Opts {
     pub subcmd: Subcommand,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 pub enum Subcommand {
     Enc(EncOpts),
     Dec(DecOpts),
@@ -37,7 +37,7 @@ where
 }
 
 /// Encrypt a file.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(name = "Encrypt")]
 pub struct EncOpts {
     /// Input file.
@@ -54,7 +54,7 @@ pub struct EncOpts {
 }
 
 /// Encrypt a file.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(name = "Decrypt")]
 pub struct DecOpts {
     /// Input file.

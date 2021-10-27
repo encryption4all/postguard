@@ -1,7 +1,7 @@
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 
 /// Private Key Generator (PKG) for IRMAseal, an Identity Based Encryption standard.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(
     name = "irmaseal-pkg",
     version = "0.2",
@@ -12,14 +12,14 @@ pub struct Opts {
     pub subcmd: Subcommand,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 pub enum Subcommand {
     Gen(GenOpts),
     Server(ServerOpts),
 }
 
 /// Generate a master key pair.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(name = "Gen")]
 pub struct GenOpts {
     /// Version of the protocol.
@@ -36,7 +36,7 @@ pub struct GenOpts {
 }
 
 /// Run the IRMASeal PKG HTTP service.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(name = "Server")]
 pub struct ServerOpts {
     /// Host to bind this service to.

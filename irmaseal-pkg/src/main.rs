@@ -8,7 +8,7 @@ mod util;
 pub use crate::error::*;
 
 use crate::opts::{Opts, Subcommand};
-use clap::Clap;
+use clap::Parser;
 
 fn main() {
     let opts = Opts::parse();
