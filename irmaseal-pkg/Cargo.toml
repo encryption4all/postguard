@@ -7,24 +7,20 @@ version = "0.1.2"
 
 [dependencies]
 actix-rt = "2.3.0"
-actix-web = { version = "3.3.2", default-features = false }
-actix-cors = "0.5.4"
+actix-web = "4.0.0-beta.10"
+actix-cors = "0.6.0-beta.3"
 arrayref = "0.3.5"
 clap = { version = "3.0.0-beta.4", features = ["derive"] }
-futures = { version = "0.3", default-features = false }
-irma = "0.0"
+futures = { version = "0.3", features = ["executor"] }
+irma = { git = "https://github.com/tweedegolf/irmars.git" }
 paste = "1.0.5"
 rand = "0.8.4"
 serde = "*"
 serde_json = "1.0.68"
 subtle = "2.1.1"
 
-[dependencies.ibe]
-features = ["cgwfo"]
-path = "../../ibe"
-
 [dependencies.irmaseal-core]
 path = "../irmaseal-core"
 
 [features]
-v1 = ["irmaseal-core/v1", "ibe/kv1"]
+v1 = ["irmaseal-core/v1"]

@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 
 mod artifacts;
 mod identity;
@@ -15,6 +15,8 @@ pub use artifacts::*;
 pub use identity::*;
 pub use metadata::*;
 pub use metadata_reader::*;
+
+pub use ibe::*;
 
 use arrayvec::ArrayVec;
 use core::mem;

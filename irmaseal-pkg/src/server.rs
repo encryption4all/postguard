@@ -1,11 +1,14 @@
-use ibe::kem::cgw_fo::CGWFO;
-use ibe::kem::IBKEM;
+use irmaseal_core::kem::cgw_fo::CGWFO;
+use irmaseal_core::kem::IBKEM;
 
 use crate::handlers;
 use crate::opts::*;
 use crate::util::*;
 use actix_rt::System;
-use actix_web::web;
+use actix_web::{
+    web,
+    web::{resource, scope, Data},
+};
 
 #[cfg(feature = "v1")]
 use ibe::kem::kiltz_vahlis_one::KV1;
@@ -40,41 +43,43 @@ pub fn exec(server_opts: ServerOpts) {
         sk: cgwfo_read_sk(secret).unwrap(),
     };
 
-    let sys = System::new().block_on(async {
+    System::new().block_on(async move {
         actix_web::HttpServer::new(move || {
             let app = actix_web::App::new()
+                .wrap(actix_web::middleware::Logger::default())
                 .wrap(actix_cors::Cors::default())
+                .app_data(Data::new(
+                    actix_web::web::JsonConfig::default().limit(1024 * 4096),
+                ))
                 .service(
-                    web::scope("/v2/")
-                        .data(actix_web::web::JsonConfig::default().limit(1024 * 4096))
-                        .data((irma.clone(), kp2.clone()))
+                    scope("/v2")
+                        .app_data(Data::new(irma.clone()))
                         .service(
-                            web::resource("parameters")
+                            resource("/parameters")
+                                .app_data(Data::new(kp2.pk.clone()))
                                 .route(web::get().to(handlers::parameters::<CGWFO>)),
                         )
-//                        .service(
-//                            web::resource("request")
-//                                .route(web::post().to(handlers::request::<CGWFO>)),
-//                        )
-//                        .service(
-//                            web::resource("request/{token}/{timestamp}")
-//                                .route(web::get().to(handlers::request_fetch::<CGWFO>)),
-//                        ),
+                        .service(resource("/request").route(web::post().to(handlers::request)))
+                        .service(
+                            resource("/request/{token}/{timestamp}")
+                                .app_data(Data::new(kp2.clone()))
+                                .route(web::get().to(handlers::request_fetch::<CGWFO>)),
+                        ),
                 );
 
             #[cfg(feature = "v1")]
             let app = app.service(
-                web::scope("/v1/")
-                    .data((irma.clone(), kp1.clone()))
+                scope("/v1")
+                    .app_data(Data::new(irma.clone()))
                     .service(
-                        web::resource("parameters")
+                        resource("/parameters")
+                            .app_data(Data::new(kp1.pk.clone()))
                             .route(web::get().to(handlers::parameters::<KV1>)),
                     )
+                    .service(resource("/request").route(web::post().to(handlers::request)))
                     .service(
-                        web::resource("request").route(web::post().to(handlers::request::<KV1>)),
-                    )
-                    .service(
-                        web::resource("request/{token}/{timestamp}")
+                        resource("/request/{token}/{timestamp}")
+                            .app_data(Data::new(kp1.clone()))
                             .route(web::get().to(handlers::request_fetch::<KV1>)),
                     ),
             );
@@ -86,5 +91,6 @@ pub fn exec(server_opts: ServerOpts) {
         .shutdown_timeout(1)
         .run()
         .await
-    });
+        .unwrap()
+    })
 }

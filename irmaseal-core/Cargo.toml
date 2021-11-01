@@ -20,9 +20,14 @@ arrayvec = { version = "0.7.1", features = ["serde"] }
 subtle = "2.3"
 postcard = "0.7.2"
 base64 = "0.12"
-ibe = { path = "../../ibe", features = ["cgwfo"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
 serde = { version = "1.0.126", features = ["derive"] }
+irma = { git = "https://github.com/tweedegolf/irmars.git" }
+
+[dependencies.ibe]
+git = "https://github.com/encryption4all/ibe/"
+branch = "features_and_docs" 
+features = ["cgwfo"]
 
 [features]
 stream = ["aes", "ctr"]

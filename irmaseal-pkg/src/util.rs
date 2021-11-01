@@ -1,11 +1,12 @@
 use arrayref::array_ref;
-#[cfg(feature = "v1")]
-use ibe::kem::kiltz_vahlis_one::KV1;
-use ibe::kem::{cgw_fo::CGWFO, IBKEM};
-use ibe::Compress;
+use irmaseal_core::kem::{cgw_fo::CGWFO, IBKEM};
+use irmaseal_core::Compress;
 use irmaseal_core::Error;
 use paste::paste;
 use std::path::Path;
+
+#[cfg(feature = "v1")]
+use ibe::kem::kiltz_vahlis_one::KV1;
 
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {

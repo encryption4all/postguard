@@ -7,17 +7,19 @@ use crate::client::{Client, ClientError, OwnedKeyChallenge};
 use crate::opts::DecOpts;
 use crate::util::*;
 
-use ibe::kem::cgw_fo::CGWFO;
-use ibe::kem::IBKEM;
+use irma::*;
+
+use irmaseal_core::kem::cgw_fo::CGWFO;
+use irmaseal_core::kem::IBKEM;
 
 use irmaseal_core::stream::Unsealer;
 use irmaseal_core::{api::*, stream::Readable, Metadata, MetadataReader, MetadataReaderResult};
 
 #[cfg(feature = "v1")]
-use ibe::kem::kiltz_vahlis_one::KV1;
+use irmaseal_core::kem::kiltz_vahlis_one::KV1;
 
-fn print_qr(s: &str) {
-    let code = qrcode::QrCode::new(s).unwrap();
+fn print_qr(qr: &irma::Qr) {
+    let code = qrcode::QrCode::new(serde_json::to_string(qr).unwrap()).unwrap();
     let scode = code
         .render::<char>()
         .quiet_zone(false)
@@ -29,7 +31,7 @@ fn print_qr(s: &str) {
 
 async fn wait_on_session<K: IBKEM>(
     client: &Client<'_>,
-    sp: &OwnedKeyChallenge,
+    sp: &irma::SessionData,
     timestamp: u64,
 ) -> Result<Option<KeyResponse<K>>, ClientError>
 where
@@ -95,21 +97,25 @@ pub async fn exec(dec_opts: DecOpts) {
 
     eprintln!("Requesting private key for {:#?}", identity.attribute);
 
-    let sp: OwnedKeyChallenge = client
+    let sd: irma::SessionData = client
         .request(&KeyRequest {
-            attribute: identity.attribute.clone(),
+            attribute: AttributeRequest::Compound {
+                attr_type: identity.attribute.atype.to_string(),
+                value: identity.attribute.value.as_deref().map(|s| s.to_string()),
+                not_null: identity.attribute.value.is_some(),
+            },
         })
         .await
         .unwrap();
 
     eprintln!("Please scan the following QR-code with IRMA:");
 
-    print_qr(&sp.qr);
+    print_qr(&sd.session_ptr);
 
     let mut unsealer = match metadata {
         #[cfg(feature = "v1")]
         Metadata::V1(m) => {
-            let kr = wait_on_session::<KV1>(&client, &sp, timestamp)
+            let kr = wait_on_session::<KV1>(&client, &sd, timestamp)
                 .await
                 .unwrap();
             FileUnsealerRead::new(
@@ -117,7 +123,7 @@ pub async fn exec(dec_opts: DecOpts) {
             )
         }
         Metadata::V2(m) => {
-            let kr = wait_on_session::<CGWFO>(&client, &sp, timestamp)
+            let kr = wait_on_session::<CGWFO>(&client, &sd, timestamp)
                 .await
                 .unwrap();
             let pars = client.parameters::<CGWFO>().await.unwrap();

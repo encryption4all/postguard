@@ -5,7 +5,7 @@ mod opts;
 mod util;
 
 use crate::opts::{Opts, Subcommand};
-use clap::Clap;
+use clap::Parser;
 use tokio::runtime::Runtime;
 
 fn main() {

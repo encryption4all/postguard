@@ -4,6 +4,8 @@ use crate::*;
 use ibe::kem::IBKEM;
 use serde::{Deserialize, Serialize};
 
+use irma::*;
+
 /// Set of public parameters for the Private Key Generator (PKG).
 #[derive(Serialize, Deserialize)]
 #[serde(bound(
@@ -19,10 +21,11 @@ pub struct Parameters<K: IBKEM> {
 /// A request for the user secret key for an identity.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeyRequest {
-    pub attribute: Attribute,
+    pub attribute: AttributeRequest,
 }
 
 /// The challenge to verify the key request.
+// TODO: this is just a regular irma session package, consider removing
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeyChallenge<'a> {
     /// The QR code that should be shown to the user,
@@ -39,6 +42,8 @@ pub struct KeyChallenge<'a> {
 pub enum KeyStatus {
     /// The IRMA session has been initialized.
     Initialized,
+    /// The IRMA session is in the pairing stage.
+    Pairing,
     /// The IRMA app has connected to the API server.
     Connected,
     /// The IRMA session was cancelled.

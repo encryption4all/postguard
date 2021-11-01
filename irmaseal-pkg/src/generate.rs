@@ -1,5 +1,5 @@
-use ibe::kem::cgw_fo::CGWFO;
-use ibe::{kem::IBKEM, Compress};
+use irmaseal_core::kem::cgw_fo::CGWFO;
+use irmaseal_core::{kem::IBKEM, Compress};
 
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;

@@ -1,4 +1,4 @@
-use ibe::kem::IBKEM;
+use irmaseal_core::kem::IBKEM;
 use irmaseal_core::{api::*, util::version, PublicKey};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
@@ -42,20 +42,20 @@ impl<'a> Client<'a> {
             .await
     }
 
-    pub async fn request(&self, kr: &KeyRequest) -> Result<OwnedKeyChallenge, ClientError> {
+    pub async fn request(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
         self.client
             .post(self.create_url("v2/request"))
             .json(kr)
             .send()
             .await?
             .error_for_status()?
-            .json::<OwnedKeyChallenge>()
+            .json::<irma::SessionData>()
             .await
     }
 
     pub async fn result<K>(
         &self,
-        token: &str,
+        token: &irma::SessionToken,
         timestamp: u64,
     ) -> Result<KeyResponse<K>, ClientError>
     where
@@ -65,7 +65,7 @@ impl<'a> Client<'a> {
         self.client
             .get(
                 self.create_url(&format!("{}/request/", version::<K>().unwrap()))
-                    .join(&format!("{}/{}", token, timestamp))
+                    .join(&format!("{}/{}", token.0, timestamp))
                     .unwrap(),
             )
             .send()
