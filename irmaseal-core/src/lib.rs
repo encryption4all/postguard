@@ -1,8 +1,9 @@
-#![no_std]
+//#![no_std]
 
 mod artifacts;
 mod identity;
 mod metadata;
+mod metadata2;
 mod metadata_reader;
 
 pub mod api;
@@ -18,6 +19,8 @@ pub use metadata_reader::*;
 
 use arrayvec::ArrayVec;
 use core::mem;
+
+extern crate alloc;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {

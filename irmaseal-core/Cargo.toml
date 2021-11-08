@@ -23,6 +23,14 @@ base64 = "0.12"
 ibe = { path = "../../ibe", features = ["cgwfo"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
 serde = { version = "1.0.126", features = ["derive"] }
+bincode = { version = "1.3.3" }
+serde_json = { version = "1.0.68" }
+base64ct = "1.2.0"
+serde_bytes = "0.11.5"
+serde_with = { version = "1.11.0", features = ["base64"] }
+
+[dev-dependencies]
+serde-transcode = "1.1.1"
 
 [features]
 stream = ["aes", "ctr"]
