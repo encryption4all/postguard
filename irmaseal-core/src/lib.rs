@@ -3,8 +3,8 @@
 mod artifacts;
 mod identity;
 mod metadata;
-mod metadata2;
-mod metadata_reader;
+//mod metadata2;
+//mod metadata_reader;
 
 pub mod api;
 pub mod util;
@@ -15,7 +15,7 @@ pub mod stream;
 pub use artifacts::*;
 pub use identity::*;
 pub use metadata::*;
-pub use metadata_reader::*;
+//pub use metadata_reader::*;
 
 use arrayvec::ArrayVec;
 use core::mem;
