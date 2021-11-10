@@ -12,14 +12,16 @@ impl RecipientMetadata {
             .or(Err(Error::FormatViolation)))?
     }
 
-    pub fn msgpack_from_slice<'a>(data: &'a [u8], id: &RecipientIdentifier) -> Result<Self, Error> {
-        let mut deserializer = rmp_serde::decode::Deserializer::from_read_ref(data);
+    /// Deserialize metadata byte stream for a specific identifier.
+    pub fn msgpack_from<'a, R: std::io::Read>(
+        r: &mut R,
+        id: &RecipientIdentifier,
+    ) -> Result<Self, Error> {
+        let mut deserializer = rmp_serde::decode::Deserializer::new(r);
         Ok(Self::default_with_id(id)
             .deserialize(&mut deserializer)
             .or(Err(Error::FormatViolation)))?
     }
-
-    // TODO: from reader?
 }
 
 struct PartialEqVisitor<T> {

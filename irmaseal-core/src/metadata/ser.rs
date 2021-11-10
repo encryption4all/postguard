@@ -3,7 +3,6 @@ use crate::metadata::*;
 use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
 use serde::ser::SerializeSeq;
 use serde::Serialize;
-use std::io::Write as StdWrite;
 
 impl<'a> MetadataArgs<'a> {
     /// Writes binary msgPack format into a std::io::Writer.
@@ -16,7 +15,7 @@ impl<'a> MetadataArgs<'a> {
     ///     `ct`: associated ciphertext with this policy,
     /// `iv`: 16-byte initialization vector,
     /// `cs`: chunk size in bytes used in the symmetrical encryption.
-    pub fn msgpack_write_into<W: StdWrite>(&self, w: &mut W) -> Result<(), Error> {
+    pub fn msgpack_into<W: std::io::Write>(&self, w: &mut W) -> Result<(), Error> {
         let mut serializer = rmp_serde::encode::Serializer::new(w);
         self.serialize(&mut serializer)
             .map_err(|_e| Error::FormatViolation)

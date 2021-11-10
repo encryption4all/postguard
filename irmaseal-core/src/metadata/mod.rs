@@ -42,12 +42,6 @@ pub struct RecipientInfo {
     pub ct: [u8; CGWFO_CT_BYTES],
 }
 
-impl PartialEq for RecipientInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.identifier == other.identifier
-    }
-}
-
 /// This struct _never_ needs to be in memory, unless you require the full metadata
 /// containing info for all recipients, otherwise see [`RecipientMetadata`].
 #[derive(Serialize, Deserialize)]
@@ -87,6 +81,12 @@ pub struct MetadataArgs<'a> {
     iv: [u8; IV_SIZE],
     #[serde(rename = "cs")]
     chunk_size: usize,
+}
+
+impl PartialEq for RecipientInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.identifier == other.identifier
+    }
 }
 
 impl RecipientIdentifier {

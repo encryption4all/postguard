@@ -51,17 +51,19 @@ fn test_enc_dec_json() {
 
 #[test]
 fn test_enc_dec_msgpack() {
+    use std::io::Cursor;
+
     setup!(ma);
 
     let id2 = &ma.recipients.0[1].0.clone();
     let policy2 = &ma.recipients.0[1].1.clone();
 
     let mut v = Vec::new();
-    ma.msgpack_write_into(&mut v).unwrap();
+    ma.msgpack_into(&mut v).unwrap();
     //dbg!(&v);
     println!("output is {} bytes", v.len());
 
-    let decoded = RecipientMetadata::msgpack_from_slice(&v[..], &id2).unwrap();
+    let decoded = RecipientMetadata::msgpack_from(&mut Cursor::new(v), &id2).unwrap();
     //dbg!(&decoded);
 
     assert_eq!(&decoded.recipient_info.identifier, id2);
@@ -78,8 +80,8 @@ fn test_transcode() {
     let mut v = Vec::new();
     let mut out = Vec::new();
 
-    ma.msgpack_write_into(&mut v).unwrap();
-    let mut des = rmp_serde::decode::Deserializer::from_read_ref(&v);
+    ma.msgpack_into(&mut v).unwrap();
+    let mut des = rmp_serde::decode::Deserializer::new(&v[..]);
     let mut ser = serde_json::Serializer::pretty(&mut out);
 
     serde_transcode::transcode(&mut des, &mut ser).unwrap();
