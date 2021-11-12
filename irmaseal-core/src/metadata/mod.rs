@@ -4,27 +4,62 @@ mod ser;
 #[cfg(test)]
 mod tests;
 
+use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::util::{derive_keys, KeySet};
 use crate::{Attribute, Error, IV_SIZE};
 use alloc::fmt::Debug;
 use arrayvec::ArrayString;
 use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
-//use ibe::{kem::IBKEM, Compress};
-
+use ibe::kem::SharedSecret;
+use ibe::{kem::IBKEM, Compress};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
-use ser::serialize_encaps;
+/// An IRMAseal policy.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
+pub struct Policy {
+    #[serde(rename = "t")]
+    pub timestamp: u64,
+    #[serde(rename = "a")]
+    pub attribute: Attribute,
+    //pub con: Vec<Attribute>,
+}
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RecipientIdentifier(pub ArrayString<255>);
+// We split them by type to ensure no mixups!
+/// An IRMAseal AttributeRequest.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Default)]
+pub struct HiddenAttribute {
+    #[serde(rename = "t")]
+    pub atype: ArrayString<255>,
+    #[serde(rename = "v")]
+    pub hidden_value: Option<ArrayString<254>>,
+}
 
 /// An IRMAseal hidden policy.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct HiddenPolicy {
     #[serde(rename = "t")]
     pub timestamp: u64,
-    pub con: Vec<Attribute>,
+    #[serde(rename = "a")]
+    pub attribute: HiddenAttribute,
+    //pub con: Vec<Attribute>,
 }
+
+/// EXAMPLE!!!! DO NOT USE!!! DOESN'T HIDE ANYTHING
+impl From<&Policy> for HiddenPolicy {
+    fn from(p: &Policy) -> Self {
+        Self {
+            timestamp: p.timestamp,
+            attribute: HiddenAttribute {
+                atype: p.attribute.atype,
+                hidden_value: p.attribute.value,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RecipientIdentifier(pub ArrayString<255>);
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientInfo {
@@ -44,14 +79,17 @@ pub struct RecipientInfo {
 
 /// This struct _never_ needs to be in memory, unless you require the full metadata
 /// containing info for all recipients, otherwise see [`RecipientMetadata`].
-#[derive(Serialize, Deserialize)]
-pub struct FullMetadata {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Metadata {
+    #[serde(rename = "rs")]
     pub recipient_info: Vec<RecipientInfo>,
 
     /// The initializion vector used for symmetric encryption.
+    #[serde(rename = "iv")]
     pub iv: [u8; IV_SIZE],
 
     /// The size of the chunks in which to process symmetric encryption.
+    #[serde(rename = "cs")]
     pub chunk_size: usize,
 }
 
@@ -65,22 +103,6 @@ pub struct RecipientMetadata {
 
     /// The size of the chunks in which to process symmetric encryption.
     pub chunk_size: usize,
-}
-
-#[derive(Clone)]
-pub struct Policies<'a>(&'a [(RecipientIdentifier, HiddenPolicy)]);
-
-/// Everything that is needed to construct a serialized metadata.
-///
-/// Can be serialized to an output format {json, msgPack}.
-#[derive(Serialize, Clone)]
-pub struct MetadataArgs<'a> {
-    #[serde(rename = "rs")]
-    #[serde(serialize_with = "serialize_encaps")]
-    recipients: Policies<'a>,
-    iv: [u8; IV_SIZE],
-    #[serde(rename = "cs")]
-    chunk_size: usize,
 }
 
 impl PartialEq for RecipientInfo {
@@ -108,5 +130,20 @@ impl RecipientMetadata {
             iv: [0u8; IV_SIZE],
             chunk_size: 0 as usize,
         }
+    }
+
+    /// Derives a [`KeySet`] from a [`RecipientMetadata`].
+    ///
+    /// This keyset can be used for AEAD.
+    pub fn derive_keys(
+        &self,
+        usk: &UserSecretKey<CGWFO>,
+        pk: &PublicKey<CGWFO>,
+    ) -> Result<KeySet, Error> {
+        let c = crate::util::open_ct(<CGWFO as IBKEM>::Ct::from_bytes(&self.recipient_info.ct))
+            .ok_or(Error::FormatViolation)?;
+        let ss = CGWFO::decaps(Some(&pk.0), &usk.0, &c).map_err(|_e| Error::DecapsulationError)?;
+
+        Ok(derive_keys(&ss))
     }
 }

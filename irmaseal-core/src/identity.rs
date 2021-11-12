@@ -34,7 +34,7 @@ impl Attribute {
     pub fn new(atype: &str, value: Option<&str>) -> Result<Self, Error> {
         let atype = ArrayString::<255>::from(atype).or(Err(Error::ConstraintViolation))?;
         let value = value
-            .map(|v| Ok(ArrayString::<254>::from(v).or(Err(Error::ConstraintViolation))?))
+            .map(|v| ArrayString::<254>::from(v).map_err(|_e| Error::ConstraintViolation))
             .transpose()?;
 
         Ok(Attribute { atype, value })

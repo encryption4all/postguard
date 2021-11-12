@@ -1,88 +1,92 @@
 use crate::metadata::*;
-
-use crate::util::generate_iv;
 use crate::Attribute;
 
+use ibe::kem::IBKEM;
+
 macro_rules! setup {
-    ($ma: ident) => {
-        let mut rng = rand::thread_rng();
+    ($rids: ident, $policies: ident, $mpk: ident, $rng: ident) => {
+        let mut $rng = rand::thread_rng();
+
         let identifier1 = RecipientIdentifier::new("l.botros@cs.ru.nl").unwrap();
         let identifier2 = RecipientIdentifier::new("leon.botros@gmail.com").unwrap();
 
-        let p1 = HiddenPolicy {
+        let p1 = Policy {
             timestamp: 1566722350,
-            con: vec![Attribute::new("pbdf.gemeente.personalData.bsn", Some("*****1234")).unwrap()],
+            attribute: Attribute::new("pbdf.gemeente.personalData.bsn", Some("123456789")).unwrap(),
         };
-        let p2 = HiddenPolicy {
+        let p2 = Policy {
             timestamp: 1566722350,
-            con: vec![Attribute::new("pbdf.gemeente.personalData.bsn", Some("*****1234")).unwrap()],
+            attribute: Attribute::new("pbdf.gemeente.personalData.name", Some("123456789"))
+                .unwrap(),
         };
 
-        let list = [(identifier1, p1.clone()), (identifier2, p2.clone())];
-        let c = Policies(&list);
-        let iv = generate_iv(&mut rng);
+        let $rids = [&identifier1, &identifier2];
+        let $policies = [&p1, &p2];
 
-        let $ma = MetadataArgs {
-            recipients: c,
-            iv,
-            chunk_size: 1024 * 1024,
-        };
+        let (tmpk, _) = ibe::kem::cgw_fo::CGWFO::setup(&mut $rng);
+        let $mpk = PublicKey::<CGWFO>(tmpk);
     };
 }
 
 #[test]
 fn test_enc_dec_json() {
-    setup!(ma);
-    let id2 = &ma.recipients.0[1].0.clone();
-    let policy2 = &ma.recipients.0[1].1.clone();
+    setup!(rids, policies, mpk, rng);
 
-    let s = ma.write_to_json_string().unwrap();
+    let (meta, _ss) = Metadata::new(&mpk, &rids, &policies, &mut rng).unwrap();
+
+    let s = meta.to_json_string().unwrap();
     println!("encoded: {}", &s);
 
     // Decode string, while looking for id2
-    let decoded = RecipientMetadata::from_string(&s, id2).unwrap();
-    println!("decoded: {:?}", &decoded);
+    let decoded = RecipientMetadata::from_string(&s, rids[1]).unwrap();
+    dbg!(&decoded);
 
-    assert_eq!(&decoded.recipient_info.identifier, id2);
-    assert_eq!(&decoded.recipient_info.policy, policy2);
-    assert_eq!(&decoded.iv, &ma.iv);
-    assert_eq!(&decoded.chunk_size, &ma.chunk_size);
+    assert_eq!(&decoded.recipient_info.identifier, rids[1]);
+    assert_eq!(&decoded.iv, &meta.iv);
+    assert_eq!(&decoded.chunk_size, &meta.chunk_size);
 }
 
 #[test]
 fn test_enc_dec_msgpack() {
     use std::io::Cursor;
-
-    setup!(ma);
-
-    let id2 = &ma.recipients.0[1].0.clone();
-    let policy2 = &ma.recipients.0[1].1.clone();
+    setup!(rids, policies, mpk, rng);
 
     let mut v = Vec::new();
-    ma.msgpack_into(&mut v).unwrap();
-    //dbg!(&v);
+    let (meta, _ss) = Metadata::new(&mpk, &rids, &policies, &mut rng).unwrap();
+    meta.msgpack_into(&mut v).unwrap();
+    dbg!(&v);
     println!("output is {} bytes", v.len());
 
-    let decoded = RecipientMetadata::msgpack_from(&mut Cursor::new(v), &id2).unwrap();
-    //dbg!(&decoded);
+    let mut c = Cursor::new(v);
+    let decoded = RecipientMetadata::msgpack_from(&mut c, &rids[1]).unwrap();
 
-    assert_eq!(&decoded.recipient_info.identifier, id2);
-    assert_eq!(&decoded.recipient_info.policy, policy2);
-    assert_eq!(&decoded.iv, &ma.iv);
-    assert_eq!(&decoded.chunk_size, &ma.chunk_size);
+    assert_eq!(&decoded.recipient_info.identifier, rids[1]);
+    //assert_eq!(&decoded.recipient_info.policy, policy2);
+    assert_eq!(&decoded.iv, &meta.iv);
+    assert_eq!(&decoded.chunk_size, &meta.chunk_size);
 }
 
 #[test]
 fn test_transcode() {
-    setup!(ma);
+    use crate::PREAMBLE_SIZE;
+    use std::io::Cursor;
 
-    // encode to binary via msgpack and transcode into json
-    let mut v = Vec::new();
-    let mut out = Vec::new();
+    // This test encodes to binary and then transcodes into serde_json
+    // The transcoded data is compared with a direct serialization of the same metadata.
+    setup!(rids, policies, mpk, rng);
 
-    ma.msgpack_into(&mut v).unwrap();
-    let mut des = rmp_serde::decode::Deserializer::new(&v[..]);
-    let mut ser = serde_json::Serializer::pretty(&mut out);
+    let mut binary = Vec::new();
+    let (meta, _ss) = Metadata::new(&mpk, &rids, &policies, &mut rng).unwrap();
+    meta.msgpack_into(&mut binary).unwrap();
+
+    let v1 = serde_json::to_vec(&meta).unwrap();
+    let mut v2 = Vec::new();
+
+    // Be sure to skip the preamble, when transcoding
+    let mut des = rmp_serde::decode::Deserializer::new(&binary[PREAMBLE_SIZE..]);
+    let mut ser = serde_json::Serializer::new(Cursor::new(&mut v2));
 
     serde_transcode::transcode(&mut des, &mut ser).unwrap();
+
+    assert_eq!(&v1, &v2);
 }

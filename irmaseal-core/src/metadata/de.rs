@@ -1,7 +1,9 @@
+use std::convert::TryInto;
+
 use crate::*;
 
 use alloc::fmt;
-use serde::de::{DeserializeSeed, Deserializer, Error as DeError, SeqAccess, Visitor};
+use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 
 impl RecipientMetadata {
@@ -9,18 +11,44 @@ impl RecipientMetadata {
         let mut deserializer = serde_json::Deserializer::from_str(s);
         Ok(Self::default_with_id(id)
             .deserialize(&mut deserializer)
-            .or(Err(Error::FormatViolation)))?
+            .map_err(|_| Error::FormatViolation)?)
     }
 
     /// Deserialize metadata byte stream for a specific identifier.
     pub fn msgpack_from<'a, R: std::io::Read>(
-        r: &mut R,
+        mut r: R,
         id: &RecipientIdentifier,
     ) -> Result<Self, Error> {
-        let mut deserializer = rmp_serde::decode::Deserializer::new(r);
+        let mut tmp = [0u8; PREAMBLE_SIZE];
+        r.read_exact(&mut tmp).map_err(|_e| Error::NotIRMASEAL)?;
+
+        if tmp[..PRELUDE_SIZE] != PRELUDE {
+            Err(Error::NotIRMASEAL)?
+        }
+
+        let version = u16::from_be_bytes(
+            tmp[PRELUDE_SIZE..PRELUDE_SIZE + VERSION_SIZE]
+                .try_into()
+                .map_err(|_e| Error::FormatViolation)?,
+        );
+
+        if version != VERSION_V2 {
+            Err(Error::VersionError)?
+        }
+
+        let metadata_len = u64::from_be_bytes(
+            tmp[PREAMBLE_SIZE - METADATA_SIZE_SIZE..]
+                .try_into()
+                .map_err(|_e| Error::FormatViolation)?,
+        );
+
+        // Limit the reader, otherwise it would read into possibly a payload
+        let meta_reader = r.take(metadata_len as u64);
+
+        let mut deserializer = rmp_serde::decode::Deserializer::new(meta_reader);
         Ok(Self::default_with_id(id)
             .deserialize(&mut deserializer)
-            .or(Err(Error::FormatViolation)))?
+            .map_err(|_e| Error::FormatViolation)?)
     }
 }
 
@@ -31,7 +59,7 @@ struct PartialEqVisitor<T> {
 /// Visits any types that implements PartialEq and returns instance of type T once found.
 impl<'de, T> Visitor<'de> for PartialEqVisitor<T>
 where
-    T: Deserialize<'de> + PartialEq,
+    T: Deserialize<'de> + PartialEq + fmt::Debug,
 {
     type Value = T;
 
@@ -43,17 +71,18 @@ where
     where
         A: SeqAccess<'de>,
     {
-        loop {
-            match seq.next_element::<T>() {
-                Ok(Some(el)) => {
-                    if el == self.looking_for {
-                        break Ok(el);
-                    }
-                }
-                Ok(None) => break Err(DeError::custom("not found")),
-                Err(_) => break Err(DeError::custom("unexpected error")),
+        let mut found: Option<T> = None;
+
+        while let Some(el) = seq.next_element()? {
+            if el == self.looking_for {
+                found = Some(el);
+                break;
             }
         }
+
+        while let Some(IgnoredAny) = seq.next_element()? {}
+
+        found.ok_or_else(|| serde::de::Error::custom("not found"))
     }
 }
 
@@ -71,6 +100,7 @@ impl<'de> DeserializeSeed<'de> for RecipientInfo {
     }
 }
 
+// This looks like a lot of code, but it is almost identical to what Serde's macros generate.
 impl<'de> DeserializeSeed<'de> for RecipientMetadata {
     type Value = Self;
 
@@ -105,13 +135,13 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
             {
                 let recipient_info = seq
                     .next_element_seed(self.0.recipient_info)?
-                    .ok_or_else(|| DeError::missing_field("recipient"))?;
+                    .ok_or_else(|| serde::de::Error::missing_field("recipient"))?;
                 let iv = seq
                     .next_element()?
-                    .ok_or_else(|| DeError::missing_field("iv"))?;
+                    .ok_or_else(|| serde::de::Error::missing_field("iv"))?;
                 let chunk_size = seq
                     .next_element()?
-                    .ok_or_else(|| DeError::missing_field("chunk_size"))?;
+                    .ok_or_else(|| serde::de::Error::missing_field("chunk_size"))?;
 
                 Ok(RecipientMetadata {
                     recipient_info,
@@ -133,30 +163,31 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
                     match key {
                         Field::RecipientInfo => {
                             if recipient_info.is_some() {
-                                return Err(DeError::duplicate_field("recipient_info"));
+                                return Err(serde::de::Error::duplicate_field("recipient_info"));
                             }
                             recipient_info =
                                 Some(map.next_value_seed(self.0.recipient_info.clone())?);
                         }
                         Field::Iv => {
                             if iv.is_some() {
-                                return Err(DeError::duplicate_field("iv"));
+                                return Err(serde::de::Error::duplicate_field("iv"));
                             }
                             iv = Some(map.next_value()?);
                         }
                         Field::ChunkSize => {
                             if chunk_size.is_some() {
-                                return Err(DeError::duplicate_field("chunk_size"));
+                                return Err(serde::de::Error::duplicate_field("chunk_size"));
                             }
                             chunk_size = Some(map.next_value()?);
                         }
                     }
                 }
 
-                let recipient_info =
-                    recipient_info.ok_or_else(|| DeError::missing_field("recipient_info"))?;
-                let iv = iv.ok_or_else(|| DeError::missing_field("iv"))?;
-                let chunk_size = chunk_size.ok_or_else(|| DeError::missing_field("chunk_size"))?;
+                let recipient_info = recipient_info
+                    .ok_or_else(|| serde::de::Error::missing_field("recipient_info"))?;
+                let iv = iv.ok_or_else(|| serde::de::Error::missing_field("iv"))?;
+                let chunk_size =
+                    chunk_size.ok_or_else(|| serde::de::Error::missing_field("chunk_size"))?;
 
                 Ok(RecipientMetadata {
                     recipient_info,

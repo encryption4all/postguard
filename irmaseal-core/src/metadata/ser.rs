@@ -1,10 +1,70 @@
 use crate::metadata::*;
+use crate::util::generate_iv;
+use crate::*;
 
-use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
-use serde::ser::SerializeSeq;
-use serde::Serialize;
+use ibe::kem::cgw_fo::CGWFO;
+use ibe::kem::IBKEM;
+use rand::{CryptoRng, Rng};
 
-impl<'a> MetadataArgs<'a> {
+impl From<std::io::Error> for crate::Error {
+    fn from(_e: std::io::Error) -> Self {
+        // TODO: maybe show the inner error
+        Error::FormatViolation
+    }
+}
+
+impl Metadata {
+    pub fn new<R: Rng + CryptoRng>(
+        pk: &PublicKey<CGWFO>,
+        rids: &[&RecipientIdentifier],
+        policies: &[&Policy],
+        rng: &mut R,
+    ) -> Result<(Self, SharedSecret), Error> {
+        if rids.len() != policies.len() {
+            Err(Error::FormatViolation)?
+        }
+
+        let mut cts = vec![<CGWFO as IBKEM>::Ct::default(); policies.len()];
+
+        // Map policies to IBE identities
+        let ids: Vec<<CGWFO as IBKEM>::Id> = policies
+            .iter()
+            .map(|p| {
+                Identity::new(
+                    p.timestamp,
+                    &p.attribute.atype,
+                    p.attribute.value.as_deref(),
+                )
+                .unwrap()
+                .derive::<CGWFO>()
+                .unwrap()
+            })
+            .collect();
+
+        let refs: Vec<&<CGWFO as IBKEM>::Id> = ids.iter().collect();
+        let ss = CGWFO::multi_encaps(&pk.0, &refs[..], rng, &mut cts[..]).unwrap();
+
+        let recipient_info = rids
+            .iter()
+            .zip(policies.iter())
+            .zip(cts.iter())
+            .map(|((rid, policy), ct)| RecipientInfo {
+                identifier: *rid.clone(),
+                policy: (*policy).into(),
+                ct: ct.to_bytes(),
+            })
+            .collect();
+
+        Ok((
+            Metadata {
+                recipient_info,
+                iv: generate_iv(rng),
+                chunk_size: 1024 * 1024,
+            },
+            ss,
+        ))
+    }
+
     /// Writes binary msgPack format into a std::io::Writer.
     ///
     /// Internally uses the "named" convention, which preserves field names.
@@ -16,38 +76,40 @@ impl<'a> MetadataArgs<'a> {
     /// `iv`: 16-byte initialization vector,
     /// `cs`: chunk size in bytes used in the symmetrical encryption.
     pub fn msgpack_into<W: std::io::Write>(&self, w: &mut W) -> Result<(), Error> {
-        let mut serializer = rmp_serde::encode::Serializer::new(w);
+        w.write(&PRELUDE)?;
+        w.write(&VERSION_V2.to_be_bytes())?;
+
+        // For this to work, we need know the length of the metadata in advance
+        // For now: write to vec and determine the length.
+        // TODO: could optimize this, or at least use a max capacity.
+        let mut meta_vec = Vec::new();
+        let mut serializer = rmp_serde::encode::Serializer::new(&mut meta_vec).with_struct_map();
         self.serialize(&mut serializer)
-            .map_err(|_e| Error::FormatViolation)
+            .map_err(|_e| Error::FormatViolation)?;
+
+        w.write(&meta_vec.len().to_be_bytes())?;
+        w.write(&meta_vec)?;
+
+        Ok(())
     }
 
     /// Writes to a pretty json string.
     ///
     /// Should only be used for small metadata or development purposes.
-    pub fn write_to_json_string(&self) -> Result<String, Error> {
-        Ok(serde_json::to_string_pretty(&self).or(Err(Error::FormatViolation)))?
+    pub fn to_json_string(&self) -> Result<String, Error> {
+        Ok(serde_json::to_string_pretty(&self).or(Err(Error::FormatViolation))?)
     }
 }
 
-/// Serializes encapsulation of a shared secret for each recipient/policy combination.
-pub(crate) fn serialize_encaps<S>(list: &Policies, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    // TODO: map might be better?
-    let mut seq = serializer.serialize_seq(Some(list.0.len()))?;
-    for (id, policy) in list.0.into_iter() {
-        // TODO: make a real ciphertext for the policy using IBE
-        let ct = [7u8; CGWFO_CT_BYTES];
-
-        let recipient_info = RecipientInfo {
-            identifier: id.clone(),
-            policy: policy.clone(),
-            ct,
-        };
-
-        seq.serialize_element(&recipient_info)?;
-    }
-
-    seq.end()
-}
+// TODO: domain separation:
+//
+// let h_i = H(i+1 || con[0])
+// let id_policy = H(0 || h_0 || h_1 || .. | h_n)
+//
+// TODO: con.sort() here, required impl Ord for Attribute
+//
+// policy.con.sort().iter().map(|ar| {
+//     let i =
+//         Identity::new(policy.timestamp, &ar.atype, ar.value.as_deref()).unwrap();
+//     let derived = i.derive::<CGWFO>();
+// });
