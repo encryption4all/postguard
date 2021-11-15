@@ -63,7 +63,7 @@ impl From<&Policy> for HiddenPolicy {
 }
 
 impl Policy {
-    /// Derives an identity to be used in IBE (specificly, CGWFO).
+    /// Derives an identity to be used in IBE (specifically, CGWFO).
     pub fn derive(&self) -> <CGWFO as IBKEM>::Id {
         // This method implements domain separation as follows:
         // let policy(id = con[0..n-1]) = H(0 || h_0 || h_1 || .. | h_{n-1}),
@@ -119,7 +119,6 @@ pub struct Metadata {
     pub recipient_info: Vec<RecipientInfo>,
 
     /// The initializion vector used for symmetric encryption.
-    #[serde(rename = "iv")]
     pub iv: [u8; IV_SIZE],
 
     /// The size of the chunks in which to process symmetric encryption.
