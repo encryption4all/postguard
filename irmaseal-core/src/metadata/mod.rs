@@ -65,7 +65,7 @@ impl From<&Policy> for HiddenPolicy {
 impl Policy {
     /// Derives an identity to be used in IBE (specificly, CGWFO).
     pub fn derive(&self) -> <CGWFO as IBKEM>::Id {
-        // This method implement domain separation as follows:
+        // This method implements domain separation as follows:
         // let policy(id = con[0..n-1]) = H(0 || h_0 || h_1 || .. | h_{n-1}),
         // where h_i = H(i + 1 || con[i]).
 
@@ -108,8 +108,8 @@ pub struct RecipientInfo {
     pub ct: [u8; CGWFO_CT_BYTES],
 }
 
-/// This struct _never_ needs to be in memory, unless you require the full metadata
-/// containing info for all recipients, otherwise see [`RecipientMetadata`].
+/// This struct containts metadata for _ALL_ recipients.  It only needs to be in memory for
+/// encoding purposes, for decoding for specific recipient see[`RecipientMetadata`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
     #[serde(rename = "rs")]
