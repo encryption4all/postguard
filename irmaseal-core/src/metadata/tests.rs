@@ -134,7 +134,7 @@ fn test_round() {
     assert_eq!(&keys1.aes_key, &keys2.aes_key);
     assert_eq!(&keys1.mac_key, &keys2.mac_key);
 
-    assert_eq!(&keys1.mac_key, &keys3.mac_key);
+    assert_eq!(&keys1.aes_key, &keys3.aes_key);
     assert_eq!(&keys1.mac_key, &keys3.mac_key);
 }
 
