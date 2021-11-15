@@ -9,11 +9,13 @@ use crate::util::{derive_keys, KeySet};
 use crate::{Attribute, Error, Identity, IV_SIZE};
 use alloc::fmt::Debug;
 use arrayvec::ArrayString;
+use core::convert::TryFrom;
 use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
 use ibe::kem::SharedSecret;
-use ibe::{kem::IBKEM, Compress};
+use ibe::{kem::IBKEM, Compress, Derive};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
+use tiny_keccak::{Hasher, Sha3};
 
 /// An IRMAseal policy.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
@@ -59,10 +61,6 @@ impl From<&Policy> for HiddenPolicy {
         }
     }
 }
-
-use core::convert::TryFrom;
-use ibe::Derive;
-use tiny_keccak::{Hasher, Sha3};
 
 impl Policy {
     /// Derives an identity to be used in IBE (specificly, CGWFO).
