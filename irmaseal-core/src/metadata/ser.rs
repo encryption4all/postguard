@@ -24,26 +24,19 @@ impl Metadata {
             Err(Error::FormatViolation)?
         }
 
+        // Generate a bunch of default ciphertexts.
         let mut cts = vec![<CGWFO as IBKEM>::Ct::default(); policies.len()];
 
-        // Map policies to IBE identities
-        let ids: Vec<<CGWFO as IBKEM>::Id> = policies
-            .iter()
-            .map(|p| {
-                Identity::new(
-                    p.timestamp,
-                    &p.attribute.atype,
-                    p.attribute.value.as_deref(),
-                )
-                .unwrap()
-                .derive::<CGWFO>()
-                .unwrap()
-            })
-            .collect();
+        // Map policies to IBE identities.
+        let ids: Vec<<CGWFO as IBKEM>::Id> = policies.iter().map(|p| p.derive()).collect();
 
+        // Map to references of IBE identities.
         let refs: Vec<&<CGWFO as IBKEM>::Id> = ids.iter().collect();
+
+        // Generate the shared secret and ciphertexts/
         let ss = CGWFO::multi_encaps(&pk.0, &refs[..], rng, &mut cts[..]).unwrap();
 
+        // Generate the RecipientInfo
         let recipient_info = rids
             .iter()
             .zip(policies.iter())

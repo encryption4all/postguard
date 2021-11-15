@@ -6,7 +6,7 @@ mod tests;
 
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::util::{derive_keys, KeySet};
-use crate::{Attribute, Error, IV_SIZE};
+use crate::{Attribute, Error, Identity, IV_SIZE};
 use alloc::fmt::Debug;
 use arrayvec::ArrayString;
 use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
@@ -20,9 +20,8 @@ use serde_big_array::BigArray;
 pub struct Policy {
     #[serde(rename = "t")]
     pub timestamp: u64,
-    #[serde(rename = "a")]
-    pub attribute: Attribute,
-    //pub con: Vec<Attribute>,
+    #[serde(rename = "c")]
+    pub con: Vec<Attribute>,
 }
 
 // We split them by type to ensure no mixups!
@@ -40,9 +39,8 @@ pub struct HiddenAttribute {
 pub struct HiddenPolicy {
     #[serde(rename = "t")]
     pub timestamp: u64,
-    #[serde(rename = "a")]
-    pub attribute: HiddenAttribute,
-    //pub con: Vec<Attribute>,
+    #[serde(rename = "c")]
+    pub con: Vec<HiddenAttribute>,
 }
 
 /// EXAMPLE!!!! DO NOT USE!!! DOESN'T HIDE ANYTHING
@@ -50,11 +48,46 @@ impl From<&Policy> for HiddenPolicy {
     fn from(p: &Policy) -> Self {
         Self {
             timestamp: p.timestamp,
-            attribute: HiddenAttribute {
-                atype: p.attribute.atype,
-                hidden_value: p.attribute.value,
-            },
+            con: p
+                .con
+                .iter()
+                .map(|a| HiddenAttribute {
+                    atype: a.atype,
+                    hidden_value: a.value,
+                })
+                .collect(),
         }
+    }
+}
+
+use core::convert::TryFrom;
+use ibe::Derive;
+use tiny_keccak::{Hasher, Sha3};
+
+impl Policy {
+    /// Derives an identity to be used in IBE (specificly, CGWFO).
+    pub fn derive(&self) -> <CGWFO as IBKEM>::Id {
+        // This method implement domain separation as follows:
+        // let policy(id = con[0..n-1]) = H(0 || h_0 || h_1 || .. | h_{n-1}),
+        // where h_i = H(i + 1 || con[i]).
+
+        let mut buf = [0u8; 65];
+        let mut sha3 = Sha3::v512();
+
+        for (i, ar) in self.con.iter().enumerate() {
+            let id = Identity::new(self.timestamp, &ar.atype, ar.value.as_deref())
+                .unwrap()
+                .derive::<CGWFO>()
+                .unwrap();
+
+            buf[0] = u8::try_from(i + 1).unwrap(); // fails for > 255 attributes
+            buf[1..].copy_from_slice(&id.0);
+            sha3.update(&buf);
+        }
+
+        buf[0] = 0x00;
+        sha3.finalize(&mut buf[1..]);
+        <CGWFO as IBKEM>::Id::derive(&buf)
     }
 }
 
