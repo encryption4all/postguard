@@ -72,7 +72,10 @@ impl Policy {
         let mut buf = [0u8; 65];
         let mut sha3 = Sha3::v512();
 
-        for (i, ar) in self.con.iter().enumerate() {
+        let mut copy = self.con.clone();
+        copy.sort();
+
+        for (i, ar) in copy.iter().enumerate() {
             let id = Identity::new(self.timestamp, &ar.atype, ar.value.as_deref())
                 .unwrap()
                 .derive::<CGWFO>()
@@ -109,7 +112,7 @@ pub struct RecipientInfo {
 }
 
 /// This struct containts metadata for _ALL_ recipients.  It only needs to be in memory for
-/// encoding purposes, for decoding for specific recipient see[`RecipientMetadata`].
+/// encoding purposes, for decoding for specific recipient see [`RecipientMetadata`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
     #[serde(rename = "rs")]

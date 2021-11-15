@@ -93,16 +93,3 @@ impl Metadata {
         Ok(serde_json::to_string_pretty(&self).or(Err(Error::FormatViolation))?)
     }
 }
-
-// TODO: domain separation:
-//
-// let h_i = H(i+1 || con[0])
-// let id_policy = H(0 || h_0 || h_1 || .. | h_n)
-//
-// TODO: con.sort() here, required impl Ord for Attribute
-//
-// policy.con.sort().iter().map(|ar| {
-//     let i =
-//         Identity::new(policy.timestamp, &ar.atype, ar.value.as_deref()).unwrap();
-//     let derived = i.derive::<CGWFO>();
-// });

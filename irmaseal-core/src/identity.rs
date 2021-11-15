@@ -12,7 +12,7 @@ const IDENTITY_UNSET: u8 = 0xFF;
 type IdentityBuf = ArrayVec<u8, 1024>;
 
 /// An IRMAseal Attribute(Request), which is a simple case of an IRMA ConDisCon.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
     pub atype: ArrayString<255>,

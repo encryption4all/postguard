@@ -16,7 +16,11 @@ macro_rules! setup {
         };
         let p2 = Policy {
             timestamp: 1566722350,
-            con: vec![Attribute::new("pbdf.gemeente.personalData.name", Some("leon")).unwrap()],
+            con: vec![
+                Attribute::new("pbdf.gemeente.personalData.name", Some("leon")).unwrap(),
+                Attribute::new("pbdf.sidn-pbdf.email.email", Some("leon.botros@gmail.com"))
+                    .unwrap(),
+            ],
         };
 
         let $rids = [&identifier1, &identifier2];
@@ -82,7 +86,7 @@ fn test_transcode() {
     let v1 = serde_json::to_vec(&meta).unwrap();
     let mut v2 = Vec::new();
 
-    // Be sure to skip the preamble when transcoding
+    // Be sure to skip or better, check, the preamble when transcoding
     let mut des = rmp_serde::decode::Deserializer::new(&binary[PREAMBLE_SIZE..]);
     let mut ser = serde_json::Serializer::new(Cursor::new(&mut v2));
 
@@ -132,4 +136,19 @@ fn test_round() {
 
     assert_eq!(&keys1.mac_key, &keys3.mac_key);
     assert_eq!(&keys1.mac_key, &keys3.mac_key);
+}
+
+#[test]
+fn test_ordering() {
+    // Test that symantically equivalent policies map to the same IBE identity.
+    setup!(_rids, policies, _mpk, _msk, _rng);
+    let p1_derived = policies[1].derive();
+
+    let mut reversed = policies[1].clone();
+    reversed.con.reverse();
+    assert_eq!(&p1_derived, &reversed.derive());
+
+    // The timestamp should matter, and therefore map to a different IBE identity.
+    reversed.timestamp += 1;
+    assert_ne!(&p1_derived, &reversed.derive());
 }
