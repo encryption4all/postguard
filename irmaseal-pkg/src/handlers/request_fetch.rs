@@ -47,7 +47,7 @@ pub async fn request_fetch<K: IBKEM>(
     let client = IrmaClientBuilder::new(&irma_url).unwrap().build();
     let result = client.result(&SessionToken(token)).await;
 
-    let d = |status: KeyStatus| KeyResponse { status, key: None };
+    let d = |status: KeyStatus| Ok(KeyResponse { status, key: None });
 
     let kr = match result {
         Ok(result) => match fetch_identity(timestamp, &result.disclosed) {
@@ -56,23 +56,25 @@ pub async fn request_fetch<K: IBKEM>(
                 let mut rng = rand::thread_rng();
                 let usk = K::extract_usk(Some(&kp.pk), &kp.sk, &k, &mut rng);
 
-                KeyResponse {
+                Ok(KeyResponse {
                     status: KeyStatus::DoneValid,
                     key: Some(UserSecretKey::<K>(usk)),
-                }
+                })
             }
             None => d(KeyStatus::DoneInvalid),
         },
-        // TODO: map every irma::Error to an associated KeyStatus
-        Err(irma::Error::SessionNotFinished) => d(KeyStatus::Connected),
+        Err(irma::Error::SessionNotFinished(status)) => match status {
+            irma::SessionStatus::Initialized => d(KeyStatus::Initialized),
+            irma::SessionStatus::Pairing => d(KeyStatus::Pairing),
+            irma::SessionStatus::Connected => d(KeyStatus::Connected),
+            _ => Err(crate::Error::Unexpected),
+        },
         Err(irma::Error::SessionTimedOut) => d(KeyStatus::Cancelled),
         Err(irma::Error::SessionCancelled) => d(KeyStatus::Connected),
-        Err(irma::Error::NetworkError(x)) => {
-            println!("NetworkError: {:?}", x);
-            d(KeyStatus::Pairing)
+        Err(irma::Error::NetworkError(_)) | Err(irma::Error::InvalidUrl(_)) => {
+            Err(crate::Error::SessionNotFound)
         }
-        Err(irma::Error::InvalidUrl(_)) => d(KeyStatus::Timeout),
-    };
+    }?;
 
     Ok(HttpResponse::Ok().json(kr))
 }
