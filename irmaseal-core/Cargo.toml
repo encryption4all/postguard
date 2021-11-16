@@ -20,7 +20,7 @@ arrayvec = { version = "0.7.1", features = ["serde"] }
 subtle = "2.3"
 postcard = "0.7.2"
 base64 = "0.12"
-ibe = { path = "../../ibe", features = ["cgwfo"] }
+ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "features_and_docs", features = ["cgwfo"] }
 serde = { version = "1.0.126", features = ["derive"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
 rmp-serde = "0.15.5"
