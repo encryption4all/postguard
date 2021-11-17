@@ -47,7 +47,7 @@ pub const VERSION_V2: u16 = 1;
 pub(crate) const PRELUDE_SIZE: usize = 4;
 pub(crate) const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
 pub(crate) const VERSION_SIZE: usize = mem::size_of::<u16>();
-pub(crate) const METADATA_SIZE_SIZE: usize = mem::size_of::<u64>();
+pub(crate) const METADATA_SIZE_SIZE: usize = mem::size_of::<u32>();
 
 // PREAMBLE contains the following:
 //

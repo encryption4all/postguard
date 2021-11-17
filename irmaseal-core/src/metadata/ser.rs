@@ -33,10 +33,10 @@ impl Metadata {
         // Map to references of IBE identities.
         let refs: Vec<&<CGWFO as IBKEM>::Id> = ids.iter().collect();
 
-        // Generate the shared secret and ciphertexts/
+        // Generate the shared secret and ciphertexts.
         let ss = CGWFO::multi_encaps(&pk.0, &refs[..], rng, &mut cts[..]).unwrap();
 
-        // Generate the RecipientInfo
+        // Generate all RecipientInfo's.
         let recipient_info = rids
             .iter()
             .zip(policies.iter())
@@ -62,7 +62,7 @@ impl Metadata {
     ///
     /// Internally uses the "named" convention, which preserves field names.
     /// Fields names are shortened to limit overhead:
-    /// `r`: sequence of serialized `RecipientInfo`s,
+    /// `rs`: sequence of serialized `RecipientInfo`s,
     ///     `id`: serialized `RecipientIdentifier`,
     ///     `p`: serialized `HiddenPolicy`:
     ///     `ct`: associated ciphertext with this policy,
@@ -72,15 +72,20 @@ impl Metadata {
         w.write(&PRELUDE)?;
         w.write(&VERSION_V2.to_be_bytes())?;
 
-        // For this to work, we need know the length of the metadata in advance
-        // For now: write to vec and determine the length.
+        // For this to work, we need know the length of the metadata in advance.
+        // For now, buffer it and determine the length.
         // TODO: could optimize this, or at least use a max capacity.
         let mut meta_vec = Vec::new();
         let mut serializer = rmp_serde::encode::Serializer::new(&mut meta_vec).with_struct_map();
-        self.serialize(&mut serializer)
-            .map_err(|_e| Error::FormatViolation)?;
 
-        w.write(&meta_vec.len().to_be_bytes())?;
+        self.serialize(&mut serializer)
+            .map_err(|_e| Error::ConstraintViolation)?;
+
+        w.write(
+            &u32::try_from(meta_vec.len())
+                .map_err(|_e| Error::ConstraintViolation)?
+                .to_be_bytes(),
+        )?;
         w.write(&meta_vec)?;
 
         Ok(())

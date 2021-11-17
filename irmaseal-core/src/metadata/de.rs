@@ -36,7 +36,7 @@ impl RecipientMetadata {
             Err(Error::VersionError)?
         }
 
-        let metadata_len = u64::from_be_bytes(
+        let metadata_len = u32::from_be_bytes(
             tmp[PREAMBLE_SIZE - METADATA_SIZE_SIZE..]
                 .try_into()
                 .map_err(|_e| Error::FormatViolation)?,
