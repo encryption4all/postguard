@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 
 /// Set of public parameters for the Private Key Generator (PKG).
 #[derive(Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "PublicKey<K>: Serialize",
-    deserialize = "PublicKey<K>: Deserialize<'de>"
-))]
 pub struct Parameters<K: IBKEM> {
     pub format_version: u8,
     pub max_age: u64,
+    #[serde(bound(
+        serialize = "PublicKey<K>: Serialize",
+        deserialize = "PublicKey<K>: Deserialize<'de>"
+    ))]
     pub public_key: PublicKey<K>,
 }
 
