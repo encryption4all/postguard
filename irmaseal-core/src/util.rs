@@ -16,7 +16,16 @@ pub fn version<K: IBKEM>() -> Result<&'static str, Error> {
 #[derive(Debug, Clone)]
 pub struct KeySet {
     pub aes_key: [u8; KEY_SIZE],
-    pub mac_key: [u8; MAC_SIZE],
+    pub mac_key: [u8; KEY_SIZE],
+}
+
+/// Splits the 32-byte shared secret into two 16-byte keys.
+pub(crate) fn derive_keys(key: &SharedSecret) -> KeySet {
+    let (aes_key, mac_key) = key.0.split_at(KEY_SIZE);
+    KeySet {
+        aes_key: aes_key.try_into().unwrap(),
+        mac_key: mac_key.try_into().unwrap(),
+    }
 }
 
 pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
@@ -24,14 +33,6 @@ pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
         Some(x.unwrap())
     } else {
         None
-    }
-}
-
-/// Splits the 64-byte shared secret into two keys
-pub(crate) fn derive_keys(key: &SharedSecret) -> KeySet {
-    KeySet {
-        aes_key: key.0[0..32].try_into().unwrap(),
-        mac_key: key.0[32..64].try_into().unwrap(),
     }
 }
 
