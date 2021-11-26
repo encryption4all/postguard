@@ -69,8 +69,8 @@ pub async fn request_fetch<K: IBKEM>(
             irma::SessionStatus::Connected => d(KeyStatus::Connected),
             _ => Err(crate::Error::Unexpected),
         },
-        Err(irma::Error::SessionTimedOut) => d(KeyStatus::Cancelled),
-        Err(irma::Error::SessionCancelled) => d(KeyStatus::Connected),
+        Err(irma::Error::SessionTimedOut) => d(KeyStatus::Timeout),
+        Err(irma::Error::SessionCancelled) => d(KeyStatus::Cancelled),
         Err(irma::Error::NetworkError(_)) | Err(irma::Error::InvalidUrl(_)) => {
             Err(crate::Error::SessionNotFound)
         }
