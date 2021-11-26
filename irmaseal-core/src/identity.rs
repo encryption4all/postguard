@@ -7,20 +7,21 @@ use serde::{Deserialize, Serialize};
 
 const IDENTITY_UNSET: u8 = 0xFF;
 
-// Must be at least 8+255+254 = 517
+// Must be at least 8 + 16 * (255 + 254) = 517
 #[allow(dead_code)]
 type IdentityBuf = ArrayVec<u8, 1024>;
 
-/// An IRMAseal Attribute, which is a simple case of an IRMA ConDisCon.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+/// An IRMAseal Attribute(Request), which is a simple case of an IRMA ConDisCon.
+#[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy, Default)]
 pub struct Attribute {
-    #[serde(rename = "type")]
+    #[serde(rename = "t")]
     pub atype: ArrayString<255>,
+    #[serde(rename = "v")]
     pub value: Option<ArrayString<254>>,
 }
 
 /// An IRMAseal identity, from which internally a Waters identity can be derived.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct Identity {
     pub timestamp: u64,
     pub attribute: Attribute,
@@ -33,7 +34,7 @@ impl Attribute {
     pub fn new(atype: &str, value: Option<&str>) -> Result<Self, Error> {
         let atype = ArrayString::<255>::from(atype).or(Err(Error::ConstraintViolation))?;
         let value = value
-            .map(|v| Ok(ArrayString::<254>::from(v).or(Err(Error::ConstraintViolation))?))
+            .map(|v| ArrayString::<254>::from(v).map_err(|_e| Error::ConstraintViolation))
             .transpose()?;
 
         Ok(Attribute { atype, value })

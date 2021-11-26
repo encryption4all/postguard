@@ -13,7 +13,7 @@ pub fn version<K: IBKEM>() -> Result<&'static str, Error> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct KeySet {
     pub aes_key: [u8; KEY_SIZE],
     pub mac_key: [u8; MAC_SIZE],
