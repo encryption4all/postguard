@@ -1,136 +1,162 @@
 use super::Error;
-use arrayvec::{ArrayString, ArrayVec};
-use core::convert::TryFrom;
+use ibe::kem::cgw_fo::CGWFO;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
+use tiny_keccak::{Hasher, Sha3};
 
-const IDENTITY_UNSET: u8 = 0xFF;
+const IDENTITY_UNSET: u64 = u64::MAX;
+const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
 
-// Must be at least 8 + 16 * (255 + 254) = 517
-#[allow(dead_code)]
-type IdentityBuf = ArrayVec<u8, 1024>;
-
-/// An IRMAseal Attribute(Request), which is a simple case of an IRMA ConDisCon.
-#[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy, Default)]
+/// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
+// TODO: consider implementing Ord ourselves.
+#[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
-    pub atype: ArrayString<255>,
+    pub atype: String,
     #[serde(rename = "v")]
-    pub value: Option<ArrayString<254>>,
+    pub value: Option<String>,
+    // TODO: not null bool?
 }
 
-/// An IRMAseal identity, from which internally a Waters identity can be derived.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Default)]
-pub struct Identity {
+/// An IRMAseal policy.
+///
+/// Contains a timestamp and a conjuction of Attribute(Requests).
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
+pub struct Policy {
+    #[serde(rename = "t")]
     pub timestamp: u64,
-    pub attribute: Attribute,
+    #[serde(rename = "c")]
+    pub con: Vec<Attribute>,
+}
+
+/// An IRMAseal AttributeRequest.
+///
+/// We split this from Attribut by type to ensure no mixups!
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
+pub struct HiddenAttribute {
+    #[serde(rename = "t")]
+    pub atype: String,
+    #[serde(rename = "v")]
+    pub hidden_value: Option<String>,
+}
+
+/// An IRMAseal hidden policy.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
+pub struct HiddenPolicy {
+    #[serde(rename = "t")]
+    pub timestamp: u64,
+    #[serde(rename = "c")]
+    pub con: Vec<HiddenAttribute>,
+}
+
+impl Policy {
+    /// Completely hides the attribute value.
+    pub fn to_hidden(&self) -> HiddenPolicy {
+        HiddenPolicy {
+            timestamp: self.timestamp,
+            con: self
+                .con
+                .iter()
+                .map(|a| HiddenAttribute {
+                    atype: a.atype.clone(),
+                    hidden_value: Some("".to_string()),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Policy {
+    /// Derives an identity to be used in IBE (specifically, CGWFO).
+    pub fn derive(&self) -> Result<<CGWFO as IBKEM>::Id, Error> {
+        // This method implements domain separation as follows:
+        // Suppose we have the following policy:
+        //  - con[0..n - 1] consisting of n conjunctions.
+        //  - timestamp
+        // = H(0 || f_0 || f'_0 ||  .. || f_{n-1} || f'_{n-1} || timestamp),
+        // where f_i  = H(2i + 1 || a.typ.len() || a.typ),
+        // and   f'_i = H(2i + 2 || a.val.len() || a.val).
+        //
+        // Conjunction is sorted. This requires that Attribute implements a stable Ord.
+        // Lengths are encoded as usize.
+
+        if self.con.len() > MAX_CON {
+            Err(Error::ConstraintViolation)?
+        }
+
+        let mut tmp = [0u8; 64];
+
+        let mut pre_h = Sha3::v512();
+        pre_h.update(&[0x00]);
+
+        let mut copy = self.con.clone();
+        copy.sort();
+
+        for (i, ar) in copy.iter().enumerate() {
+            let mut f = Sha3::v512();
+
+            f.update(&(2 * i + 1).to_be_bytes());
+            let at_bytes = ar.atype.as_bytes();
+            f.update(&at_bytes.len().to_be_bytes());
+            f.update(&at_bytes);
+            f.finalize(&mut tmp);
+
+            pre_h.update(&tmp);
+
+            // Initialize a new hash, f'
+            f = Sha3::v512();
+            f.update(&(2 * i + 2).to_be_bytes());
+
+            match &ar.value {
+                None => f.update(&IDENTITY_UNSET.to_be_bytes()),
+                Some(val) => {
+                    let val_bytes = val.as_bytes();
+                    f.update(&val_bytes.len().to_be_bytes());
+                    f.update(&val_bytes);
+                }
+            }
+
+            f.finalize(&mut tmp);
+
+            pre_h.update(&tmp);
+        }
+
+        pre_h.update(&self.timestamp.to_be_bytes());
+        pre_h.finalize(&mut tmp);
+
+        // This hash is superfluous in theory, but derive does not support incremental hashing.
+        // As a practical considerion we use an extra hash here.
+        Ok(<CGWFO as IBKEM>::Id::derive(&tmp))
+    }
 }
 
 impl Attribute {
     /// Conveniently construct a new attribute. It is also possible to directly construct this object.
-    ///
-    /// Throws a ConstraintViolation when the type or value strings are too long.
     pub fn new(atype: &str, value: Option<&str>) -> Result<Self, Error> {
-        let atype = ArrayString::<255>::from(atype).or(Err(Error::ConstraintViolation))?;
-        let value = value
-            .map(|v| ArrayString::<254>::from(v).map_err(|_e| Error::ConstraintViolation))
-            .transpose()?;
-
+        let atype = atype.to_owned();
+        let value = value.map(|s| s.to_owned());
         Ok(Attribute { atype, value })
-    }
-}
-
-impl Identity {
-    /// Conveniently construct a new identity. It is also possible to directly construct this object.
-    ///
-    /// Throws a ConstraintViolation when the attribute or identity strings are too long.
-    pub fn new(timestamp: u64, atype: &str, value: Option<&str>) -> Result<Identity, Error> {
-        Ok(Identity {
-            timestamp,
-            attribute: Attribute::new(atype, value)?,
-        })
-    }
-
-    /// Derive the corresponding Waters identity in a deterministic way.
-    /// Uses `ibe::kiltz_vahlis_one::Identity:derive` internally.
-    pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error>
-    where
-        K::Id: Derive,
-    {
-        let mut buf = IdentityBuf::new();
-
-        buf.try_extend_from_slice(&self.timestamp.to_be_bytes())
-            .map_err(|_| Error::ConstraintViolation)?;
-
-        let at = self.attribute.atype.as_bytes();
-        let at_len = u8::try_from(at.len()).map_err(|_| Error::ConstraintViolation)?;
-
-        buf.try_extend_from_slice(&[at_len])
-            .map_err(|_| Error::ConstraintViolation)?;
-
-        buf.try_extend_from_slice(&at)
-            .map_err(|_| Error::ConstraintViolation)?;
-
-        match self.attribute.value {
-            None => buf
-                .try_extend_from_slice(&[IDENTITY_UNSET])
-                .map_err(|_| Error::ConstraintViolation),
-            Some(i) => {
-                let i = i.as_bytes();
-                let i_len = i.len();
-
-                if i_len >= usize::from(IDENTITY_UNSET) {
-                    return Err(Error::ConstraintViolation);
-                }
-
-                let i_len_u8 = u8::try_from(i_len).map_err(|_| Error::ConstraintViolation)?;
-
-                buf.try_extend_from_slice(&[i_len_u8])
-                    .map_err(|_| Error::ConstraintViolation)?;
-
-                buf.try_extend_from_slice(&i)
-                    .map_err(|_| Error::ConstraintViolation)
-            }
-        }?;
-
-        Ok(<K as IBKEM>::Id::derive(&buf))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::test_common::TestSetup;
 
     #[test]
-    fn eq_write_read() {
-        let mut buf = IdentityBuf::new();
+    fn test_ordering() {
+        // Test that symantically equivalent policies map to the same IBE identity.
+        let setup = TestSetup::default();
 
-        // using the arrayvec as a slice uses amount
-        // of valid elements in the arrayvec as the slice
-        // slice length. Since we want to write into it
-        // using postcard we fill it with dummy data
-        // first. Alternative is to use unsafe and
-        // force the capacity to a certain size.
-        for _ in 0..buf.capacity() {
-            buf.push(0);
-        }
+        let p1_derived = setup.policies[1].derive();
 
-        unsafe {
-            buf.set_len(buf.capacity());
-        }
+        let mut reversed = setup.policies[1].clone();
+        reversed.con.reverse();
+        assert_eq!(&p1_derived, &reversed.derive());
 
-        let i = Identity::new(
-            1566722350,
-            "pbdf.pbdf.email.email",
-            Some("w.geraedts@sarif.nl"),
-        )
-        .unwrap();
-
-        let identity_bytes = postcard::to_slice(&i, buf.as_mut_slice()).unwrap();
-
-        let i2 = postcard::from_bytes(identity_bytes).unwrap();
-
-        assert_eq!(i, i2);
+        // The timestamp should matter, and therefore map to a different IBE identity.
+        reversed.timestamp += 1;
+        assert_ne!(&p1_derived, &reversed.derive());
     }
 }

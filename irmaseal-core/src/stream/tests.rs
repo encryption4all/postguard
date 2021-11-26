@@ -1,158 +1,107 @@
-use crate::stream::util::SliceReader;
-use crate::stream::*;
-use crate::*;
+use super::*;
+use crate::metadata::RecipientIdentifier;
+use crate::stream::unsealer::Unsealer;
+use crate::Policy;
+use futures::{executor::block_on, io::AllowStdIo};
+use std::io::Cursor;
 
-use arrayvec::ArrayVec;
-use rand::RngCore;
+use crate::test_common::TestSetup;
 
-use ibe::kem::{cgw_fo::CGWFO, IBKEM};
+fn seal_helper(setup: &TestSetup, plain: &Vec<u8>) -> Vec<u8> {
+    let mut rng = rand::thread_rng();
 
-type BigBuf = ArrayVec<u8, 65536>;
+    let mut input = AllowStdIo::new(Cursor::new(plain));
+    let mut output = AllowStdIo::new(Vec::new());
 
-struct DefaultProps {
-    pub i: Identity,
-    pub pk: <CGWFO as IBKEM>::Pk,
-    pub sk: <CGWFO as IBKEM>::Sk,
-}
+    let identifier_refs: Vec<&RecipientIdentifier> = setup.identifiers.iter().collect();
+    let policy_refs: Vec<&Policy> = setup.policies.iter().collect();
 
-impl Default for DefaultProps {
-    fn default() -> DefaultProps {
-        let mut rng = rand::thread_rng();
-        let i = Identity::new(
-            1566722350,
-            "pbdf.pbdf.email.email",
-            Some("w.geraedts@sarif.nl"),
+    block_on(async {
+        seal(
+            &identifier_refs,
+            &policy_refs,
+            &setup.mpk,
+            &mut rng,
+            &mut input,
+            &mut output,
         )
+        .await
         .unwrap();
+    });
 
-        let (pk, sk) = CGWFO::setup(&mut rng);
-
-        DefaultProps { i, pk, sk }
-    }
+    output.into_inner()
 }
 
-fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
-    let mut rng = rand::thread_rng();
-    let DefaultProps { i, pk, sk: _ } = props;
+fn unseal_helper(setup: &TestSetup, ct: &Vec<u8>, recipient_idx: usize) -> Vec<u8> {
+    let mut input = AllowStdIo::new(Cursor::new(ct));
+    let mut output = AllowStdIo::new(Vec::new());
 
-    let mut buf = BigBuf::new();
-    {
-        let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
-        s.write(&content).unwrap();
-    } // Force Drop of s.
-    buf
+    block_on(async {
+        let unsealer = Unsealer::new(&mut input, &setup.identifiers[recipient_idx])
+            .await
+            .unwrap();
+
+        // Normally, a user would need to retrieve a usk here via the PKG,
+        // but in this case we own the master key pair.
+        unsealer
+            .unseal(&setup.usks[recipient_idx], &setup.mpk, &mut output)
+            .await
+            .unwrap();
+    });
+
+    output.into_inner()
 }
 
-fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
-    let mut rng = rand::thread_rng();
-    let DefaultProps { i, pk, sk } = props;
+fn seal_and_unseal(setup: &TestSetup, plain: Vec<u8>) {
+    let ct = seal_helper(&setup, &plain);
+    let plain2 = unseal_helper(&setup, &ct, 0);
 
-    let mut mr = MetadataReader::new();
-    let mut mrr = None;
-
-    let mut written = 0;
-    for b in buf {
-        written += 1;
-        match mr.write(&[*b]).unwrap() {
-            MetadataReaderResult::Hungry => continue,
-            MetadataReaderResult::Saturated {
-                unconsumed,
-                header,
-                metadata,
-                version: v,
-            } => {
-                assert_eq!(unconsumed, 0);
-                assert_eq!(v, VERSION_V2);
-                mrr = Some((header, metadata));
-                break;
-            }
-        }
-    }
-
-    let (header, metadata) = mrr.unwrap();
-
-    let i2 = match metadata {
-        #[cfg(feature = "v1")]
-        Metadata::V1(ref x) => &x.identity,
-        Metadata::V2(ref x) => &x.identity,
-    };
-
-    assert_eq!(&i, &i2);
-    let usk = UserSecretKey(CGWFO::extract_usk(
-        Some(&pk),
-        &sk,
-        &i2.derive::<CGWFO>().unwrap(),
-        &mut rng,
-    ));
-
-    let pk = PublicKey(*pk);
-
-    let bufr = SliceReader::new(&buf[written..]);
-    if let Metadata::V2(m) = metadata {
-        let mut unsealer = Unsealer::new_v2(&m, header, &usk, &pk, bufr).unwrap();
-        let mut dst = BigBuf::new();
-        unsealer.write_to(&mut dst).unwrap();
-
-        (dst, unsealer.validate())
-    } else {
-        // this else is required when feature "v1" is enabled
-        panic!("Should be v2")
-    }
+    assert_eq!(&plain, &plain2);
 }
 
-fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {
-    let buf = seal(props, content);
-    unseal(props, &buf)
-}
-
-fn do_test(props: &DefaultProps, content: &mut [u8]) {
-    rand::thread_rng().fill_bytes(content);
-    let (dst, valid) = seal_and_unseal(props, content);
-
-    assert_eq!(&content.as_ref(), &dst.as_slice());
-    assert!(valid);
+fn rand_vec(length: usize) -> Vec<u8> {
+    (0..length).map(|_| rand::random::<u8>()).collect()
 }
 
 #[test]
-fn reflection_sealer_opener() {
-    let props = DefaultProps::default();
+fn test_reflection_seal_unsealer() {
+    let setup = TestSetup::default();
 
-    do_test(&props, &mut [0u8; 0]);
-    do_test(&props, &mut [0u8; 1]);
-    do_test(&props, &mut [0u8; 511]);
-    do_test(&props, &mut [0u8; 512]);
-    do_test(&props, &mut [0u8; 1008]);
-    do_test(&props, &mut [0u8; 1023]);
-    do_test(&props, &mut [0u8; 60000]);
+    seal_and_unseal(&setup, rand_vec(1));
+    seal_and_unseal(&setup, rand_vec(5));
+    seal_and_unseal(&setup, rand_vec(32));
+    seal_and_unseal(&setup, rand_vec(33));
+    seal_and_unseal(&setup, rand_vec(511));
+    seal_and_unseal(&setup, rand_vec(512));
+    seal_and_unseal(&setup, rand_vec(1023));
+    seal_and_unseal(&setup, rand_vec(60000));
 }
 
 #[test]
-fn corrupt_body() {
-    let props = DefaultProps::default();
+#[should_panic]
+fn test_corrupt_body() {
+    let setup = TestSetup::default();
 
-    let mut content = [0u8; 60000];
-    rand::thread_rng().fill_bytes(&mut content);
+    let plain = rand_vec(100);
+    let mut ct = seal_helper(&setup, &plain);
 
-    let mut buf = seal(&props, &content);
-    buf[1000] += 0x02;
-    let (dst, valid) = unseal(&props, &buf);
+    ct[1000] += 2;
 
-    assert_ne!(&content.as_ref(), &dst.as_slice());
-    assert!(!valid);
+    // This should panic.
+    let _plain2 = unseal_helper(&setup, &ct, 1);
 }
 
 #[test]
-fn corrupt_mac() {
-    let props = DefaultProps::default();
+#[should_panic]
+fn test_corrupt_mac() {
+    let setup = TestSetup::default();
 
-    let mut content = [0u8; 60000];
-    rand::thread_rng().fill_bytes(&mut content);
+    let plain = rand_vec(100);
+    let mut ct = seal_helper(&setup, &plain);
 
-    let mut buf = seal(&props, &content);
-    let mutation_point = buf.len() - 5;
-    buf[mutation_point] += 0x02;
-    let (dst, valid) = unseal(&props, &buf);
+    let len = ct.len();
+    ct[len - 5] += 2;
 
-    assert_eq!(&content.as_ref(), &dst.as_slice());
-    assert!(!valid);
+    // This should panic as well.
+    let _plain2 = unseal_helper(&setup, &ct, 1);
 }

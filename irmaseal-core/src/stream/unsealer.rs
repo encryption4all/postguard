@@ -1,145 +1,154 @@
+use crate::metadata::*;
 use crate::*;
 use crate::{stream::*, util::KeySet};
+use aes::Aes128;
 use ctr::cipher::{NewCipher, StreamCipher};
-use digest::Digest;
+use ctr::Ctr64BE;
+use futures::io::{AsyncReadExt, AsyncWriteExt};
+use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use ibe::kem::cgw_fo::CGWFO;
+use std::convert::TryInto;
+use tiny_keccak::{Hasher, Kmac};
 
-#[cfg(feature = "v1")]
-mod v1 {
-    use super::*;
-    use crate::metadata::v1::V1Metadata;
-    use core::convert::TryInto;
-    use ibe::kem::kiltz_vahlis_one::KV1;
-
-    impl<R: Readable> Unsealer<R> {
-        pub fn new_v1(
-            metadata: &V1Metadata,
-            header: HeaderBuf,
-            usk: &UserSecretKey<KV1>,
-            r: R,
-        ) -> Result<Unsealer<R>, Error> {
-            let KeySet { aes_key, mac_key } = metadata.derive_keys(usk)?;
-
-            let mut mac = Mac::default();
-            mac.input(&mac_key);
-            mac.input(&header);
-
-            let iv: [u8; IV_SIZE] = metadata.iv.as_slice().try_into().unwrap();
-
-            let decrypter = SymCrypt::new(&aes_key.into(), &iv.into());
-
-            Ok(Unsealer {
-                decrypter,
-                mac,
-                r,
-                resultbuf: None,
-            })
-        }
-    }
-}
-
-/// Unseal IRMAseal encrypted bytestream.
-///
-/// **Warning**: will only validate the authenticity of the plaintext when calling `validate`.
-pub struct Unsealer<R: Readable> {
-    decrypter: SymCrypt,
-    mac: Mac,
+pub struct Unsealer<R: AsyncRead + Unpin> {
+    meta_buf: Vec<u8>,
+    meta: RecipientMetadata,
     r: R,
-    resultbuf: Option<[u8; SYMMETRIC_CRYPTO_BLOCKSIZE]>,
 }
 
-impl<R: Readable> Unsealer<R> {
-    pub fn new_v2(
-        metadata: &V2Metadata,
-        header: HeaderBuf,
-        usk: &UserSecretKey<CGWFO>,
-        mpk: &PublicKey<CGWFO>,
-        r: R,
-    ) -> Result<Unsealer<R>, Error> {
-        let KeySet { aes_key, mac_key } = metadata.derive_keys(usk, mpk)?;
+impl<R> Unsealer<R>
+where
+    R: AsyncRead + Unpin,
+{
+    pub async fn new(mut r: R, id: &RecipientIdentifier) -> Result<Self, Error> {
+        let mut tmp = [0u8; PREAMBLE_SIZE];
+        r.read_exact(&mut tmp)
+            .map_err(|_e| Error::NotIRMASEAL)
+            .await?;
 
-        let mut mac = Mac::default();
-        mac.input(&mac_key);
-        mac.input(&header);
+        if tmp[..PRELUDE_SIZE] != PRELUDE {
+            Err(Error::NotIRMASEAL)?
+        }
 
-        let decrypter = SymCrypt::new(&aes_key.into(), &metadata.iv.into());
+        let version = u16::from_be_bytes(
+            tmp[PRELUDE_SIZE..PRELUDE_SIZE + VERSION_SIZE]
+                .try_into()
+                .map_err(|_e| Error::FormatViolation)?,
+        );
+
+        if version != VERSION_V2 {
+            Err(Error::VersionError)?
+        }
+
+        let metadata_len = u32::from_be_bytes(
+            tmp[PREAMBLE_SIZE - METADATA_SIZE_SIZE..]
+                .try_into()
+                .map_err(|_e| Error::FormatViolation)?,
+        ) as usize;
+
+        let mut meta_buf = Vec::with_capacity(PREAMBLE_SIZE + metadata_len);
+        meta_buf.extend_from_slice(&tmp);
+
+        // Limit reader to not read past metadata
+        let mut r = r.take(metadata_len as u64);
+
+        r.read_to_end(&mut meta_buf)
+            .map_err(|_e| Error::FormatViolation)
+            .await?;
+
+        let recipient_meta =
+            RecipientMetadata::msgpack_from(&*meta_buf, id).map_err(|_e| Error::FormatViolation)?;
 
         Ok(Unsealer {
-            decrypter,
-            mac,
-            r,
-            resultbuf: None,
+            meta: recipient_meta,
+            meta_buf,
+            r: r.into_inner(), // This (new) reader is locked to the payload.
         })
     }
-}
 
-impl<R: Readable> Unsealer<R> {
-    /// Read up to `SYMMETRIC_CRYPTO_BLOCKSIZE` bytes at a time.
-    pub fn read(&mut self) -> Result<&[u8], StreamError> {
-        let (resultsize, macbuf) = match self.resultbuf.as_mut() {
-            None => (SYMMETRIC_CRYPTO_BLOCKSIZE, None),
-            Some(dst) => {
-                let mut macbuf = [0u8; MAC_SIZE];
-                macbuf.copy_from_slice(
-                    &dst[SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE],
-                );
-                (SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE, Some(macbuf))
-            }
-        };
-
-        // TODO eliminate extra check.
-        let dst = self
-            .resultbuf
-            .get_or_insert_with(|| [0u8; SYMMETRIC_CRYPTO_BLOCKSIZE]);
-        let src = self.r.read_bytes(resultsize)?;
-        let srcsize = src.len();
-
-        if srcsize == 0 {
-            return Err(StreamError::EndOfStream);
-        }
-
-        let dstmid = SYMMETRIC_CRYPTO_BLOCKSIZE - srcsize;
-        dst[dstmid..SYMMETRIC_CRYPTO_BLOCKSIZE].copy_from_slice(src);
-
-        let dststart = match macbuf {
-            None => dstmid,
-            Some(macbuf) => {
-                let dststart = dstmid - MAC_SIZE;
-                dst[dststart..dstmid].copy_from_slice(&macbuf);
-                dststart
-            }
-        };
-
-        let mut content = &mut dst[dststart..SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE];
-        self.mac.input(&content);
-        self.decrypter.apply_keystream(&mut content);
-
-        Ok(content)
+    pub async fn unseal<W>(
+        self,
+        usk: &UserSecretKey<CGWFO>,
+        mpk: &PublicKey<CGWFO>,
+        w: W,
+    ) -> Result<(), Error>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        self.generic_unseal::<W, Ctr64BE<Aes128>, Kmac>(usk, mpk, w)
+            .await
     }
 
-    /// Will check the tag once the entire stream is exhausted.
-    /// Will only yield the correct value once the **entire** stream is read
-    /// using `write_to`, or by manually calling `write` until `Error::EndOfStream` is yielded.
-    pub fn validate(self) -> bool {
-        match self.resultbuf {
-            None => false,
-            Some(resultbuf) => {
-                let expected =
-                    &resultbuf[SYMMETRIC_CRYPTO_BLOCKSIZE - MAC_SIZE..SYMMETRIC_CRYPTO_BLOCKSIZE];
-                let got = self.mac.result();
-                expected == got.as_slice()
-            }
-        }
-    }
+    /// This function is generic over streamciphers and MACs.
+    async fn generic_unseal<W, Sym, Mac>(
+        mut self,
+        usk: &UserSecretKey<CGWFO>,
+        mpk: &PublicKey<CGWFO>,
+        mut w: W,
+    ) -> Result<(), Error>
+    where
+        Sym: NewCipher + StreamCipher,
+        Mac: NewMac + Hasher,
+        W: AsyncWrite + Unpin,
+    {
+        let KeySet { aes_key, mac_key } = self.meta.derive_keys(usk, mpk).unwrap();
 
-    /// Will block and write the entire stream to the argument writer.
-    pub fn write_to<W: Writable>(&mut self, w: &mut W) -> Result<(), StreamError> {
+        let mut dec =
+            Sym::new_from_slices(&aes_key, &self.meta.iv).map_err(|_err| Error::FormatViolation)?;
+        let mut mac = Mac::new_with_key(&mac_key);
+
+        mac.update(&self.meta_buf);
+
+        let bufsize: usize = self.meta.chunk_size + TAG_SIZE;
+        let mut buf = vec![0u8; bufsize];
+
+        // The input buffer must at least contain enough bytes for a MAC to be included.
+        self.r
+            .read_exact(&mut buf[..TAG_SIZE])
+            .map_err(|_err| Error::FormatViolation)
+            .await?;
+
+        let mut buf_tail = TAG_SIZE;
         loop {
-            match self.read() {
-                Ok(buf) => w.write(buf)?,
-                Err(StreamError::EndOfStream) => return Ok(()),
-                Err(e) => return Err(e),
-            };
+            let input_length = self
+                .r
+                .read(&mut buf[buf_tail..])
+                .map_err(|_err| Error::FormatViolation)
+                .await?;
+            buf_tail += input_length;
+
+            // Start encrypting when our buffer is full or when the input stream
+            // is exhausted and we still have data left to decrypt.
+            if buf_tail == bufsize || input_length == 0 && buf_tail > TAG_SIZE {
+                let mut block = &mut buf[0..buf_tail - TAG_SIZE];
+
+                // Mac-then-decrypt
+                mac.update(&mut block);
+                dec.apply_keystream(&mut block);
+
+                w.write_all(&mut block)
+                    .map_err(|_err| Error::FormatViolation)
+                    .await?;
+
+                // Make sure potential tag is shifted to the front of the array.
+                let mut tmp = [0u8; TAG_SIZE];
+                tmp.copy_from_slice(&buf[buf_tail - TAG_SIZE..buf_tail]);
+                buf[..TAG_SIZE].copy_from_slice(&tmp);
+
+                buf_tail = TAG_SIZE;
+            }
+
+            if input_length == 0 {
+                break;
+            }
         }
+
+        let mut computed_tag = [0u8; TAG_SIZE];
+        mac.finalize(&mut computed_tag);
+
+        let found_tag = &buf[..TAG_SIZE];
+        (computed_tag == found_tag)
+            .then(|| ())
+            .ok_or(Error::FormatViolation)
     }
 }

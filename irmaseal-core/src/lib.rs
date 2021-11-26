@@ -1,10 +1,9 @@
-//#![no_std]
-
 mod artifacts;
 mod identity;
 mod metadata;
-//mod metadata2;
-//mod metadata_reader;
+
+#[cfg(test)]
+mod test_common;
 
 pub mod api;
 pub mod util;
@@ -13,15 +12,9 @@ pub mod util;
 pub mod stream;
 
 pub use artifacts::*;
+pub use constants::*;
 pub use identity::*;
 pub use metadata::*;
-//pub use metadata_reader::*;
-
-use arrayvec::ArrayVec;
-use core::mem;
-pub use ibe::*;
-
-extern crate alloc;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -33,48 +26,46 @@ pub enum Error {
     VersionError,
 }
 
-/// Version 1 (legacy).
-///
-/// This version used the Kiltz-Vahlis-1 scheme.
-pub const VERSION_V1: u16 = 0;
+#[allow(unused)]
+pub mod constants {
+    use std::mem;
 
-/// Version 2.
-///
-/// This version uses the CGW anonymous IBE scheme to construct a KEM variant. This scheme can
-/// encapsulate the same shared secret for multiple recipients. This version also supports
-/// conjunctions. For this version we required the metadata to be dynamic.
-pub const VERSION_V2: u16 = 1;
+    /// Version 1 (legacy).
+    ///
+    /// This version used the Kiltz-Vahlis-1 scheme.
+    pub const VERSION_V1: u16 = 0;
 
-/// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
-pub(crate) const PRELUDE_SIZE: usize = 4;
-pub(crate) const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
-pub(crate) const VERSION_SIZE: usize = mem::size_of::<u16>();
-pub(crate) const METADATA_SIZE_SIZE: usize = mem::size_of::<u32>();
+    /// Version 2.
+    ///
+    /// This version uses the CGW anonymous IBE scheme to construct a KEM variant. This scheme can
+    /// encapsulate the same shared secret for multiple recipients. This version also supports
+    /// conjunctions. For this version we required the metadata to be dynamic.
+    pub const VERSION_V2: u16 = 1;
 
-// PREAMBLE contains the following:
-//
-// * Prelude: 4 bytes
-// * Version identifier: 2 bytes
-// * Size of metadata: 8 bytes
-// * Totalling: 4 + 2 + 8 = 14 bytes
-pub(crate) const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + METADATA_SIZE_SIZE;
+    /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
+    pub const PRELUDE_SIZE: usize = 4;
+    pub const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
+    pub const VERSION_SIZE: usize = mem::size_of::<u16>();
+    pub const METADATA_SIZE_SIZE: usize = mem::size_of::<u32>();
 
-// How large a block is that has to be encrypted using
-// the symmetric crypto algorithm
-// 128 KiB
-pub const SYMMETRIC_CRYPTO_BLOCKSIZE: usize = 131072;
+    // PREAMBLE contains the following:
+    // * Prelude: 4 bytes,
+    // * Version identifier: 2 bytes,
+    // * Size of metadata: 4 bytes,
+    // * Totalling: 4 + 2 + 4 = 12 bytes.
+    pub const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + METADATA_SIZE_SIZE;
 
-// Which symmetric crypto algorithm is used.
-#[allow(dead_code)]
-pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES256-CTR64BE";
+    // How large a block is that has to be encrypted using
+    // the symmetric crypto algorithm. 64 KiB.
+    pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: usize = 1024 * 64;
 
-// Which verification algorithm is used.
-#[allow(dead_code)]
-pub const MAC_IDENTIFIER: &str = "SHA3-256";
+    // Which symmetric crypto algorithm is used.
+    // AES with a keysize of 128 bits and a 64-bit counter in big endian.
+    pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES128-CTR64BE";
+    pub const KEY_SIZE: usize = 16;
+    pub const IV_SIZE: usize = 16;
 
-#[allow(dead_code)]
-pub const KEY_SIZE: usize = 32;
-pub const IV_SIZE: usize = 16;
-#[allow(dead_code)]
-pub const MAC_SIZE: usize = 32;
-pub const CIPHERTEXT_SIZE: usize = 144;
+    // Which MAC algorithm is used.
+    pub const MAC_IDENTIFIER: &str = "KMAC128";
+    pub const TAG_SIZE: usize = 32;
+}

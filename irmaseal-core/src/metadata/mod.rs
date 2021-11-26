@@ -6,101 +6,23 @@ mod tests;
 
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::util::{derive_keys, KeySet};
-use crate::{Attribute, Error, Identity, IV_SIZE};
-use alloc::fmt::Debug;
-use arrayvec::ArrayString;
+use crate::{Error, HiddenPolicy, IV_SIZE};
 use core::convert::TryFrom;
 use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
 use ibe::kem::SharedSecret;
-use ibe::{kem::IBKEM, Compress, Derive};
+use ibe::{kem::IBKEM, Compress};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-use tiny_keccak::{Hasher, Sha3};
+use std::fmt::Debug;
 
-/// An IRMAseal policy.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct Policy {
-    #[serde(rename = "t")]
-    pub timestamp: u64,
-    #[serde(rename = "c")]
-    pub con: Vec<Attribute>,
-}
-
-// We split them by type to ensure no mixups!
-/// An IRMAseal AttributeRequest.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Default)]
-pub struct HiddenAttribute {
-    #[serde(rename = "t")]
-    pub atype: ArrayString<255>,
-    #[serde(rename = "v")]
-    pub hidden_value: Option<ArrayString<254>>,
-}
-
-/// An IRMAseal hidden policy.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct HiddenPolicy {
-    #[serde(rename = "t")]
-    pub timestamp: u64,
-    #[serde(rename = "c")]
-    pub con: Vec<HiddenAttribute>,
-}
-
-/// EXAMPLE!!!! DO NOT USE!!! DOESN'T HIDE ANYTHING
-impl From<&Policy> for HiddenPolicy {
-    fn from(p: &Policy) -> Self {
-        Self {
-            timestamp: p.timestamp,
-            con: p
-                .con
-                .iter()
-                .map(|a| HiddenAttribute {
-                    atype: a.atype,
-                    hidden_value: a.value,
-                })
-                .collect(),
-        }
-    }
-}
-
-impl Policy {
-    /// Derives an identity to be used in IBE (specifically, CGWFO).
-    pub fn derive(&self) -> <CGWFO as IBKEM>::Id {
-        // This method implements domain separation as follows:
-        // let policy(id = con[0..n-1]) = H(0 || h_0 || h_1 || .. | h_{n-1}),
-        // where h_i = H(i + 1 || con[i]).
-
-        let mut buf = [0u8; 65];
-        let mut sha3 = Sha3::v512();
-
-        let mut copy = self.con.clone();
-        copy.sort();
-
-        for (i, ar) in copy.iter().enumerate() {
-            let id = Identity::new(self.timestamp, &ar.atype, ar.value.as_deref())
-                .unwrap()
-                .derive::<CGWFO>()
-                .unwrap();
-
-            buf[0] = u8::try_from(i + 1).unwrap(); // fails for > 255 attributes
-            buf[1..].copy_from_slice(&id.0);
-            sha3.update(&buf);
-        }
-
-        buf[0] = 0x00;
-        sha3.finalize(&mut buf[1..]);
-        <CGWFO as IBKEM>::Id::derive(&buf)
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RecipientIdentifier(pub ArrayString<255>);
+pub type RecipientIdentifier = String;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientInfo {
     /// (Public) Identifier of the recipient.
     /// Used to find the associated policy and ciphertext.
     #[serde(rename = "id")]
-    pub identifier: RecipientIdentifier,
+    pub identifier: String,
 
     /// The hidden policy associated with this identifier.
     #[serde(rename = "p")]
@@ -144,19 +66,11 @@ impl PartialEq for RecipientInfo {
     }
 }
 
-impl RecipientIdentifier {
-    pub fn new<'a>(s: &'a str) -> Result<Self, Error> {
-        ArrayString::<255>::from(s)
-            .map(|x| Self(x))
-            .map_err(|_e| Error::FormatViolation)
-    }
-}
-
 impl RecipientMetadata {
-    fn default_with_id(id: &RecipientIdentifier) -> Self {
+    fn default_with_id(id: &str) -> Self {
         Self {
             recipient_info: RecipientInfo {
-                identifier: id.clone(),
+                identifier: id.to_owned(),
                 policy: HiddenPolicy::default(),
                 ct: [0u8; CGWFO_CT_BYTES],
             },

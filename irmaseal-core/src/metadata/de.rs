@@ -2,9 +2,9 @@ use std::convert::TryInto;
 
 use crate::*;
 
-use alloc::fmt;
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
+use std::fmt;
 
 impl RecipientMetadata {
     pub fn from_string<'a>(s: &'a str, id: &RecipientIdentifier) -> Result<Self, Error> {

@@ -12,13 +12,8 @@ categories = ["cryptography", "no-std"]
 [dependencies]
 aes = { version = "0.7.0", optional = true }
 ctr = { version = "0.7.0", optional = true }
-digest = { version = "0.8.1" }
 rand = { version = "0.8.4" }
-sha3 = { version = "0.8.2" }
-arrayref = "0.3.5"
-arrayvec = { version = "0.7.1", features = ["serde"] }
 subtle = "2.3"
-postcard = "0.7.2"
 irma = { git = "https://github.com/tweedegolf/irmars.git" }
 ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "features_and_docs", features = [
   "cgwfo"
@@ -29,10 +24,11 @@ rmp-serde = "0.15.5"
 serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
+futures = { version = "0.3.17" }
 
 [dev-dependencies]
 serde-transcode = "1.1.1"
 
 [features]
-stream = ["aes", "ctr"]
+stream = ["aes", "ctr", "tiny-keccak/kmac"]
 v1 = ["ibe/kv1"]

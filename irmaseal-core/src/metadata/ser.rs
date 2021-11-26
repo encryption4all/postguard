@@ -28,7 +28,10 @@ impl Metadata {
         let mut cts = vec![<CGWFO as IBKEM>::Ct::default(); policies.len()];
 
         // Map policies to IBE identities.
-        let ids: Vec<<CGWFO as IBKEM>::Id> = policies.iter().map(|p| p.derive()).collect();
+        let ids = policies
+            .iter()
+            .map(|p| p.derive())
+            .collect::<Result<Vec<<CGWFO as IBKEM>::Id>, _>>()?;
 
         // Map to references of IBE identities.
         let refs: Vec<&<CGWFO as IBKEM>::Id> = ids.iter().collect();
@@ -42,8 +45,8 @@ impl Metadata {
             .zip(policies.iter())
             .zip(cts.iter())
             .map(|((rid, policy), ct)| RecipientInfo {
-                identifier: *rid.clone(),
-                policy: (*policy).into(),
+                identifier: rid.to_string(),
+                policy: (*policy).to_hidden(),
                 ct: ct.to_bytes(),
             })
             .collect();
@@ -52,7 +55,7 @@ impl Metadata {
             Metadata {
                 recipient_info,
                 iv: generate_iv(rng),
-                chunk_size: 1024 * 1024,
+                chunk_size: SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
             },
             ss,
         ))
