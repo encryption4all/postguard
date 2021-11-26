@@ -16,6 +16,8 @@ pub use constants::*;
 pub use identity::*;
 pub use metadata::*;
 
+pub use ibe::*;
+
 #[derive(Debug, PartialEq)]
 pub enum Error {
     NotIRMASEAL,
