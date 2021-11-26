@@ -30,7 +30,7 @@ impl Metadata {
         // Map policies to IBE identities.
         let ids = policies
             .iter()
-            .map(|p| p.derive())
+            .map(|p| p.derive::<CGWFO>())
             .collect::<Result<Vec<<CGWFO as IBKEM>::Id>, _>>()?;
 
         // Map to references of IBE identities.

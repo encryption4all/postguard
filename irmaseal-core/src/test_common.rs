@@ -36,10 +36,10 @@ impl Default for TestSetup {
         let mpk = PublicKey::<CGWFO>(tmpk);
 
         // Extract associated user secret keys
-        let derived_0 = policies[0].derive().unwrap();
+        let derived_0 = policies[0].derive::<CGWFO>().unwrap();
         let usk_0 = UserSecretKey(CGWFO::extract_usk(Some(&mpk.0), &msk, &derived_0, &mut rng));
 
-        let derived_1 = policies[1].derive().unwrap();
+        let derived_1 = policies[1].derive::<CGWFO>().unwrap();
         let usk_1 = UserSecretKey(CGWFO::extract_usk(Some(&mpk.0), &msk, &derived_1, &mut rng));
 
         let usks = [usk_0, usk_1];

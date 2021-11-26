@@ -1,5 +1,4 @@
 use super::Error;
-use ibe::kem::cgw_fo::CGWFO;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
@@ -68,8 +67,8 @@ impl Policy {
 }
 
 impl Policy {
-    /// Derives an identity to be used in IBE (specifically, CGWFO).
-    pub fn derive(&self) -> Result<<CGWFO as IBKEM>::Id, Error> {
+    /// Derives an identity to be used in IBE..
+    pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
         //  - con[0..n - 1] consisting of n conjunctions.
@@ -127,7 +126,7 @@ impl Policy {
 
         // This hash is superfluous in theory, but derive does not support incremental hashing.
         // As a practical considerion we use an extra hash here.
-        Ok(<CGWFO as IBKEM>::Id::derive(&tmp))
+        Ok(<K as IBKEM>::Id::derive(&tmp))
     }
 }
 
@@ -142,6 +141,8 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
+    use ibe::kem::cgw_fo::CGWFO;
+
     use crate::test_common::TestSetup;
 
     #[test]
@@ -149,14 +150,14 @@ mod tests {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::default();
 
-        let p1_derived = setup.policies[1].derive();
+        let p1_derived = setup.policies[1].derive::<CGWFO>();
 
         let mut reversed = setup.policies[1].clone();
         reversed.con.reverse();
-        assert_eq!(&p1_derived, &reversed.derive());
+        assert_eq!(&p1_derived, &reversed.derive::<CGWFO>());
 
         // The timestamp should matter, and therefore map to a different IBE identity.
         reversed.timestamp += 1;
-        assert_ne!(&p1_derived, &reversed.derive());
+        assert_ne!(&p1_derived, &reversed.derive::<CGWFO>());
     }
 }
