@@ -1,37 +1,42 @@
 use actix_web::web::{Data, HttpResponse, Path};
 use irmaseal_core::api::{KeyResponse, KeyStatus};
 use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{Identity, UserSecretKey};
+use irmaseal_core::{Attribute, Policy, UserSecretKey};
 
 use irma::*;
+use serde::Serialize;
 
 use crate::server::MasterKeyPair;
 use crate::Error;
 
 /// Fetch identity iff valid, or else yield nothing.
-fn fetch_identity(timestamp: u64, disclosed: &Vec<Vec<DisclosedAttribute>>) -> Option<Identity> {
-    let disclosed = if disclosed.len() == 1 && disclosed[0].len() == 1 {
-        &disclosed[0][0]
-    } else {
-        return None;
-    };
+fn fetch_policy(timestamp: u64, disclosed: &Vec<Vec<DisclosedAttribute>>) -> Option<Policy> {
+    // Convert disclosed attributes to a Policy
+    let res: Result<Vec<Attribute>, _> = disclosed
+        .into_iter()
+        .flatten()
+        .map(|a| match a.status {
+            AttributeStatus::Present => Ok(Attribute {
+                atype: a.identifier.clone(),
+                value: a.raw_value.clone(),
+            }),
+            _ => Err(Error::Unexpected),
+        })
+        .collect();
 
-    match disclosed.status {
-        AttributeStatus::Present => Identity::new(
-            timestamp,
-            &disclosed.identifier,
-            disclosed.raw_value.as_ref().map(|s| &**s),
-        )
-        .ok(),
-        _ => None,
-    }
+    let con = res.ok()?;
+
+    Some(Policy { timestamp, con })
 }
 
 pub async fn request_fetch<K: IBKEM>(
     irma: Data<String>,
     mkp: Data<MasterKeyPair<K>>,
     path: Path<(String, u64)>,
-) -> Result<HttpResponse, crate::Error> {
+) -> Result<HttpResponse, crate::Error>
+where
+    UserSecretKey<K>: Serialize,
+{
     let irma_url = irma.get_ref().clone();
     let kp = mkp.get_ref().clone();
     let (token, timestamp) = path.into_inner();
@@ -50,9 +55,9 @@ pub async fn request_fetch<K: IBKEM>(
     let d = |status: KeyStatus| Ok(KeyResponse { status, key: None });
 
     let kr = match result {
-        Ok(result) => match fetch_identity(timestamp, &result.disclosed) {
-            Some(i) => {
-                let k = i.derive::<K>().map_err(|_e| crate::Error::Unexpected)?;
+        Ok(result) => match fetch_policy(timestamp, &result.disclosed) {
+            Some(p) => {
+                let k = p.derive::<K>().map_err(|_e| crate::Error::Unexpected)?;
                 let mut rng = rand::thread_rng();
                 let usk = K::extract_usk(Some(&kp.pk), &kp.sk, &k, &mut rng);
 

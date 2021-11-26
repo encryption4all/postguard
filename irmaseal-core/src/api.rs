@@ -4,8 +4,6 @@ use crate::*;
 use ibe::kem::IBKEM;
 use serde::{Deserialize, Serialize};
 
-use irma::*;
-
 /// Set of public parameters for the Private Key Generator (PKG).
 #[derive(Serialize, Deserialize)]
 pub struct Parameters<K: IBKEM> {
@@ -21,7 +19,7 @@ pub struct Parameters<K: IBKEM> {
 /// A request for the user secret key for an identity.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeyRequest {
-    pub attribute: AttributeRequest,
+    pub con: Vec<Attribute>,
 }
 
 /// The challenge to verify the key request.

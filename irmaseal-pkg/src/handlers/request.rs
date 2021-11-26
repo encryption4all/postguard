@@ -10,8 +10,19 @@ pub async fn request(
     let irma_url = url.get_ref().clone();
     let kr = value.into_inner();
 
+    // TODO:
+    // if the attributes are from the same credential, put them in 1 discon (inner).
+    // if the attributes are from different credentials, put them in seperate discons.
     let dr = DisclosureRequestBuilder::new()
-        .add_discon(vec![vec![kr.attribute]])
+        .add_discon(vec![kr
+            .con
+            .iter()
+            .map(|attr| AttributeRequest::Compound {
+                attr_type: attr.atype.clone(),
+                value: attr.value.clone(),
+                not_null: true,
+            })
+            .collect()])
         .build();
 
     let client = IrmaClientBuilder::new(&irma_url).unwrap().build();
