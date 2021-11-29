@@ -27,7 +27,13 @@ futures = { version = "0.3.17" }
 
 [dev-dependencies]
 serde-transcode = "1.1.1"
+criterion = "0.3.5"
 
 [features]
 stream = ["aes", "ctr", "tiny-keccak/kmac"]
 v1 = ["ibe/kv1"]
+
+[[bench]]
+name = "main"
+harness = false
+required-features = ["stream"]
