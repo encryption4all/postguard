@@ -132,10 +132,11 @@ impl Policy {
 
 impl Attribute {
     /// Conveniently construct a new attribute. It is also possible to directly construct this object.
-    pub fn new(atype: &str, value: Option<&str>) -> Result<Self, Error> {
+    pub fn new(atype: &str, value: Option<&str>) -> Self {
         let atype = atype.to_owned();
         let value = value.map(|s| s.to_owned());
-        Ok(Attribute { atype, value })
+
+        Attribute { atype, value }
     }
 }
 
