@@ -16,8 +16,8 @@ use {aes::Aes128, aes_async::AsyncCipher, ctr::Ctr64BE};
 use aes_wasm::Ctr64BEAes128;
 
 pub struct Unsealer<R> {
-    meta_buf: Vec<u8>,
-    meta: RecipientMetadata,
+    pub meta_buf: Vec<u8>,
+    pub meta: RecipientMetadata,
     r: R,
 }
 
@@ -42,7 +42,7 @@ where
         );
 
         if version != VERSION_V2 {
-            Err(Error::VersionError)?
+            Err(Error::IncorrectVersion)?
         }
 
         let metadata_len = u32::from_be_bytes(

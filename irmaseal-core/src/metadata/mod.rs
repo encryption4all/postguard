@@ -48,7 +48,7 @@ pub struct Metadata {
     pub chunk_size: usize,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct RecipientMetadata {
     /// Info specific to one recipient, i.e., a policy and associated ciphertext.
     pub recipient_info: RecipientInfo,
