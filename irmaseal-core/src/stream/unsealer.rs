@@ -1,14 +1,19 @@
+use crate::constants::*;
 use crate::metadata::*;
-use crate::*;
+use crate::Error;
 use crate::{stream::*, util::KeySet};
-use aes::Aes128;
-use ctr::cipher::{NewCipher, StreamCipher};
-use ctr::Ctr64BE;
+use crate::{PublicKey, UserSecretKey};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use ibe::kem::cgw_fo::CGWFO;
 use std::convert::TryInto;
 use tiny_keccak::{Hasher, Kmac};
+
+#[cfg(feature = "stream")]
+use {aes::Aes128, aes_async::AsyncCipher, ctr::Ctr64BE};
+
+#[cfg(feature = "wasm_stream")]
+use aes_wasm::Ctr64BEAes128;
 
 pub struct Unsealer<R: AsyncRead + Unpin> {
     meta_buf: Vec<u8>,
@@ -75,8 +80,16 @@ where
     where
         W: AsyncWrite + Unpin,
     {
-        self.generic_unseal::<W, Ctr64BE<Aes128>, Kmac>(usk, mpk, w)
-            .await
+        #[cfg(feature = "stream")]
+        {
+            self.generic_unseal::<W, AsyncCipher<Ctr64BE<Aes128>>, Kmac>(usk, mpk, w)
+                .await
+        }
+        #[cfg(feature = "wasm_stream")]
+        {
+            self.generic_unseal::<W, Ctr64BEAes128, Kmac>(usk, mpk, w)
+                .await
+        }
     }
 
     /// This function is generic over streamciphers and MACs.
@@ -87,14 +100,15 @@ where
         mut w: W,
     ) -> Result<(), Error>
     where
-        Sym: NewCipher + StreamCipher,
+        Sym: AsyncNewCipher + AsyncStreamCipher,
         Mac: NewMac + Hasher,
         W: AsyncWrite + Unpin,
     {
         let KeySet { aes_key, mac_key } = self.meta.derive_keys(usk, mpk).unwrap();
 
-        let mut dec =
-            Sym::new_from_slices(&aes_key, &self.meta.iv).map_err(|_err| Error::FormatViolation)?;
+        let mut dec = Sym::new_from_slices(&aes_key, &self.meta.iv)
+            .await
+            .map_err(|_err| Error::FormatViolation)?;
         let mut mac = Mac::new_with_key(&mac_key);
 
         mac.update(&self.meta_buf);
@@ -124,7 +138,7 @@ where
 
                 // Mac-then-decrypt
                 mac.update(&mut block);
-                dec.apply_keystream(&mut block);
+                dec.apply_keystream(&mut block).await;
 
                 w.write_all(&mut block)
                     .map_err(|_err| Error::FormatViolation)

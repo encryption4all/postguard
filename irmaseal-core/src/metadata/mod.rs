@@ -89,7 +89,7 @@ impl RecipientMetadata {
     ) -> Result<KeySet, Error> {
         let c = crate::util::open_ct(<CGWFO as IBKEM>::Ct::from_bytes(&self.recipient_info.ct))
             .ok_or(Error::FormatViolation)?;
-        let ss = CGWFO::decaps(Some(&pk.0), &usk.0, &c).map_err(|_e| Error::DecapsulationError)?;
+        let ss = CGWFO::decaps(Some(&pk.0), &usk.0, &c).map_err(|e| Error::KemError(e))?;
 
         Ok(derive_keys(&ss))
     }

@@ -8,7 +8,10 @@ mod test_common;
 pub mod api;
 pub mod util;
 
-#[cfg(feature = "stream")]
+#[cfg(all(feature = "stream", feature = "wasm_stream"))]
+compile_error!("Features \"stream\" and \"wasm_stream\" cannot be combined. Choose one, depending on your target.");
+
+#[cfg(any(feature = "stream", feature = "wasm_stream"))]
 pub mod stream;
 
 pub use artifacts::*;
@@ -18,14 +21,17 @@ pub use metadata::*;
 
 pub use ibe::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     NotIRMASEAL,
     IncorrectVersion,
     ConstraintViolation,
     FormatViolation,
-    DecapsulationError,
     VersionError,
+    KeyError,
+    ReadError,
+    WriteError,
+    KemError(ibe::kem::Error),
 }
 
 #[allow(unused)]
@@ -66,6 +72,8 @@ pub mod constants {
     pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES128-CTR64BE";
     pub const KEY_SIZE: usize = 16;
     pub const IV_SIZE: usize = 16;
+    pub const NONCE_SIZE: usize = 8;
+    pub const COUNTER_SIZE: usize = 8;
 
     // Which MAC algorithm is used.
     pub const MAC_IDENTIFIER: &str = "KMAC128";

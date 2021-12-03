@@ -10,8 +10,6 @@ homepage = "https://github.com/Wassasin/irmaseal/tree/master/irmaseal-core"
 categories = ["cryptography", "no-std"]
 
 [dependencies]
-aes = { version = "0.7.0", optional = true }
-ctr = { version = "0.7.0", optional = true }
 rand = { version = "0.8.4" }
 subtle = "2.3"
 base64 = "0.12"
@@ -24,13 +22,40 @@ rmp-serde = "0.15.5"
 serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 futures = { version = "0.3.17" }
+async-trait = "0.1.51"
+# For normal stream feature
+aes = { version = "0.7.0", optional = true }
+ctr = { version = "0.7.0", optional = true }
+# For wasm_stream feature
+wasm-bindgen = { version = "0.2.78", optional = true }
+js-sys = { version = "0.3.55", optional = true }
+cipher = { version = "0.3.0", optional = true }
+wasm-bindgen-futures = { version = "0.4.28", optional = true }
+web-sys = { version = "0.3.55", features = [
+  "SubtleCrypto",
+  "AesCtrParams",
+  "Crypto",
+  "CryptoKey"
+], optional = true }
 
 [dev-dependencies]
 serde-transcode = "1.1.1"
 criterion = "0.3.5"
 
 [features]
+default = []
 stream = ["aes", "ctr", "tiny-keccak/kmac"]
+wasm_stream = [
+  "cipher",
+  "tiny-keccak/kmac",
+  "wasm-bindgen",
+  "js-sys",
+  "wasm-bindgen-futures",
+  "web-sys/SubtleCrypto",
+  "web-sys/AesCtrParams",
+  "web-sys/Crypto",
+  "web-sys/CryptoKey"
+]
 v1 = ["ibe/kv1"]
 
 [[bench]]

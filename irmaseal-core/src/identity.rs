@@ -150,14 +150,14 @@ mod tests {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::default();
 
-        let p1_derived = setup.policies[1].derive::<CGWFO>();
+        let p1_derived = setup.policies[1].derive::<CGWFO>().unwrap();
 
         let mut reversed = setup.policies[1].clone();
         reversed.con.reverse();
-        assert_eq!(&p1_derived, &reversed.derive::<CGWFO>());
+        assert_eq!(&p1_derived, &reversed.derive::<CGWFO>().unwrap());
 
         // The timestamp should matter, and therefore map to a different IBE identity.
         reversed.timestamp += 1;
-        assert_ne!(&p1_derived, &reversed.derive::<CGWFO>());
+        assert_ne!(&p1_derived, &reversed.derive::<CGWFO>().unwrap());
     }
 }
