@@ -15,7 +15,7 @@ use {aes::Aes128, aes_async::AsyncCipher, ctr::Ctr64BE};
 #[cfg(feature = "wasm_stream")]
 use aes_wasm::Ctr64BEAes128;
 
-pub struct Unsealer<R: AsyncRead + Unpin> {
+pub struct Unsealer<R> {
     meta_buf: Vec<u8>,
     meta: RecipientMetadata,
     r: R,
