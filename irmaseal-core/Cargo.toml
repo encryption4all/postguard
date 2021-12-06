@@ -12,10 +12,7 @@ categories = ["cryptography", "no-std"]
 [dependencies]
 rand = { version = "0.8.4" }
 subtle = "2.3"
-base64 = "0.12"
-ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "features_and_docs", features = [
-  "cgwfo"
-] }
+ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "features_and_docs", features = ["cgwfo"] }
 serde = { version = "1.0.126", features = ["derive"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
 rmp-serde = "0.15.5"
@@ -37,6 +34,7 @@ web-sys = { version = "0.3.55", features = [
   "Crypto",
   "CryptoKey"
 ], optional = true }
+base64ct = { version = "1.0.2" }
 
 [dev-dependencies]
 serde-transcode = "1.1.1"
