@@ -46,8 +46,7 @@ pub fn exec(server_opts: ServerOpts) {
     System::new().block_on(async move {
         actix_web::HttpServer::new(move || {
             let app = actix_web::App::new()
-                .wrap(actix_web::middleware::Logger::default())
-                .wrap(actix_cors::Cors::default())
+                .wrap(actix_cors::Cors::permissive())
                 .app_data(Data::new(
                     actix_web::web::JsonConfig::default().limit(1024 * 4096),
                 ))
