@@ -6,7 +6,7 @@ use paste::paste;
 use std::path::Path;
 
 #[cfg(feature = "v1")]
-use ibe::kem::kiltz_vahlis_one::KV1;
+use irmaseal_core::kem::kiltz_vahlis_one::KV1;
 
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {

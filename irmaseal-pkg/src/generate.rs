@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::opts::*;
 
 #[cfg(feature = "v1")]
-use ibe::kem::kiltz_vahlis_one::KV1;
+use irmaseal_core::kem::kiltz_vahlis_one::KV1;
 
 fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
     fn inner(path: &Path, contents: &[u8]) {

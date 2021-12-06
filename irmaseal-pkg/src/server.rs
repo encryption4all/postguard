@@ -11,7 +11,7 @@ use actix_web::{
 };
 
 #[cfg(feature = "v1")]
-use ibe::kem::kiltz_vahlis_one::KV1;
+use irmaseal_core::kem::kiltz_vahlis_one::KV1;
 
 #[derive(Clone)]
 pub struct MasterKeyPair<K: IBKEM> {
