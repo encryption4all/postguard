@@ -11,13 +11,9 @@ use criterion::*;
 
 // Keep in mind that for small payloads the cost of IBE will outweigh the cost of symmetric
 // encryption. Also, large conjunctions will also take longer to derive an identity from.
-fn bench_seal<Rng: RngCore + CryptoRng>(
-    plain: &Vec<u8>,
-    mpk: &PublicKey<CGWFO>,
-    rng: &mut Rng,
-) -> Vec<u8> {
+fn bench_seal<Rng: RngCore + CryptoRng>(plain: &Vec<u8>, mpk: &PublicKey<CGWFO>, rng: &mut Rng) {
     let mut input = AllowStdIo::new(Cursor::new(plain));
-    let mut output = AllowStdIo::new(Vec::new());
+    let mut output = futures::io::sink();
 
     block_on(async {
         seal(
@@ -34,8 +30,6 @@ fn bench_seal<Rng: RngCore + CryptoRng>(
         .await
         .unwrap();
     });
-
-    output.into_inner()
 }
 
 fn rand_vec(length: usize) -> Vec<u8> {
