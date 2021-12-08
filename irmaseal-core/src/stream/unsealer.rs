@@ -131,7 +131,7 @@ where
                 .await?;
             buf_tail += input_length;
 
-            // Start encrypting when our buffer is full or when the input stream
+            // Start decrypting when our buffer is full or when the input stream
             // is exhausted and we still have data left to decrypt.
             if buf_tail == bufsize || input_length == 0 && buf_tail > TAG_SIZE {
                 let mut block = &mut buf[0..buf_tail - TAG_SIZE];

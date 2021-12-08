@@ -32,7 +32,7 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    #[cfg(not(feature = "wasm_stream"))]
+    #[cfg(feature = "stream")]
     {
         generic_seal::<Rng, AsyncCipher<Ctr64BE<Aes128>>, Kmac, R, W>(rids, policies, pk, rng, r, w)
             .await

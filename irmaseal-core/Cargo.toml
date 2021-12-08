@@ -52,7 +52,7 @@ wasm_stream = [
   "web-sys/SubtleCrypto",
   "web-sys/AesCtrParams",
   "web-sys/Crypto",
-  "web-sys/CryptoKey"
+  "web-sys/CryptoKey",
 ]
 v1 = ["ibe/kv1"]
 
