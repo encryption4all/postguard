@@ -67,7 +67,6 @@ impl Policy {
 }
 
 impl Policy {
-    /// Derives an identity to be used in IBE..
     pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
@@ -78,7 +77,8 @@ impl Policy {
         // and   f'_i = H(2i + 2 || a.val.len() || a.val).
         //
         // Conjunction is sorted. This requires that Attribute implements a stable Ord.
-        // Lengths are encoded as usize.
+        // Since lengths encoded as usize are not platform-agnostic, we convert all
+        // usize to u64.
 
         if self.con.len() > MAX_CON {
             Err(Error::ConstraintViolation)?
@@ -95,9 +95,9 @@ impl Policy {
         for (i, ar) in copy.iter().enumerate() {
             let mut f = Sha3::v512();
 
-            f.update(&(2 * i + 1).to_be_bytes());
+            f.update(&((2 * i + 1) as u64).to_be_bytes());
             let at_bytes = ar.atype.as_bytes();
-            f.update(&at_bytes.len().to_be_bytes());
+            f.update(&(at_bytes.len() as u64).to_be_bytes());
             f.update(&at_bytes);
             f.finalize(&mut tmp);
 
@@ -105,13 +105,13 @@ impl Policy {
 
             // Initialize a new hash, f'
             f = Sha3::v512();
-            f.update(&(2 * i + 2).to_be_bytes());
+            f.update(&((2 * i + 2) as u64).to_be_bytes());
 
             match &ar.value {
                 None => f.update(&IDENTITY_UNSET.to_be_bytes()),
                 Some(val) => {
                     let val_bytes = val.as_bytes();
-                    f.update(&val_bytes.len().to_be_bytes());
+                    f.update(&(val_bytes.len() as u64).to_be_bytes());
                     f.update(&val_bytes);
                 }
             }
