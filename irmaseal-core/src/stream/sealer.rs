@@ -15,10 +15,6 @@ use {aes::Aes128, aes_async::AsyncCipher, ctr::Ctr64BE};
 #[cfg(feature = "wasm_stream")]
 use aes_wasm::Ctr64BEAes128;
 
-// TODO: Proper errors instead of Error::FormatViolation everywhere.
-
-/// This seal uses AES128-CTR with 64-bit counter,
-/// For authentication we use KMAC of the keccak family.
 pub async fn seal<Rng, R, W>(
     rids: &[&RecipientIdentifier],
     policies: &[&Policy],
@@ -72,7 +68,7 @@ where
     meta.msgpack_into(&mut meta_vec)?;
 
     mac.update(&meta_vec);
-    w.write(&meta_vec[..])
+    w.write_all(&meta_vec[..])
         .map_err(|_e| Error::WriteError)
         .await?;
 
@@ -107,6 +103,7 @@ where
 
     let mut tag = [0u8; TAG_SIZE];
     mac.finalize(&mut tag);
+    w.write_all(&tag).map_err(|_err| Error::WriteError).await?;
 
-    w.write_all(&tag).map_err(|_err| Error::WriteError).await
+    Ok(())
 }

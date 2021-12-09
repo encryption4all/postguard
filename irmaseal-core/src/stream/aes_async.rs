@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use ctr::cipher::{NewCipher, StreamCipher};
 
 // Async wrapper for RustCrypto's StreamCipher.
-// Only threadsafe when called in a loop like this crate does.
 pub(crate) struct AsyncCipher<T>(T);
 
 #[async_trait(?Send)]

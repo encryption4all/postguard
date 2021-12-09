@@ -30,6 +30,7 @@ pub enum Error {
     KeyError,
     ReadError,
     WriteError,
+    IncorrectTag,
     KemError(ibe::kem::Error),
 }
 

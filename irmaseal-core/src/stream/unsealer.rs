@@ -161,8 +161,11 @@ where
         mac.finalize(&mut computed_tag);
 
         let found_tag = &buf[..TAG_SIZE];
-        (computed_tag == found_tag)
-            .then(|| ())
-            .ok_or(Error::FormatViolation)
+
+        if computed_tag == found_tag {
+            Ok(())
+        } else {
+            Err(Error::IncorrectTag)
+        }
     }
 }

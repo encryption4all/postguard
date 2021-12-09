@@ -10,6 +10,7 @@ use web_sys::{AesCtrParams, Crypto, CryptoKey};
 
 const BLOCKSIZE: usize = 16;
 const MODE: &'static str = "AES-CTR";
+const COUNTER_BITS: u8 = 64;
 
 // JS web workers do not support accessing web-sys::window(), so
 // we have to import crypto using a custom binding.
@@ -95,7 +96,7 @@ impl Ctr64BEAes128 {
 
         let iv_arr: Uint8Array = iv.as_ref().into();
 
-        AesCtrParams::new(MODE, &iv_arr, 64u8)
+        AesCtrParams::new(MODE, &iv_arr, COUNTER_BITS)
     }
 
     fn update(&mut self, data: &[u8]) {
