@@ -9,7 +9,7 @@ pub fn version<K: IBKEM>() -> Result<&'static str, Error> {
     match K::IDENTIFIER {
         "kv1" => Ok("v1"),
         "cgwfo" => Ok("v2"),
-        _ => Err(Error::VersionError),
+        _ => Err(Error::IncorrectVersion),
     }
 }
 

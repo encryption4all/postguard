@@ -33,7 +33,7 @@ impl RecipientMetadata {
         );
 
         if version != VERSION_V2 {
-            Err(Error::VersionError)?
+            Err(Error::IncorrectVersion)?
         }
 
         let metadata_len = u32::from_be_bytes(

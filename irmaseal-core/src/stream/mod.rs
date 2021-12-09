@@ -4,19 +4,20 @@ use tiny_keccak::{Hasher, Kmac, Sha3};
 mod sealer;
 mod unsealer;
 
+#[cfg(feature = "stream")]
+mod aes_async;
+
+#[cfg(feature = "wasm_stream")]
+mod aes_wasm;
+
 #[cfg(test)]
 mod tests;
 
 pub use sealer::*;
 pub use unsealer::*;
 
-#[derive(Debug, PartialEq)]
-pub enum StreamError {
-    IrmaSealError(crate::Error),
-    UpstreamWritableError,
-    EndOfStream,
-    PrematureEndError,
-}
+use crate::Error;
+use async_trait::async_trait;
 
 /// Domain separation bytestring
 pub const DOMAIN: &'static [u8] = b"IRMASeal";
@@ -34,8 +35,6 @@ impl NewMac for Kmac {
     }
 }
 
-// probably should'nt use SHA3_256 for a MAC, it's wasteful
-// Kmac128 is much more suitable, because of it's higher rate
 impl NewMac for Sha3 {
     type Hasher = Self;
 
@@ -45,4 +44,15 @@ impl NewMac for Sha3 {
         h.update(DOMAIN);
         h
     }
+}
+
+#[async_trait(?Send)]
+pub trait AsyncNewCipher {
+    type Cipher: AsyncStreamCipher;
+    async fn new_from_slices(key: &[u8], nonce: &[u8]) -> Result<Self::Cipher, Error>;
+}
+
+#[async_trait(?Send)]
+pub trait AsyncStreamCipher {
+    async fn apply_keystream(&mut self, data: &mut [u8]);
 }
