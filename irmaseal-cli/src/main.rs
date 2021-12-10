@@ -2,7 +2,7 @@ mod client;
 mod decrypt;
 mod encrypt;
 mod opts;
-mod util;
+//mod util;
 
 use crate::opts::{Opts, Subcommand};
 use clap::Parser;

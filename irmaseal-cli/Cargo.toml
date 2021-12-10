@@ -21,6 +21,7 @@ serde = { version = "*", features = ["derive"] }
 serde_json = { version = "1.0.57" }
 tokio = { version = "0.2.5", features = ["rt-threaded", "time"] }
 irma = { git = "https://github.com/tweedegolf/irmars.git" }
+indicatif = "0.16.2"
 
 [features]
 v1 = ["irmaseal-core/v1"]
