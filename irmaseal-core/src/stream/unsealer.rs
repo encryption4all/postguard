@@ -7,6 +7,7 @@ use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use ibe::kem::cgw_fo::CGWFO;
 use std::convert::TryInto;
+use subtle::ConstantTimeEq;
 use tiny_keccak::{Hasher, Kmac};
 
 #[cfg(feature = "stream")]
@@ -164,10 +165,8 @@ where
 
         let found_tag = &buf[..TAG_SIZE];
 
-        if computed_tag == found_tag {
-            Ok(())
-        } else {
-            Err(Error::IncorrectTag)
-        }
+        bool::from(computed_tag.ct_eq(found_tag))
+            .then(|| ())
+            .ok_or(Error::IncorrectTag)
     }
 }
