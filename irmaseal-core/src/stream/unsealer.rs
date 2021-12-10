@@ -16,6 +16,7 @@ use {aes::Aes128, aes_async::AsyncCipher, ctr::Ctr64BE};
 use aes_wasm::Ctr64BEAes128;
 
 pub struct Unsealer<R> {
+    pub version: u16,
     pub meta_buf: Vec<u8>,
     pub meta: RecipientMetadata,
     r: R,
@@ -65,6 +66,7 @@ where
             RecipientMetadata::msgpack_from(&*meta_buf, id).map_err(|_e| Error::FormatViolation)?;
 
         Ok(Unsealer {
+            version,
             meta: recipient_meta,
             meta_buf,
             r: r.into_inner(), // This (new) reader is locked to the payload.
