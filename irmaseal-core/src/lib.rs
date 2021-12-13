@@ -28,10 +28,11 @@ pub enum Error {
     ConstraintViolation,
     FormatViolation,
     KeyError,
-    ReadError,
-    WriteError,
     IncorrectTag,
     KemError(ibe::kem::Error),
+    StdIOError(std::io::Error),
+    #[cfg(feature = "stream")]
+    FuturesIO(futures::io::Error),
 }
 
 #[allow(unused)]

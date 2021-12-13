@@ -17,12 +17,19 @@ use std::fmt::Debug;
 
 pub type RecipientIdentifier = String;
 
+impl From<std::io::Error> for crate::Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::StdIOError(e)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientInfo {
-    /// (Public) Identifier of the recipient.
+    /// Public identifier of the recipient.
+    ///
     /// Used to find the associated policy and ciphertext.
     #[serde(rename = "id")]
-    pub identifier: String,
+    pub identifier: RecipientIdentifier,
 
     /// The hidden policy associated with this identifier.
     #[serde(rename = "p")]

@@ -23,7 +23,7 @@ impl RecipientMetadata {
         r.read_exact(&mut tmp).map_err(|_e| Error::NotIRMASEAL)?;
 
         if tmp[..PRELUDE_SIZE] != PRELUDE {
-            Err(Error::NotIRMASEAL)?
+            return Err(Error::NotIRMASEAL);
         }
 
         let version = u16::from_be_bytes(
@@ -33,7 +33,7 @@ impl RecipientMetadata {
         );
 
         if version != VERSION_V2 {
-            Err(Error::IncorrectVersion)?
+            return Err(Error::IncorrectVersion);
         }
 
         let metadata_len = u32::from_be_bytes(

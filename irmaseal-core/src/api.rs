@@ -22,18 +22,6 @@ pub struct KeyRequest {
     pub con: Vec<Attribute>,
 }
 
-/// The challenge to verify the key request.
-// TODO: this is just a regular irma session package, consider removing
-#[derive(Serialize, Deserialize, Debug)]
-pub struct KeyChallenge<'a> {
-    /// The QR code that should be shown to the user,
-    /// such that it can be scanned using the IRMA app.
-    pub qr: &'a str,
-
-    /// The token that should be used to retrieve the status of the earlier request.
-    pub token: &'a str,
-}
-
 /// The status of a key request.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

@@ -34,7 +34,7 @@ where
             .await?;
 
         if tmp[..PRELUDE_SIZE] != PRELUDE {
-            Err(Error::NotIRMASEAL)?
+            return Err(Error::NotIRMASEAL);
         }
 
         let version = u16::from_be_bytes(
@@ -44,7 +44,7 @@ where
         );
 
         if version != VERSION_V2 {
-            Err(Error::IncorrectVersion)?
+            return Err(Error::IncorrectVersion);
         }
 
         let metadata_len = u32::from_be_bytes(
@@ -63,8 +63,7 @@ where
             .map_err(|_e| Error::FormatViolation)
             .await?;
 
-        let recipient_meta =
-            RecipientMetadata::msgpack_from(&*meta_buf, id).map_err(|_e| Error::FormatViolation)?;
+        let recipient_meta = RecipientMetadata::msgpack_from(&*meta_buf, id)?;
 
         Ok(Unsealer {
             version,
@@ -109,9 +108,7 @@ where
     {
         let KeySet { aes_key, mac_key } = self.meta.derive_keys(usk, mpk).unwrap();
 
-        let mut dec = Sym::new_from_slices(&aes_key, &self.meta.iv)
-            .await
-            .map_err(|_err| Error::FormatViolation)?;
+        let mut dec = Sym::new_from_slices(&aes_key, &self.meta.iv).await?;
         let mut mac = Mac::new_with_key(&mac_key);
 
         mac.update(&self.meta_buf);
@@ -120,18 +117,11 @@ where
         let mut buf = vec![0u8; bufsize];
 
         // The input buffer must at least contain enough bytes for a MAC to be included.
-        self.r
-            .read_exact(&mut buf[..TAG_SIZE])
-            .map_err(|_err| Error::FormatViolation)
-            .await?;
+        self.r.read_exact(&mut buf[..TAG_SIZE]).await?;
 
         let mut buf_tail = TAG_SIZE;
         loop {
-            let input_length = self
-                .r
-                .read(&mut buf[buf_tail..])
-                .map_err(|_err| Error::FormatViolation)
-                .await?;
+            let input_length = self.r.read(&mut buf[buf_tail..]).await?;
             buf_tail += input_length;
 
             // Start decrypting when our buffer is full or when the input stream
@@ -143,9 +133,7 @@ where
                 mac.update(&mut block);
                 dec.apply_keystream(&mut block).await;
 
-                w.write_all(&mut block)
-                    .map_err(|_err| Error::FormatViolation)
-                    .await?;
+                w.write_all(&mut block).await?;
 
                 // Make sure potential tag is shifted to the front of the array.
                 let mut tmp = [0u8; TAG_SIZE];

@@ -6,13 +6,6 @@ use ibe::kem::cgw_fo::CGWFO;
 use ibe::kem::IBKEM;
 use rand::{CryptoRng, Rng};
 
-impl From<std::io::Error> for crate::Error {
-    fn from(_e: std::io::Error) -> Self {
-        // TODO: maybe show the inner error
-        Error::FormatViolation
-    }
-}
-
 impl Metadata {
     pub fn new<R: Rng + CryptoRng>(
         pk: &PublicKey<CGWFO>,
@@ -21,7 +14,7 @@ impl Metadata {
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
         if rids.len() != policies.len() {
-            Err(Error::FormatViolation)?
+            return Err(Error::FormatViolation);
         }
 
         // Generate a bunch of default ciphertexts.

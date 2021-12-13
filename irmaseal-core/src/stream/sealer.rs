@@ -4,7 +4,7 @@ use crate::Error;
 use crate::{stream::*, util::derive_keys, util::KeySet};
 use crate::{Policy, PublicKey};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
-use futures::{AsyncRead, AsyncWrite, TryFutureExt};
+use futures::{AsyncRead, AsyncWrite};
 use ibe::kem::cgw_fo::CGWFO;
 use rand::{CryptoRng, RngCore};
 use tiny_keccak::{Hasher, Kmac};
@@ -57,9 +57,7 @@ where
     let (meta, ss) = Metadata::new(pk, rids, policies, rng)?;
     let KeySet { aes_key, mac_key } = derive_keys(&ss);
 
-    let mut enc = Sym::new_from_slices(&aes_key, &meta.iv)
-        .await
-        .map_err(|_e| Error::KeyError)?;
+    let mut enc = Sym::new_from_slices(&aes_key, &meta.iv).await?;
     let mut mac = Mac::new_with_key(&mac_key);
 
     // We have to buffer the entire metadata here, unfortunately.
@@ -68,18 +66,13 @@ where
     meta.msgpack_into(&mut meta_vec)?;
 
     mac.update(&meta_vec);
-    w.write_all(&meta_vec[..])
-        .map_err(|_e| Error::WriteError)
-        .await?;
+    w.write_all(&meta_vec[..]).await?;
 
     let mut buf = vec![0u8; meta.chunk_size];
     let mut buf_tail = 0;
 
     loop {
-        let input_length = r
-            .read(&mut buf[buf_tail..])
-            .map_err(|_e| Error::ReadError)
-            .await?;
+        let input_length = r.read(&mut buf[buf_tail..]).await?;
         buf_tail += input_length;
 
         // Start encrypting when our buffer is full or when the input stream
@@ -91,7 +84,7 @@ where
             enc.apply_keystream(data).await;
             mac.update(data);
 
-            w.write_all(data).map_err(|_e| Error::WriteError).await?;
+            w.write_all(data).await?;
 
             buf_tail = 0;
         }
@@ -103,7 +96,7 @@ where
 
     let mut tag = [0u8; TAG_SIZE];
     mac.finalize(&mut tag);
-    w.write_all(&tag).map_err(|_err| Error::WriteError).await?;
+    w.write_all(&tag).await?;
 
     Ok(())
 }
