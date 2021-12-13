@@ -5,48 +5,51 @@ use crate::*;
 use ibe::kem::cgw_fo::CGWFO;
 use ibe::kem::IBKEM;
 use rand::{CryptoRng, Rng};
+use std::io::Write;
 
 impl Metadata {
+    /// Create a new metadata.
+    ///
+    /// Consumes the policies.
     pub fn new<R: Rng + CryptoRng>(
         pk: &PublicKey<CGWFO>,
-        rids: &[&RecipientIdentifier],
-        policies: &[&Policy],
+        policies: BTreeMap<String, Policy>,
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
-        if rids.len() != policies.len() {
-            return Err(Error::FormatViolation);
-        }
-
         // Generate a bunch of default ciphertexts.
         let mut cts = vec![<CGWFO as IBKEM>::Ct::default(); policies.len()];
 
         // Map policies to IBE identities.
-        let ids = policies
-            .iter()
+        let ibe_ids = policies
+            .clone()
+            .into_values()
             .map(|p| p.derive::<CGWFO>())
             .collect::<Result<Vec<<CGWFO as IBKEM>::Id>, _>>()?;
 
         // Map to references of IBE identities.
-        let refs: Vec<&<CGWFO as IBKEM>::Id> = ids.iter().collect();
+        let refs: Vec<&<CGWFO as IBKEM>::Id> = ibe_ids.iter().collect();
 
         // Generate the shared secret and ciphertexts.
         let ss = CGWFO::multi_encaps(&pk.0, &refs[..], rng, &mut cts[..]).unwrap();
 
         // Generate all RecipientInfo's.
-        let recipient_info = rids
-            .iter()
-            .zip(policies.iter())
+        let recipient_info: BTreeMap<String, RecipientInfo> = policies
+            .into_iter()
             .zip(cts.iter())
-            .map(|((rid, policy), ct)| RecipientInfo {
-                identifier: rid.to_string(),
-                policy: (*policy).to_hidden(),
-                ct: ct.to_bytes(),
+            .map(|((rid, policy), ct)| {
+                (
+                    rid,
+                    RecipientInfo {
+                        policy: policy.to_hidden(),
+                        ct: ct.to_bytes(),
+                    },
+                )
             })
             .collect();
 
         Ok((
             Metadata {
-                recipient_info,
+                policies: recipient_info,
                 iv: generate_iv(rng),
                 chunk_size: SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
             },
@@ -64,7 +67,7 @@ impl Metadata {
     ///     `ct`: associated ciphertext with this policy,
     /// `iv`: 16-byte initialization vector,
     /// `cs`: chunk size in bytes used in the symmetrical encryption.
-    pub fn msgpack_into<W: std::io::Write>(&self, w: &mut W) -> Result<(), Error> {
+    pub fn msgpack_into<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         w.write(&PRELUDE)?;
         w.write(&VERSION_V2.to_be_bytes())?;
 

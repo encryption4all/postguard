@@ -1,10 +1,10 @@
-use crate::{Attribute, Policy, PublicKey, RecipientIdentifier, UserSecretKey};
+use crate::{Attribute, Policy, PublicKey, UserSecretKey};
 use ibe::kem::cgw_fo::CGWFO;
 use ibe::kem::IBKEM;
 
 pub struct TestSetup {
     pub mpk: PublicKey<CGWFO>,
-    pub identifiers: [RecipientIdentifier; 2],
+    pub identifiers: [String; 2],
     pub policies: [Policy; 2],
     pub usks: [UserSecretKey<CGWFO>; 2],
 }
@@ -13,8 +13,8 @@ impl Default for TestSetup {
     fn default() -> Self {
         let mut rng = rand::thread_rng();
 
-        let identifier1 = RecipientIdentifier::from("l.botros@cs.ru.nl");
-        let identifier2 = RecipientIdentifier::from("leon.botros@gmail.com");
+        let identifier1 = String::from("l.botros@cs.ru.nl");
+        let identifier2 = String::from("leon.botros@gmail.com");
 
         let p1 = Policy {
             timestamp: 1566722350,

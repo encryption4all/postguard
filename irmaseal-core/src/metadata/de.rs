@@ -1,24 +1,26 @@
 use std::convert::TryInto;
+use std::marker::PhantomData;
 
 use crate::*;
 
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::fmt;
+use std::io::Read;
 
 impl RecipientMetadata {
-    pub fn from_string<'a>(s: &'a str, id: &RecipientIdentifier) -> Result<Self, Error> {
+    pub fn from_string<'a>(s: &'a str, id: &String) -> Result<Self, Error> {
         let mut deserializer = serde_json::Deserializer::from_str(s);
-        Ok(Self::default_with_id(id)
-            .deserialize(&mut deserializer)
-            .map_err(|_| Error::FormatViolation)?)
+        Ok(Seed::<RecipientMetadata> {
+            id: id.clone(),
+            marker: PhantomData,
+        }
+        .deserialize(&mut deserializer)
+        .map_err(|_| Error::FormatViolation)?)
     }
 
     /// Deserialize metadata byte stream for a specific identifier.
-    pub fn msgpack_from<'a, R: std::io::Read>(
-        mut r: R,
-        id: &RecipientIdentifier,
-    ) -> Result<Self, Error> {
+    pub fn msgpack_from<'a, R: Read>(mut r: R, id: &String) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp).map_err(|_e| Error::NotIRMASEAL)?;
 
@@ -46,63 +48,70 @@ impl RecipientMetadata {
         let meta_reader = r.take(metadata_len as u64);
 
         let mut deserializer = rmp_serde::decode::Deserializer::new(meta_reader);
-        Ok(Self::default_with_id(id)
-            .deserialize(&mut deserializer)
-            .map_err(|_e| Error::FormatViolation)?)
+        Ok(Seed::<RecipientMetadata> {
+            id: id.clone(),
+            marker: PhantomData,
+        }
+        .deserialize(&mut deserializer)
+        .map_err(|_e| Error::FormatViolation)?)
     }
 }
 
-struct PartialEqVisitor<T> {
-    looking_for: T,
+struct KeyVisitor<K, V> {
+    key: K,
+    marker: PhantomData<fn(K) -> V>,
 }
 
-/// Visits any types that implements PartialEq and returns instance of type T once found.
-impl<'de, T> Visitor<'de> for PartialEqVisitor<T>
+impl<'de, K, V> Visitor<'de> for KeyVisitor<K, V>
 where
-    T: Deserialize<'de> + PartialEq + fmt::Debug,
+    V: Deserialize<'de>,
+    K: Deserialize<'de> + PartialEq + Eq,
 {
-    type Value = T;
+    type Value = V;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("sequence")
+        formatter.write_str("map")
     }
 
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
-        A: SeqAccess<'de>,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut found: Option<T> = None;
+        let mut found: Option<V> = None;
 
-        while let Some(el) = seq.next_element()? {
-            if el == self.looking_for {
-                found = Some(el);
+        while let Some((key, value)) = map.next_entry::<K, V>()? {
+            if key == self.key {
+                found = Some(value);
                 break;
             }
         }
 
-        while let Some(IgnoredAny) = seq.next_element()? {}
-
-        found.ok_or_else(|| serde::de::Error::custom("not found"))
+        while let Some((IgnoredAny, IgnoredAny)) = map.next_entry()? {}
+        found.ok_or(serde::de::Error::custom("not found"))
     }
 }
 
-impl<'de> DeserializeSeed<'de> for RecipientInfo {
-    type Value = Self;
+struct Seed<T> {
+    id: String,
+    marker: PhantomData<T>,
+}
+
+impl<'de> DeserializeSeed<'de> for Seed<RecipientInfo> {
+    type Value = RecipientInfo;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let recipient_info = deserializer
-            .deserialize_seq(PartialEqVisitor::<RecipientInfo> { looking_for: self })?;
-
-        Ok(recipient_info)
+        deserializer.deserialize_map(KeyVisitor::<String, RecipientInfo> {
+            key: self.id,
+            marker: PhantomData,
+        })
     }
 }
 
-// This looks like a lot of code, but it is almost identical to what Serde's macros generate.
-impl<'de> DeserializeSeed<'de> for RecipientMetadata {
-    type Value = Self;
+impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
+    type Value = RecipientMetadata;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -119,29 +128,31 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
             ChunkSize,
         }
 
-        struct RecipientMetadataVisitor<RecipientMetadata>(RecipientMetadata);
+        struct RecipientMetadataVisitor<String>(String);
 
-        impl<'de> Visitor<'de> for RecipientMetadataVisitor<RecipientMetadata> {
+        impl<'de> Visitor<'de> for RecipientMetadataVisitor<String> {
             type Value = RecipientMetadata;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("metadata struct")
             }
 
-            // Required when struct was serialized to sequence.
             fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
             where
                 V: SeqAccess<'de>,
             {
                 let recipient_info = seq
-                    .next_element_seed(self.0.recipient_info)?
-                    .ok_or_else(|| serde::de::Error::missing_field("recipient"))?;
+                    .next_element_seed(Seed::<RecipientInfo> {
+                        id: self.0,
+                        marker: PhantomData,
+                    })?
+                    .ok_or(serde::de::Error::missing_field("recipient"))?;
                 let iv = seq
                     .next_element()?
-                    .ok_or_else(|| serde::de::Error::missing_field("iv"))?;
+                    .ok_or(serde::de::Error::missing_field("iv"))?;
                 let chunk_size = seq
                     .next_element()?
-                    .ok_or_else(|| serde::de::Error::missing_field("chunk_size"))?;
+                    .ok_or(serde::de::Error::missing_field("chunk_size"))?;
 
                 Ok(RecipientMetadata {
                     recipient_info,
@@ -150,7 +161,6 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
                 })
             }
 
-            // Required when struct was serialized to map.
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -165,8 +175,10 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
                             if recipient_info.is_some() {
                                 return Err(serde::de::Error::duplicate_field("recipient_info"));
                             }
-                            recipient_info =
-                                Some(map.next_value_seed(self.0.recipient_info.clone())?);
+                            recipient_info = Some(map.next_value_seed(Seed::<RecipientInfo> {
+                                id: self.0.clone(),
+                                marker: PhantomData,
+                            })?);
                         }
                         Field::Iv => {
                             if iv.is_some() {
@@ -183,11 +195,10 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
                     }
                 }
 
-                let recipient_info = recipient_info
-                    .ok_or_else(|| serde::de::Error::missing_field("recipient_info"))?;
-                let iv = iv.ok_or_else(|| serde::de::Error::missing_field("iv"))?;
-                let chunk_size =
-                    chunk_size.ok_or_else(|| serde::de::Error::missing_field("chunk_size"))?;
+                let recipient_info =
+                    recipient_info.ok_or(serde::de::Error::missing_field("recipient_info"))?;
+                let iv = iv.ok_or(serde::de::Error::missing_field("iv"))?;
+                let chunk_size = chunk_size.ok_or(serde::de::Error::missing_field("chunk_size"))?;
 
                 Ok(RecipientMetadata {
                     recipient_info,
@@ -198,6 +209,10 @@ impl<'de> DeserializeSeed<'de> for RecipientMetadata {
         }
 
         const FIELDS: &'static [&'static str] = &["rs", "iv", "cs"];
-        deserializer.deserialize_struct("RecipientMetadata", FIELDS, RecipientMetadataVisitor(self))
+        deserializer.deserialize_struct(
+            "RecipientMetadata",
+            FIELDS,
+            RecipientMetadataVisitor(self.id),
+        )
     }
 }

@@ -13,9 +13,8 @@ use ibe::kem::SharedSecret;
 use ibe::{kem::IBKEM, Compress};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
-
-pub type RecipientIdentifier = String;
 
 impl From<std::io::Error> for crate::Error {
     fn from(e: std::io::Error) -> Self {
@@ -25,17 +24,11 @@ impl From<std::io::Error> for crate::Error {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientInfo {
-    /// Public identifier of the recipient.
-    ///
-    /// Used to find the associated policy and ciphertext.
-    #[serde(rename = "id")]
-    pub identifier: RecipientIdentifier,
-
     /// The hidden policy associated with this identifier.
     #[serde(rename = "p")]
     pub policy: HiddenPolicy,
 
-    /// Ciphertext for this specific recipient
+    /// Ciphertext for this specific recipient.
     #[serde(with = "BigArray")]
     pub ct: [u8; CGWFO_CT_BYTES],
 }
@@ -45,7 +38,7 @@ pub struct RecipientInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
     #[serde(rename = "rs")]
-    pub recipient_info: Vec<RecipientInfo>,
+    pub policies: BTreeMap<String, RecipientInfo>,
 
     /// The initializion vector used for symmetric encryption.
     pub iv: [u8; IV_SIZE],
@@ -55,7 +48,7 @@ pub struct Metadata {
     pub chunk_size: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RecipientMetadata {
     /// Info specific to one recipient, i.e., a policy and associated ciphertext.
     pub recipient_info: RecipientInfo,
@@ -67,25 +60,7 @@ pub struct RecipientMetadata {
     pub chunk_size: usize,
 }
 
-impl PartialEq for RecipientInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.identifier == other.identifier
-    }
-}
-
 impl RecipientMetadata {
-    fn default_with_id(id: &str) -> Self {
-        Self {
-            recipient_info: RecipientInfo {
-                identifier: id.to_owned(),
-                policy: HiddenPolicy::default(),
-                ct: [0u8; CGWFO_CT_BYTES],
-            },
-            iv: [0u8; IV_SIZE],
-            chunk_size: 0 as usize,
-        }
-    }
-
     /// Derives a [`KeySet`] from a [`RecipientMetadata`].
     ///
     /// This keyset can be used for AEAD.
