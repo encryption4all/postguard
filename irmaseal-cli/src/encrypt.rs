@@ -47,8 +47,9 @@ pub async fn exec(enc_opts: EncOpts) {
 
     eprintln!("Fetched parameters from {}", pkg);
     eprintln!(
-        "Encrypting for the following recipients:\n{:#?}\n using the following policy:\n{:?}",
-        identifiers, policies
+        "Encrypting for the following recipients:\n{:#?}\n using the following policies:\n{}",
+        identifiers,
+        serde_json::to_string_pretty(&policies).unwrap()
     );
 
     let input_path = Path::new(&input);
