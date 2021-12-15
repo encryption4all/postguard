@@ -73,7 +73,10 @@ pub async fn exec(dec_opts: DecOpts) {
     eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
     let recipient_info = &unsealer.meta.recipient_info;
-    eprintln!("Policy: {:?}", recipient_info.policy);
+    eprintln!(
+        "Policy: {}",
+        serde_json::to_string_pretty(&recipient_info.policy).unwrap()
+    );
 
     let client = Client::new(&pkg).unwrap();
     let parameters = client.parameters().await.unwrap();
