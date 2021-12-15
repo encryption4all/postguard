@@ -7,15 +7,15 @@ use std::io::Read;
 use std::marker::PhantomData;
 
 impl RecipientMetadata {
-    pub fn from_string<'a>(s: &'a str, id: String) -> Result<Self, Error> {
+    pub fn from_string<'a>(s: &'a str, id: &str) -> Result<Self, Error> {
         let mut deserializer = serde_json::Deserializer::from_str(s);
-        Ok(Seed::<RecipientMetadata>::new(id.clone())
+        Ok(Seed::<RecipientMetadata>::new(id)
             .deserialize(&mut deserializer)
             .map_err(|_| Error::FormatViolation)?)
     }
 
-    /// Deserialize metadata byte stream for a specific identifier.
-    pub fn msgpack_from<'a, R: Read>(mut r: R, id: String) -> Result<Self, Error> {
+    /// Deserialize metadata byte stream for a specific recipient identifier.
+    pub fn msgpack_from<'a, R: Read>(mut r: R, id: &str) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp).map_err(|_e| Error::NotIRMASEAL)?;
 
@@ -43,7 +43,7 @@ impl RecipientMetadata {
         let meta_reader = r.take(metadata_len as u64);
 
         let mut deserializer = rmp_serde::decode::Deserializer::new(meta_reader);
-        Ok(Seed::<RecipientMetadata>::new(id.clone())
+        Ok(Seed::<RecipientMetadata>::new(id)
             .deserialize(&mut deserializer)
             .map_err(|_e| Error::FormatViolation)?)
     }
@@ -98,9 +98,9 @@ struct Seed<T> {
 }
 
 impl<T> Seed<T> {
-    fn new(id: String) -> Self {
+    fn new(id: &str) -> Self {
         Self {
-            id,
+            id: id.to_owned(),
             marker: PhantomData,
         }
     }
@@ -135,9 +135,9 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
             ChunkSize,
         }
 
-        struct RecipientMetadataVisitor<String>(String);
+        struct RecipientMetadataVisitor(String);
 
-        impl<'de> Visitor<'de> for RecipientMetadataVisitor<String> {
+        impl<'de> Visitor<'de> for RecipientMetadataVisitor {
             type Value = RecipientMetadata;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -149,7 +149,7 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
                 V: SeqAccess<'de>,
             {
                 let recipient_info = seq
-                    .next_element_seed(Seed::<RecipientInfo>::new(self.0))?
+                    .next_element_seed(Seed::<RecipientInfo>::new(&self.0))?
                     .ok_or(serde::de::Error::missing_field("recipient"))?;
                 let iv = seq
                     .next_element()?
@@ -179,9 +179,8 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
                             if recipient_info.is_some() {
                                 return Err(serde::de::Error::duplicate_field("recipient_info"));
                             }
-                            recipient_info = Some(
-                                map.next_value_seed(Seed::<RecipientInfo>::new(self.0.clone()))?,
-                            );
+                            recipient_info =
+                                Some(map.next_value_seed(Seed::<RecipientInfo>::new(&self.0))?);
                         }
                         Field::Iv => {
                             if iv.is_some() {

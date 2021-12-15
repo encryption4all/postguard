@@ -1,11 +1,10 @@
 use super::*;
-use crate::metadata::RecipientIdentifier;
 use crate::stream::unsealer::Unsealer;
-use crate::Policy;
 use futures::{executor::block_on, io::AllowStdIo};
 use std::io::Cursor;
 
 use crate::test_common::TestSetup;
+use crate::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
 
 fn seal_helper(setup: &TestSetup, plain: &Vec<u8>) -> Vec<u8> {
     let mut rng = rand::thread_rng();
@@ -13,14 +12,10 @@ fn seal_helper(setup: &TestSetup, plain: &Vec<u8>) -> Vec<u8> {
     let mut input = AllowStdIo::new(Cursor::new(plain));
     let mut output = AllowStdIo::new(Vec::new());
 
-    let identifier_refs: Vec<&RecipientIdentifier> = setup.identifiers.iter().collect();
-    let policy_refs: Vec<&Policy> = setup.policies.iter().collect();
-
     block_on(async {
         seal(
-            &identifier_refs,
-            &policy_refs,
             &setup.mpk,
+            &setup.policies,
             &mut rng,
             &mut input,
             &mut output,
@@ -36,15 +31,17 @@ fn unseal_helper(setup: &TestSetup, ct: &Vec<u8>, recipient_idx: usize) -> Vec<u
     let mut input = AllowStdIo::new(Cursor::new(ct));
     let mut output = AllowStdIo::new(Vec::new());
 
+    let ids: Vec<String> = setup.policies.keys().cloned().collect();
+    let id = &ids[recipient_idx];
+    let usk_id = setup.usks.get(id).unwrap();
+
     block_on(async {
-        let unsealer = Unsealer::new(&mut input, &setup.identifiers[recipient_idx])
-            .await
-            .unwrap();
+        let unsealer = Unsealer::new(&mut input, id).await.unwrap();
 
         // Normally, a user would need to retrieve a usk here via the PKG,
         // but in this case we own the master key pair.
         unsealer
-            .unseal(&setup.usks[recipient_idx], &setup.mpk, &mut output)
+            .unseal(&usk_id, &setup.mpk, &mut output)
             .await
             .unwrap();
     });
@@ -75,6 +72,7 @@ fn test_reflection_seal_unsealer() {
     seal_and_unseal(&setup, rand_vec(512));
     seal_and_unseal(&setup, rand_vec(1023));
     seal_and_unseal(&setup, rand_vec(60000));
+    seal_and_unseal(&setup, rand_vec(SYMMETRIC_CRYPTO_DEFAULT_CHUNK + 3));
 }
 
 #[test]

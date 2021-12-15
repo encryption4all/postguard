@@ -1,21 +1,17 @@
-use futures::io::AllowStdIo;
-use qrcode::render::Pixel;
-use qrcode::Color;
-use serde::de::DeserializeOwned;
-use std::time::Duration;
-use tokio::time::delay_for;
-
 use crate::client::Client;
 use crate::opts::DecOpts;
-use std::fs::File;
-
+use futures::io::AllowStdIo;
+use indicatif::{ProgressBar, ProgressStyle};
 use irmaseal_core::kem::cgw_fo::CGWFO;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::stream::Unsealer;
-use irmaseal_core::RecipientIdentifier;
 use irmaseal_core::{api::*, Attribute};
-
-use indicatif::{ProgressBar, ProgressStyle};
+use qrcode::render::Pixel;
+use qrcode::Color;
+use serde::de::DeserializeOwned;
+use std::fs::File;
+use std::time::Duration;
+use tokio::time::delay_for;
 
 fn print_qr(qr: &irma::Qr) {
     let code = qrcode::QrCode::new(serde_json::to_string(qr).unwrap()).unwrap();
@@ -67,14 +63,14 @@ pub async fn exec(dec_opts: DecOpts) {
     let source = File::open(&input).unwrap();
     let mut async_read = AllowStdIo::new(&source);
 
-    let mut recipient_id = RecipientIdentifier::new();
+    let mut recipient_id = String::new();
     eprintln!("Enter recipient_id:");
     std::io::stdin().read_line(&mut recipient_id).unwrap();
     let unsealer = Unsealer::new(&mut async_read, &recipient_id.trim().to_string())
         .await
         .unwrap();
 
-    eprintln!("IRMASeal format version: {:#?}", unsealer.version + 1);
+    eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
     let recipient_info = &unsealer.meta.recipient_info;
     eprintln!("Policy: {:?}", recipient_info.policy);
@@ -85,7 +81,7 @@ pub async fn exec(dec_opts: DecOpts) {
     let mut reconstructed_policy = recipient_info.policy.clone();
     for attr in reconstructed_policy.con.iter_mut() {
         let mut line = String::new();
-        eprintln!("Enter value for {}", &attr.atype);
+        eprintln!("Enter value for {}:", &attr.atype);
         let val = std::io::stdin().read_line(&mut line).unwrap();
         attr.hidden_value = (val > 0).then(|| line.strip_suffix("\n").unwrap().to_string());
     }

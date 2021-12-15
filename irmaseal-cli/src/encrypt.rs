@@ -2,7 +2,7 @@ use crate::opts::EncOpts;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
 use irmaseal_core::stream::seal;
-use irmaseal_core::{Attribute, Policy, RecipientIdentifier};
+use irmaseal_core::{Attribute, Policy};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
@@ -26,15 +26,20 @@ pub async fn exec(enc_opts: EncOpts) {
 
     let timestamp = now();
 
-    let x: BTreeMap<RecipientIdentifier, Vec<Attribute>> = serde_json::from_str(&identity).unwrap();
-    let identifiers: Vec<RecipientIdentifier> = x.clone().into_keys().collect();
-    let policies: Vec<Policy> = x
-        .into_values()
-        .map(|con| Policy { timestamp, con })
+    let x: BTreeMap<String, Vec<Attribute>> = serde_json::from_str(&identity).unwrap();
+    let identifiers: Vec<String> = x.keys().cloned().collect();
+    let policies: BTreeMap<String, Policy> = x
+        .iter()
+        .map(|(id, con)| {
+            (
+                id.clone(),
+                Policy {
+                    timestamp,
+                    con: con.clone(),
+                },
+            )
+        })
         .collect();
-
-    let identifier_refs: Vec<&RecipientIdentifier> = identifiers.iter().collect();
-    let policy_refs: Vec<&Policy> = policies.iter().collect();
 
     let client = crate::client::Client::new(&pkg).unwrap();
 
@@ -66,14 +71,7 @@ pub async fn exec(enc_opts: EncOpts) {
 
     eprintln!("Encrypting {}...", input);
 
-    seal(
-        &identifier_refs,
-        &policy_refs,
-        &parameters.public_key,
-        &mut rng,
-        r,
-        w,
-    )
-    .await
-    .unwrap();
+    seal(&parameters.public_key, &policies, &mut rng, r, w)
+        .await
+        .unwrap();
 }

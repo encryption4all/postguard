@@ -7,6 +7,7 @@ use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite};
 use ibe::kem::cgw_fo::CGWFO;
 use rand::{CryptoRng, RngCore};
+use std::collections::BTreeMap;
 use tiny_keccak::{Hasher, Kmac};
 
 #[cfg(feature = "stream")]
@@ -16,9 +17,8 @@ use {aes::Aes128, aes_async::AsyncCipher, ctr::Ctr64BE};
 use aes_wasm::Ctr64BEAes128;
 
 pub async fn seal<Rng, R, W>(
-    rids: &[&RecipientIdentifier],
-    policies: &[&Policy],
     pk: &PublicKey<CGWFO>,
+    policies: &BTreeMap<String, Policy>,
     rng: &mut Rng,
     r: R,
     w: W,
@@ -30,19 +30,17 @@ where
 {
     #[cfg(feature = "stream")]
     {
-        generic_seal::<Rng, AsyncCipher<Ctr64BE<Aes128>>, Kmac, R, W>(rids, policies, pk, rng, r, w)
-            .await
+        generic_seal::<Rng, AsyncCipher<Ctr64BE<Aes128>>, Kmac, R, W>(pk, policies, rng, r, w).await
     }
     #[cfg(feature = "wasm_stream")]
     {
-        generic_seal::<Rng, Ctr64BEAes128, Kmac, R, W>(rids, policies, pk, rng, r, w).await
+        generic_seal::<Rng, Ctr64BEAes128, Kmac, R, W>(pk, policies, rng, r, w).await
     }
 }
 
 async fn generic_seal<Rng, Sym, Mac, R, W>(
-    rids: &[&RecipientIdentifier],
-    policies: &[&Policy],
     pk: &PublicKey<CGWFO>,
+    policies: &BTreeMap<String, Policy>,
     rng: &mut Rng,
     mut r: R,
     mut w: W,
@@ -54,7 +52,7 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let (meta, ss) = Metadata::new(pk, rids, policies, rng)?;
+    let (meta, ss) = Metadata::new(pk, policies, rng)?;
     let KeySet { aes_key, mac_key } = derive_keys(&ss);
 
     let mut enc = Sym::new_from_slices(&aes_key, &meta.iv).await?;

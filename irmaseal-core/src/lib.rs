@@ -11,8 +11,8 @@ pub mod util;
 #[cfg(all(feature = "stream", feature = "wasm_stream"))]
 compile_error!("Features \"stream\" and \"wasm_stream\" cannot be combined. Choose one, depending on your target.");
 
-//#[cfg(any(feature = "stream", feature = "wasm_stream"))]
-//pub mod stream;
+#[cfg(any(feature = "stream", feature = "wasm_stream"))]
+pub mod stream;
 
 pub use artifacts::*;
 pub use constants::*;

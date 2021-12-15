@@ -13,7 +13,7 @@ impl Metadata {
     /// Consumes the policies.
     pub fn new<R: Rng + CryptoRng>(
         pk: &PublicKey<CGWFO>,
-        policies: BTreeMap<String, Policy>,
+        policies: &BTreeMap<String, Policy>,
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
         // Generate a bunch of default ciphertexts.
@@ -21,8 +21,7 @@ impl Metadata {
 
         // Map policies to IBE identities.
         let ibe_ids = policies
-            .clone()
-            .into_values()
+            .values()
             .map(|p| p.derive::<CGWFO>())
             .collect::<Result<Vec<<CGWFO as IBKEM>::Id>, _>>()?;
 
@@ -38,7 +37,7 @@ impl Metadata {
             .zip(cts.iter())
             .map(|((rid, policy), ct)| {
                 (
-                    rid,
+                    rid.clone(),
                     RecipientInfo {
                         policy: policy.to_hidden(),
                         ct: ct.to_bytes(),

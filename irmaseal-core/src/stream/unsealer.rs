@@ -27,7 +27,7 @@ impl<R> Unsealer<R>
 where
     R: AsyncRead + Unpin,
 {
-    pub async fn new(mut r: R, id: &RecipientIdentifier) -> Result<Self, Error> {
+    pub async fn new(mut r: R, id: &str) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp)
             .map_err(|_e| Error::NotIRMASEAL)

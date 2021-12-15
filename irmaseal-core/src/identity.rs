@@ -142,18 +142,20 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use ibe::kem::cgw_fo::CGWFO;
-
     use crate::test_common::TestSetup;
+    use crate::Policy;
+    use ibe::kem::cgw_fo::CGWFO;
 
     #[test]
     fn test_ordering() {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::default();
 
-        let p1_derived = setup.policies[1].derive::<CGWFO>().unwrap();
+        let policies: Vec<Policy> = setup.policies.into_values().collect();
 
-        let mut reversed = setup.policies[1].clone();
+        let p1_derived = policies[1].derive::<CGWFO>().unwrap();
+
+        let mut reversed = policies[1].clone();
         reversed.con.reverse();
         assert_eq!(&p1_derived, &reversed.derive::<CGWFO>().unwrap());
 

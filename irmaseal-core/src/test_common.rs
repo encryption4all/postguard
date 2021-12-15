@@ -1,20 +1,20 @@
 use crate::{Attribute, Policy, PublicKey, UserSecretKey};
 use ibe::kem::cgw_fo::CGWFO;
 use ibe::kem::IBKEM;
+use std::collections::BTreeMap;
 
 pub struct TestSetup {
     pub mpk: PublicKey<CGWFO>,
-    pub identifiers: [String; 2],
-    pub policies: [Policy; 2],
-    pub usks: [UserSecretKey<CGWFO>; 2],
+    pub policies: BTreeMap<String, Policy>,
+    pub usks: BTreeMap<String, UserSecretKey<CGWFO>>,
 }
 
 impl Default for TestSetup {
     fn default() -> Self {
         let mut rng = rand::thread_rng();
 
-        let identifier1 = String::from("l.botros@cs.ru.nl");
-        let identifier2 = String::from("leon.botros@gmail.com");
+        let id1 = String::from("l.botros@cs.ru.nl");
+        let id2 = String::from("leon.botros@gmail.com");
 
         let p1 = Policy {
             timestamp: 1566722350,
@@ -31,24 +31,22 @@ impl Default for TestSetup {
             ],
         };
 
-        let identifiers = [identifier1, identifier2];
-        let policies = [p1, p2];
+        let policies = BTreeMap::<String, Policy>::from([(id1.clone(), p1), (id2.clone(), p2)]);
 
         let (tmpk, msk) = ibe::kem::cgw_fo::CGWFO::setup(&mut rng);
         let mpk = PublicKey::<CGWFO>(tmpk);
 
-        // Extract associated user secret keys
-        let derived_0 = policies[0].derive::<CGWFO>().unwrap();
-        let usk_0 = UserSecretKey(CGWFO::extract_usk(Some(&mpk.0), &msk, &derived_0, &mut rng));
-
-        let derived_1 = policies[1].derive::<CGWFO>().unwrap();
-        let usk_1 = UserSecretKey(CGWFO::extract_usk(Some(&mpk.0), &msk, &derived_1, &mut rng));
-
-        let usks = [usk_0, usk_1];
+        let usks = policies
+            .iter()
+            .map(|(id, pol)| {
+                let derived = pol.derive::<CGWFO>().unwrap();
+                let usk = UserSecretKey(CGWFO::extract_usk(Some(&mpk.0), &msk, &derived, &mut rng));
+                (id.clone(), usk)
+            })
+            .collect();
 
         TestSetup {
             mpk,
-            identifiers,
             policies,
             usks,
         }
