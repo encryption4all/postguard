@@ -1,26 +1,21 @@
-use std::convert::TryInto;
-use std::marker::PhantomData;
-
 use crate::*;
-
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
+use std::convert::TryInto;
 use std::fmt;
 use std::io::Read;
+use std::marker::PhantomData;
 
 impl RecipientMetadata {
-    pub fn from_string<'a>(s: &'a str, id: &String) -> Result<Self, Error> {
+    pub fn from_string<'a>(s: &'a str, id: String) -> Result<Self, Error> {
         let mut deserializer = serde_json::Deserializer::from_str(s);
-        Ok(Seed::<RecipientMetadata> {
-            id: id.clone(),
-            marker: PhantomData,
-        }
-        .deserialize(&mut deserializer)
-        .map_err(|_| Error::FormatViolation)?)
+        Ok(Seed::<RecipientMetadata>::new(id.clone())
+            .deserialize(&mut deserializer)
+            .map_err(|_| Error::FormatViolation)?)
     }
 
     /// Deserialize metadata byte stream for a specific identifier.
-    pub fn msgpack_from<'a, R: Read>(mut r: R, id: &String) -> Result<Self, Error> {
+    pub fn msgpack_from<'a, R: Read>(mut r: R, id: String) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp).map_err(|_e| Error::NotIRMASEAL)?;
 
@@ -48,18 +43,24 @@ impl RecipientMetadata {
         let meta_reader = r.take(metadata_len as u64);
 
         let mut deserializer = rmp_serde::decode::Deserializer::new(meta_reader);
-        Ok(Seed::<RecipientMetadata> {
-            id: id.clone(),
-            marker: PhantomData,
-        }
-        .deserialize(&mut deserializer)
-        .map_err(|_e| Error::FormatViolation)?)
+        Ok(Seed::<RecipientMetadata>::new(id.clone())
+            .deserialize(&mut deserializer)
+            .map_err(|_e| Error::FormatViolation)?)
     }
 }
 
 struct KeyVisitor<K, V> {
     key: K,
     marker: PhantomData<fn(K) -> V>,
+}
+
+impl<K, V> KeyVisitor<K, V> {
+    fn new(key: K) -> Self {
+        Self {
+            key,
+            marker: PhantomData,
+        }
+    }
 }
 
 impl<'de, K, V> Visitor<'de> for KeyVisitor<K, V>
@@ -96,6 +97,15 @@ struct Seed<T> {
     marker: PhantomData<T>,
 }
 
+impl<T> Seed<T> {
+    fn new(id: String) -> Self {
+        Self {
+            id,
+            marker: PhantomData,
+        }
+    }
+}
+
 impl<'de> DeserializeSeed<'de> for Seed<RecipientInfo> {
     type Value = RecipientInfo;
 
@@ -103,10 +113,7 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientInfo> {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_map(KeyVisitor::<String, RecipientInfo> {
-            key: self.id,
-            marker: PhantomData,
-        })
+        deserializer.deserialize_map(KeyVisitor::<String, RecipientInfo>::new(self.id))
     }
 }
 
@@ -142,10 +149,7 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
                 V: SeqAccess<'de>,
             {
                 let recipient_info = seq
-                    .next_element_seed(Seed::<RecipientInfo> {
-                        id: self.0,
-                        marker: PhantomData,
-                    })?
+                    .next_element_seed(Seed::<RecipientInfo>::new(self.0))?
                     .ok_or(serde::de::Error::missing_field("recipient"))?;
                 let iv = seq
                     .next_element()?
@@ -175,10 +179,9 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
                             if recipient_info.is_some() {
                                 return Err(serde::de::Error::duplicate_field("recipient_info"));
                             }
-                            recipient_info = Some(map.next_value_seed(Seed::<RecipientInfo> {
-                                id: self.0.clone(),
-                                marker: PhantomData,
-                            })?);
+                            recipient_info = Some(
+                                map.next_value_seed(Seed::<RecipientInfo>::new(self.0.clone()))?,
+                            );
                         }
                         Field::Iv => {
                             if iv.is_some() {

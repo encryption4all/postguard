@@ -6,7 +6,7 @@ use crate::Policy;
 fn test_enc_dec_json() {
     let mut rng = rand::thread_rng();
     let setup = TestSetup::default();
-    let test_id = &setup.identifiers[0];
+    let test_id = setup.identifiers[0].clone();
 
     let policies = BTreeMap::<String, Policy>::from([
         (String::from("l.botros@cs.ru.nl"), setup.policies[0].clone()),
