@@ -29,9 +29,9 @@ pub enum Error {
     FormatViolation,
     KeyError,
     IncorrectTag,
-    KemError(ibe::kem::Error),
-    StdIOError(std::io::Error),
-    #[cfg(feature = "stream")]
+    Kem(ibe::kem::Error),
+    StdIO(std::io::Error),
+    #[cfg(any(feature = "stream", feature = "wasm_stream"))]
     FuturesIO(futures::io::Error),
 }
 
