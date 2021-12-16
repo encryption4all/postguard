@@ -67,8 +67,8 @@ impl Metadata {
     /// `iv`: 16-byte initialization vector,
     /// `cs`: chunk size in bytes used in the symmetrical encryption.
     pub fn msgpack_into<W: Write>(&self, w: &mut W) -> Result<(), Error> {
-        w.write(&PRELUDE)?;
-        w.write(&VERSION_V2.to_be_bytes())?;
+        w.write_all(&PRELUDE)?;
+        w.write_all(&VERSION_V2.to_be_bytes())?;
 
         // For this to work, we need know the length of the metadata in advance.
         // For now, buffer it and determine the length.
@@ -79,12 +79,12 @@ impl Metadata {
         self.serialize(&mut serializer)
             .map_err(|_e| Error::ConstraintViolation)?;
 
-        w.write(
+        w.write_all(
             &u32::try_from(meta_vec.len())
                 .map_err(|_e| Error::ConstraintViolation)?
                 .to_be_bytes(),
         )?;
-        w.write(&meta_vec)?;
+        w.write_all(&meta_vec)?;
 
         Ok(())
     }
