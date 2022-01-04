@@ -66,7 +66,7 @@ pub async fn exec(dec_opts: DecOpts) {
     let mut recipient_id = String::new();
     eprintln!("Enter recipient_id:");
     std::io::stdin().read_line(&mut recipient_id).unwrap();
-    let unsealer = Unsealer::new(&mut async_read, &recipient_id.trim().to_string())
+    let mut unsealer = Unsealer::new(&mut async_read, &recipient_id.trim().to_string())
         .await
         .unwrap();
 

@@ -19,7 +19,7 @@ pub use constants::*;
 pub use identity::*;
 pub use metadata::*;
 
-pub use ibe::*;
+pub use ibe::{kem, Compress};
 
 #[derive(Debug)]
 pub enum Error {
@@ -55,6 +55,9 @@ pub mod constants {
     pub const VERSION_SIZE: usize = std::mem::size_of::<u16>();
     pub const METADATA_SIZE_SIZE: usize = std::mem::size_of::<u32>();
 
+    /// The maximum size of the metadata (4 MiB).
+    pub const MAX_METADATA_SIZE: usize = 1024 * 1024 * 4;
+
     // PREAMBLE contains the following:
     // * Prelude: 4 bytes,
     // * Version identifier: 2 bytes,
@@ -63,22 +66,14 @@ pub mod constants {
     pub const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + METADATA_SIZE_SIZE;
 
     // Default size of symmetric encryption chunks.
-    // Should always be a multiple of the blocksize (16).
-    // A reasonably default is 128 KiB.
+    // A reasonable default is 128 KiB.
     pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: usize = 1024 * 128;
 
     // Symmetric crypto constants.
     // This library uses AES128 because BLS12-381 is only secure up to around 120 bits.
-    // Furthermore, we construct an AEAD by combining the AES-CTR stream cipher with KMAC128 as an authenticator.
-    // The counter is 64 bits wide and represented in big endian to generate blocks.
-    // This effectively allows processing payload of at most 2^64 blocks.
-    pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "AES128-CTR64BE";
+    pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "STREAM_32BE_AES128_GCM";
     pub const KEY_SIZE: usize = 16;
-    pub const IV_SIZE: usize = 16;
-    pub const NONCE_SIZE: usize = 8;
-    pub const COUNTER_SIZE: usize = 8;
-
-    // Which MAC algorithm is used.
-    pub const MAC_IDENTIFIER: &str = "KMAC128";
-    pub const TAG_SIZE: usize = 32;
+    pub const IV_SIZE: usize = 12;
+    pub const NONCE_SIZE: usize = 7;
+    pub const TAG_SIZE: usize = 16;
 }

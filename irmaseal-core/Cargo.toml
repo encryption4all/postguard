@@ -22,13 +22,10 @@ rmp-serde = "0.15.5"
 serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
-async-trait = { version = "0.1.51", optional = true }
 futures = "0.3.17"
-
 # For normal stream feature
-aes = { version = "0.7.0", optional = true }
-ctr = { version = "0.7.0", optional = true }
-
+aead = { version = "0.4.3", features = ["stream", "alloc"], optional = true }
+aes-gcm = { version = "0.9.4", optional = true }
 # For wasm_stream feature
 wasm-bindgen = { version = "0.2.78", optional = true }
 js-sys = { version = "0.3.55", optional = true }
@@ -36,9 +33,10 @@ cipher = { version = "0.3.0", optional = true }
 wasm-bindgen-futures = { version = "0.4.28", optional = true }
 web-sys = { version = "0.3.55", features = [
   "SubtleCrypto",
-  "AesCtrParams",
+  "AesGcmParams",
   "Crypto",
-  "CryptoKey"
+  "CryptoKey",
+  "console"
 ], optional = true }
 
 [dev-dependencies]
@@ -47,18 +45,20 @@ criterion = "0.3.5"
 
 [features]
 default = []
-stream = ["aes", "ctr", "tiny-keccak/kmac", "async-trait"]
+stream = [
+  "aead/stream",
+  "aes-gcm"
+]
 wasm_stream = [
-  "cipher",
-  "async-trait",
-  "tiny-keccak/kmac",
+  "aead/stream",
   "wasm-bindgen",
   "js-sys",
   "wasm-bindgen-futures",
   "web-sys/SubtleCrypto",
-  "web-sys/AesCtrParams",
+  "web-sys/AesGcmParams",
   "web-sys/Crypto",
   "web-sys/CryptoKey",
+  "web-sys/console"
 ]
 v1 = ["ibe/kv1"]
 

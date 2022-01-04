@@ -1,5 +1,4 @@
-use super::*;
-use crate::stream::unsealer::Unsealer;
+use crate::stream::{seal, Unsealer};
 use futures::{executor::block_on, io::AllowStdIo};
 use std::io::Cursor;
 
@@ -36,7 +35,7 @@ fn unseal_helper(setup: &TestSetup, ct: &Vec<u8>, recipient_idx: usize) -> Vec<u
     let usk_id = setup.usks.get(id).unwrap();
 
     block_on(async {
-        let unsealer = Unsealer::new(&mut input, id).await.unwrap();
+        let mut unsealer = Unsealer::new(&mut input, id).await.unwrap();
 
         // Normally, a user would need to retrieve a usk here via the PKG,
         // but in this case we own the master key pair.

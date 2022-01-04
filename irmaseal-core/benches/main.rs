@@ -45,9 +45,10 @@ fn bench(c: &mut Criterion) {
     let mpk = PublicKey::<CGWFO>(tmpk);
 
     let mut group = c.benchmark_group("throughput-seal");
+    group.sample_size(10);
 
-    for l in [1024, 65536, 1048576, 16777216, 67108864] {
-        let input = rand_vec(l);
+    for blen in [10, 14, 18, 22, 26, 30] {
+        let input = rand_vec(1 << blen);
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_function(format!("seal {} KiB", input.len() / 1024), |b| {
             b.iter(|| bench_seal(&input, &mpk, &mut rng))
