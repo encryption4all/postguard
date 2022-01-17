@@ -7,7 +7,7 @@ use wasm_bindgen::{prelude::*, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{AesGcmParams, Crypto, CryptoKey};
 
-const MODE: &'static str = "AES-GCM";
+const MODE: &str = "AES-GCM";
 
 // JS web workers do not support accessing web-sys::window(), so
 // we have to import crypto using a custom binding.
@@ -44,6 +44,9 @@ async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
 }
 
 /// One-shot encryption function, using WebCrypto's AES-GCM128.
+///
+/// The data in the buffer is replaced by it's ciphertext.
+/// The buffer is also extended using the authentication tag.
 pub async fn encrypt(
     key: &[u8],
     iv: &[u8],
@@ -80,6 +83,10 @@ pub async fn encrypt(
 }
 
 /// One-shot decryption function, using WebCrypto's AES-GCM128.
+///
+/// Expects a ciphertext and tag in the buffer.
+/// Upon a correct decryption (a valid tag), the contents of the buffer
+/// is overwritten with the plaintext and shrinked to not contain the tag.
 pub async fn decrypt(
     key: &[u8],
     iv: &[u8],

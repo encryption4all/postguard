@@ -1,4 +1,8 @@
-//! This module
+//! This module implements [STREAM OAE2][1] encryption using primitives provided by WebCrypto.
+//! This module becomes irrelevant when the AEAD crate will support async traits, since then
+//! it is easy to construct this by implementing the traits bounds.
+//!
+//! [1]: https://eprint.iacr.org/2015/189.pdf
 
 pub mod aesgcm;
 pub mod sealer;
