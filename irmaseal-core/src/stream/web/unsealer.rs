@@ -95,8 +95,8 @@ where
         )
         .await
         .unwrap();
+        counter = counter.checked_add(1).unwrap();
 
-        counter += 1;
         let bufsize: usize = self.meta.chunk_size + TAG_SIZE;
         let mut buf = vec![0; bufsize];
         let mut buf_tail = 0;
@@ -113,7 +113,8 @@ where
                 w.write_all(&buf[..]).await?;
                 buf_tail = 0;
                 buf.resize(bufsize, 0);
-                counter += 1;
+
+                counter = counter.checked_add(1).unwrap();
             } else if read == 0 {
                 buf.truncate(buf_tail);
 
@@ -122,7 +123,7 @@ where
                     .unwrap();
 
                 w.write_all(&buf[..]).await?;
-                counter += 1;
+
                 break;
             }
         }

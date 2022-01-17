@@ -46,7 +46,7 @@ where
     .await
     .unwrap();
 
-    counter += 1;
+    counter = counter.checked_add(1).unwrap();
 
     w.write_all(&meta_vec[..]).await?;
     w.write_all(&aad_tag[..]).await?;
@@ -69,7 +69,8 @@ where
 
             w.write_all(&buf[..]).await?;
             buf_tail = 0;
-            counter += 1;
+
+            counter = counter.checked_add(1).unwrap();
         } else if read == 0 {
             buf.truncate(buf_tail);
 
@@ -78,7 +79,7 @@ where
                 .unwrap();
 
             w.write_all(&buf[..]).await?;
-            counter += 1;
+
             break;
         }
     }
