@@ -25,7 +25,7 @@ impl<'a> Client<'a> {
     }
 
     fn create_url(&self, u: &str) -> Url {
-        Url::parse(&self.baseurl).unwrap().join(u).unwrap()
+        Url::parse(self.baseurl).unwrap().join(u).unwrap()
     }
 
     pub async fn parameters<K>(&self) -> Result<Parameters<K>, ClientError>

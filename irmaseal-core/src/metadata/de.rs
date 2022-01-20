@@ -9,9 +9,10 @@ use std::marker::PhantomData;
 impl RecipientMetadata {
     pub fn from_string<'a>(s: &'a str, id: &str) -> Result<Self, Error> {
         let mut deserializer = serde_json::Deserializer::from_str(s);
-        Ok(Seed::<RecipientMetadata>::new(id)
+
+        Seed::<RecipientMetadata>::new(id)
             .deserialize(&mut deserializer)
-            .map_err(|_| Error::FormatViolation)?)
+            .map_err(|_| Error::FormatViolation)
     }
 
     /// Deserialize metadata byte stream for a specific recipient identifier.
@@ -43,9 +44,10 @@ impl RecipientMetadata {
         let meta_reader = r.take(metadata_len as u64);
 
         let mut deserializer = rmp_serde::decode::Deserializer::new(meta_reader);
-        Ok(Seed::<RecipientMetadata>::new(id)
+
+        Seed::<RecipientMetadata>::new(id)
             .deserialize(&mut deserializer)
-            .map_err(|_e| Error::FormatViolation)?)
+            .map_err(|_e| Error::FormatViolation)
     }
 }
 
@@ -88,7 +90,7 @@ where
         }
 
         while let Some((IgnoredAny, IgnoredAny)) = map.next_entry()? {}
-        found.ok_or(serde::de::Error::custom("not found"))
+        found.ok_or_else(|| serde::de::Error::custom("not found"))
     }
 }
 
@@ -150,13 +152,13 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
             {
                 let recipient_info = seq
                     .next_element_seed(Seed::<RecipientInfo>::new(&self.0))?
-                    .ok_or(serde::de::Error::missing_field("recipient"))?;
+                    .ok_or_else(|| serde::de::Error::missing_field("recipient"))?;
                 let iv = seq
                     .next_element()?
-                    .ok_or(serde::de::Error::missing_field("iv"))?;
+                    .ok_or_else(|| serde::de::Error::missing_field("iv"))?;
                 let chunk_size = seq
                     .next_element()?
-                    .ok_or(serde::de::Error::missing_field("chunk_size"))?;
+                    .ok_or_else(|| serde::de::Error::missing_field("chunk_size"))?;
 
                 Ok(RecipientMetadata {
                     recipient_info,
@@ -197,10 +199,11 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
                     }
                 }
 
-                let recipient_info =
-                    recipient_info.ok_or(serde::de::Error::missing_field("recipient_info"))?;
-                let iv = iv.ok_or(serde::de::Error::missing_field("iv"))?;
-                let chunk_size = chunk_size.ok_or(serde::de::Error::missing_field("chunk_size"))?;
+                let recipient_info = recipient_info
+                    .ok_or_else(|| serde::de::Error::missing_field("recipient_info"))?;
+                let iv = iv.ok_or_else(|| serde::de::Error::missing_field("iv"))?;
+                let chunk_size =
+                    chunk_size.ok_or_else(|| serde::de::Error::missing_field("chunk_size"))?;
 
                 Ok(RecipientMetadata {
                     recipient_info,
@@ -210,7 +213,7 @@ impl<'de> DeserializeSeed<'de> for Seed<RecipientMetadata> {
             }
         }
 
-        const FIELDS: &'static [&'static str] = &["rs", "iv", "cs"];
+        const FIELDS: &[&str] = &["rs", "iv", "cs"];
         deserializer.deserialize_struct(
             "RecipientMetadata",
             FIELDS,

@@ -28,7 +28,7 @@ macro_rules! read_keypair {
             }
 
             let bytes = array_ref![&bytes, 0, LENGTH];
-            Ok(open_ct(<$scheme as IBKEM>::Pk::from_bytes(bytes)).ok_or(Error::FormatViolation)?)
+            open_ct(<$scheme as IBKEM>::Pk::from_bytes(bytes)).ok_or(Error::FormatViolation)
         }
 
         pub fn [<$scheme:lower _read_sk>](path: impl AsRef<Path>) -> Result<<$scheme as IBKEM>::Sk, Error> {
@@ -40,7 +40,7 @@ macro_rules! read_keypair {
             }
 
             let bytes = array_ref![&bytes, 0, LENGTH];
-            Ok(open_ct(<$scheme as IBKEM>::Sk::from_bytes(bytes)).ok_or(Error::FormatViolation)?)
+            open_ct(<$scheme as IBKEM>::Sk::from_bytes(bytes)).ok_or(Error::FormatViolation)
         }
         }
     };

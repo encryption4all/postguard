@@ -13,7 +13,7 @@ use crate::Error;
 fn fetch_policy(timestamp: u64, disclosed: &Vec<Vec<DisclosedAttribute>>) -> Option<Policy> {
     // Convert disclosed attributes to a Policy
     let res: Result<Vec<Attribute>, _> = disclosed
-        .into_iter()
+        .iter()
         .flatten()
         .map(|a| match a.status {
             AttributeStatus::Present => Ok(Attribute {
@@ -46,7 +46,7 @@ where
         .unwrap()
         .as_secs();
     if timestamp > now {
-        Err(Error::ChronologyError)?
+        return Err(Error::ChronologyError);
     }
 
     let client = IrmaClientBuilder::new(&irma_url).unwrap().build();

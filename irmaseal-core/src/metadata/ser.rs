@@ -27,7 +27,7 @@ impl Metadata {
 
         // Generate all RecipientInfo's.
         let recipient_info: BTreeMap<String, RecipientInfo> = policies
-            .into_iter()
+            .iter()
             .zip(cts.iter())
             .map(|((rid, policy), ct)| {
                 (
@@ -87,6 +87,6 @@ impl Metadata {
     ///
     /// Should only be used for small metadata or development purposes.
     pub fn to_json_string(&self) -> Result<String, Error> {
-        Ok(serde_json::to_string_pretty(&self).or(Err(Error::FormatViolation))?)
+        serde_json::to_string_pretty(&self).or(Err(Error::FormatViolation))
     }
 }

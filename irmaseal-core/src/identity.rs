@@ -81,7 +81,7 @@ impl Policy {
         // usize to u64.
 
         if self.con.len() > MAX_CON {
-            Err(Error::ConstraintViolation)?
+            return Err(Error::ConstraintViolation);
         }
 
         let mut tmp = [0u8; 64];
@@ -98,7 +98,7 @@ impl Policy {
             f.update(&((2 * i + 1) as u64).to_be_bytes());
             let at_bytes = ar.atype.as_bytes();
             f.update(&(at_bytes.len() as u64).to_be_bytes());
-            f.update(&at_bytes);
+            f.update(at_bytes);
             f.finalize(&mut tmp);
 
             pre_h.update(&tmp);
@@ -112,7 +112,7 @@ impl Policy {
                 Some(val) => {
                     let val_bytes = val.as_bytes();
                     f.update(&(val_bytes.len() as u64).to_be_bytes());
-                    f.update(&val_bytes);
+                    f.update(val_bytes);
                 }
             }
 

@@ -85,7 +85,7 @@ pub async fn exec(dec_opts: DecOpts) {
         let mut line = String::new();
         eprintln!("Enter value for {}:", &attr.atype);
         let val = std::io::stdin().read_line(&mut line).unwrap();
-        attr.hidden_value = (val > 0).then(|| line.strip_suffix("\n").unwrap().to_string());
+        attr.hidden_value = (val > 0).then(|| line.strip_suffix('\n').unwrap().to_string());
     }
 
     let keyrequest = KeyRequest {

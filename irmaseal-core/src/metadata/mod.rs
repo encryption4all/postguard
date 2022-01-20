@@ -70,7 +70,7 @@ impl RecipientMetadata {
             &self.recipient_info.ct,
         ))
         .ok_or(Error::FormatViolation)?;
-        let ss = CGWKV::multi_decaps(None, &usk.0, &c).map_err(|e| Error::Kem(e))?;
+        let ss = CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)?;
 
         Ok(derive_keys(&ss))
     }
