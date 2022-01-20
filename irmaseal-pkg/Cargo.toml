@@ -10,7 +10,7 @@ actix-rt = "2.3.0"
 actix-web = "4.0.0-beta.10"
 actix-cors = "0.6.0-beta.3"
 arrayref = "0.3.5"
-clap = { version = "3.0.0-beta.4", features = ["derive"] }
+clap = { version = "3.0.10", features = ["derive"] }
 futures = { version = "0.3", features = ["executor"] }
 irma = { git = "https://github.com/tweedegolf/irmars.git" }
 paste = "1.0.5"
