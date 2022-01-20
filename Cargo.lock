@@ -1211,8 +1211,9 @@ checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
 
 [[package]]
 name = "irma"
-version = "0.2.0"
-source = "git+https://github.com/tweedegolf/irmars.git#798724ce8556f04ac4968722b7a2b01a10d2ae0c"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dde914c868fcba263783b663b3ba195edcc17d1de3de23669cfd536efb6c6ad3"
 dependencies = [
  "reqwest 0.11.7",
  "serde",

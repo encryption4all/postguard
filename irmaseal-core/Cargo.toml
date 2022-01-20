@@ -12,7 +12,7 @@ categories = ["cryptography", "no-std"]
 [dependencies]
 rand = { version = "0.8.4" }
 subtle = "2.3"
-irma = { git = "https://github.com/tweedegolf/irmars.git" }
+irma = "0.2.1"
 ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "0.2.0-beta.0", features = [
   "cgwkv", "mr"
 ] }
