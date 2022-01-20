@@ -4,13 +4,14 @@ mod ser;
 #[cfg(test)]
 mod tests;
 
-use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::artifacts::UserSecretKey;
 use crate::util::{derive_keys, KeySet};
 use crate::{Error, HiddenPolicy, IV_SIZE};
 use core::convert::TryFrom;
-use ibe::kem::cgw_fo::{CGWFO, CT_BYTES as CGWFO_CT_BYTES};
+use ibe::kem::cgw_kv::CGWKV;
+use ibe::kem::mr::{MultiRecipient, MultiRecipientCiphertext};
 use ibe::kem::SharedSecret;
-use ibe::{kem::IBKEM, Compress};
+use ibe::Compress;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use std::collections::BTreeMap;
@@ -30,7 +31,7 @@ pub struct RecipientInfo {
 
     /// Ciphertext for this specific recipient.
     #[serde(with = "BigArray")]
-    pub ct: [u8; CGWFO_CT_BYTES],
+    pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
 }
 
 /// This struct containts metadata for _ALL_ recipients.  It only needs to be in memory for
@@ -64,14 +65,12 @@ impl RecipientMetadata {
     /// Derives a [`KeySet`] from a [`RecipientMetadata`].
     ///
     /// This keyset can be used for AEAD.
-    pub fn derive_keys(
-        &self,
-        usk: &UserSecretKey<CGWFO>,
-        pk: &PublicKey<CGWFO>,
-    ) -> Result<KeySet, Error> {
-        let c = crate::util::open_ct(<CGWFO as IBKEM>::Ct::from_bytes(&self.recipient_info.ct))
-            .ok_or(Error::FormatViolation)?;
-        let ss = CGWFO::decaps(Some(&pk.0), &usk.0, &c).map_err(|e| Error::Kem(e))?;
+    pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<KeySet, Error> {
+        let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(
+            &self.recipient_info.ct,
+        ))
+        .ok_or(Error::FormatViolation)?;
+        let ss = CGWKV::multi_decaps(None, &usk.0, &c).map_err(|e| Error::Kem(e))?;
 
         Ok(derive_keys(&ss))
     }

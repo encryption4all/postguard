@@ -13,8 +13,8 @@ categories = ["cryptography", "no-std"]
 rand = { version = "0.8.4" }
 subtle = "2.3"
 irma = { git = "https://github.com/tweedegolf/irmars.git" }
-ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "features_and_docs", features = [
-  "cgwfo"
+ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "0.2.0-beta.0", features = [
+  "cgwkv", "mr"
 ] }
 serde = { version = "1.0.126", features = ["derive"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }

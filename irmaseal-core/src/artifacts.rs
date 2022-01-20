@@ -5,7 +5,7 @@
 use crate::util::open_ct;
 use base64ct::{Base64, Encoding};
 use ibe::{
-    kem::{cgw_fo::CGWFO, IBKEM},
+    kem::{cgw_kv::CGWKV, IBKEM},
     Compress,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -110,11 +110,11 @@ macro_rules! impl_serialize_usk {
     };
 }
 
-impl_serialize_pk!(CGWFO);
-impl_serialize_usk!(CGWFO);
+impl_serialize_pk!(CGWKV);
+impl_serialize_usk!(CGWKV);
 
-impl_deserialize_pk!(CGWFO);
-impl_deserialize_usk!(CGWFO);
+impl_deserialize_pk!(CGWKV);
+impl_deserialize_usk!(CGWKV);
 
 #[cfg(feature = "v1")]
 impl_serialize_pk!(KV1);
@@ -136,20 +136,20 @@ mod tests {
     #[test]
     fn test_eq_enc_dec() {
         let mut rng = rand::thread_rng();
-        let (mpk, msk) = ibe::kem::cgw_fo::CGWFO::setup(&mut rng);
-        let wrapped_pk = PublicKey::<CGWFO>(mpk);
+        let (mpk, msk) = ibe::kem::cgw_kv::CGWKV::setup(&mut rng);
+        let wrapped_pk = PublicKey::<CGWKV>(mpk);
 
         let pk_encoded = serde_json::to_string(&wrapped_pk).unwrap();
-        let pk_decoded: PublicKey<CGWFO> = serde_json::from_str(&pk_encoded).unwrap();
+        let pk_decoded: PublicKey<CGWKV> = serde_json::from_str(&pk_encoded).unwrap();
 
         assert_eq!(&wrapped_pk.0.to_bytes(), &pk_decoded.0.to_bytes());
 
-        let id = <CGWFO as IBKEM>::Id::derive_str("test");
-        let usk = CGWFO::extract_usk(Some(&mpk), &msk, &id, &mut rng);
-        let wrapped_usk = UserSecretKey::<CGWFO>(usk);
+        let id = <CGWKV as IBKEM>::Id::derive_str("test");
+        let usk = CGWKV::extract_usk(Some(&mpk), &msk, &id, &mut rng);
+        let wrapped_usk = UserSecretKey::<CGWKV>(usk);
 
         let usk_encoded = serde_json::to_string(&wrapped_usk).unwrap();
-        let usk_decoded: UserSecretKey<CGWFO> = serde_json::from_str(&usk_encoded).unwrap();
+        let usk_decoded: UserSecretKey<CGWKV> = serde_json::from_str(&usk_encoded).unwrap();
 
         assert_eq!(&wrapped_usk.0.to_bytes(), &usk_decoded.0.to_bytes());
     }

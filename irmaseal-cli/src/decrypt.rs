@@ -2,7 +2,7 @@ use crate::client::Client;
 use crate::opts::DecOpts;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
-use irmaseal_core::kem::cgw_fo::CGWFO;
+use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::stream::Unsealer;
 use irmaseal_core::{api::*, Attribute};
@@ -79,7 +79,6 @@ pub async fn exec(dec_opts: DecOpts) {
     );
 
     let client = Client::new(&pkg).unwrap();
-    let parameters = client.parameters().await.unwrap();
 
     let mut reconstructed_policy = recipient_info.policy.clone();
     for attr in reconstructed_policy.con.iter_mut() {
@@ -107,8 +106,8 @@ pub async fn exec(dec_opts: DecOpts) {
     eprintln!("Please scan the following QR-code with IRMA:");
     print_qr(&sd.session_ptr);
 
-    let key_resp: KeyResponse<CGWFO> =
-        wait_on_session::<CGWFO>(&client, &sd, recipient_info.policy.timestamp)
+    let key_resp: KeyResponse<CGWKV> =
+        wait_on_session::<CGWKV>(&client, &sd, recipient_info.policy.timestamp)
             .await
             .unwrap();
 
@@ -125,8 +124,5 @@ pub async fn exec(dec_opts: DecOpts) {
 
     eprintln!("Decrypting {}...", input);
 
-    unsealer
-        .unseal(&usk, &parameters.public_key, w)
-        .await
-        .unwrap();
+    unsealer.unseal(&usk, w).await.unwrap();
 }

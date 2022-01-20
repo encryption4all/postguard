@@ -1,12 +1,12 @@
 use crate::{Attribute, Policy, PublicKey, UserSecretKey};
-use ibe::kem::cgw_fo::CGWFO;
+use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
 use std::collections::BTreeMap;
 
 pub struct TestSetup {
-    pub mpk: PublicKey<CGWFO>,
+    pub mpk: PublicKey<CGWKV>,
     pub policies: BTreeMap<String, Policy>,
-    pub usks: BTreeMap<String, UserSecretKey<CGWFO>>,
+    pub usks: BTreeMap<String, UserSecretKey<CGWKV>>,
 }
 
 impl Default for TestSetup {
@@ -33,14 +33,14 @@ impl Default for TestSetup {
 
         let policies = BTreeMap::<String, Policy>::from([(id1.clone(), p1), (id2.clone(), p2)]);
 
-        let (tmpk, msk) = ibe::kem::cgw_fo::CGWFO::setup(&mut rng);
-        let mpk = PublicKey::<CGWFO>(tmpk);
+        let (tmpk, msk) = ibe::kem::cgw_kv::CGWKV::setup(&mut rng);
+        let mpk = PublicKey::<CGWKV>(tmpk);
 
         let usks = policies
             .iter()
             .map(|(id, pol)| {
-                let derived = pol.derive::<CGWFO>().unwrap();
-                let usk = UserSecretKey(CGWFO::extract_usk(Some(&mpk.0), &msk, &derived, &mut rng));
+                let derived = pol.derive::<CGWKV>().unwrap();
+                let usk = UserSecretKey(CGWKV::extract_usk(Some(&mpk.0), &msk, &derived, &mut rng));
                 (id.clone(), usk)
             })
             .collect();

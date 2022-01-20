@@ -144,7 +144,7 @@ impl Attribute {
 mod tests {
     use crate::test_common::TestSetup;
     use crate::Policy;
-    use ibe::kem::cgw_fo::CGWFO;
+    use ibe::kem::cgw_kv::CGWKV;
 
     #[test]
     fn test_ordering() {
@@ -153,14 +153,14 @@ mod tests {
 
         let policies: Vec<Policy> = setup.policies.into_values().collect();
 
-        let p1_derived = policies[1].derive::<CGWFO>().unwrap();
+        let p1_derived = policies[1].derive::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();
         reversed.con.reverse();
-        assert_eq!(&p1_derived, &reversed.derive::<CGWFO>().unwrap());
+        assert_eq!(&p1_derived, &reversed.derive::<CGWKV>().unwrap());
 
         // The timestamp should matter, and therefore map to a different IBE identity.
         reversed.timestamp += 1;
-        assert_ne!(&p1_derived, &reversed.derive::<CGWFO>().unwrap());
+        assert_ne!(&p1_derived, &reversed.derive::<CGWKV>().unwrap());
     }
 }

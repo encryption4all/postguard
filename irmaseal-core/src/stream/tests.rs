@@ -39,10 +39,7 @@ fn unseal_helper(setup: &TestSetup, ct: &Vec<u8>, recipient_idx: usize) -> Vec<u
 
         // Normally, a user would need to retrieve a usk here via the PKG,
         // but in this case we own the master key pair.
-        unsealer
-            .unseal(&usk_id, &setup.mpk, &mut output)
-            .await
-            .unwrap();
+        unsealer.unseal(&usk_id, &mut output).await.unwrap();
     });
 
     output.into_inner()

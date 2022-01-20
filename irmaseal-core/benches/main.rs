@@ -1,6 +1,6 @@
 use futures::executor::block_on;
 use futures::io::AllowStdIo;
-use ibe::kem::cgw_fo::CGWFO;
+use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
 use irmaseal_core::stream::seal;
 use irmaseal_core::{Attribute, Policy, PublicKey};
@@ -12,7 +12,7 @@ use criterion::*;
 
 // Keep in mind that for small payloads the cost of IBE will outweigh the cost of symmetric
 // encryption. Also, large conjunctions will also take longer to derive an identity from.
-fn bench_seal<Rng: RngCore + CryptoRng>(plain: &Vec<u8>, mpk: &PublicKey<CGWFO>, rng: &mut Rng) {
+fn bench_seal<Rng: RngCore + CryptoRng>(plain: &Vec<u8>, mpk: &PublicKey<CGWKV>, rng: &mut Rng) {
     let mut input = AllowStdIo::new(Cursor::new(plain));
     let mut output = futures::io::sink();
 
@@ -41,8 +41,8 @@ fn rand_vec(length: usize) -> Vec<u8> {
 fn bench(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
 
-    let (tmpk, _) = ibe::kem::cgw_fo::CGWFO::setup(&mut rng);
-    let mpk = PublicKey::<CGWFO>(tmpk);
+    let (tmpk, _) = ibe::kem::cgw_kv::CGWKV::setup(&mut rng);
+    let mpk = PublicKey::<CGWKV>(tmpk);
 
     let mut group = c.benchmark_group("throughput-seal");
     group.sample_size(10);

@@ -2,10 +2,10 @@ use crate::constants::*;
 use crate::metadata::*;
 use crate::util::KeySet;
 use crate::Error;
-use crate::{PublicKey, UserSecretKey};
+use crate::UserSecretKey;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite, TryFutureExt};
-use ibe::kem::cgw_fo::CGWFO;
+use ibe::kem::cgw_kv::CGWKV;
 use std::convert::TryInto;
 
 use crate::stream::web::{aead_nonce, aesgcm::decrypt};
@@ -67,19 +67,14 @@ where
         })
     }
 
-    pub async fn unseal<W>(
-        &mut self,
-        usk: &UserSecretKey<CGWFO>,
-        mpk: &PublicKey<CGWFO>,
-        mut w: W,
-    ) -> Result<(), Error>
+    pub async fn unseal<W>(&mut self, usk: &UserSecretKey<CGWKV>, mut w: W) -> Result<(), Error>
     where
         W: AsyncWrite + Unpin,
     {
         let KeySet {
             aes_key,
             mac_key: _,
-        } = self.meta.derive_keys(usk, mpk).unwrap();
+        } = self.meta.derive_keys(usk).unwrap();
 
         let nonce = &self.meta.iv[..NONCE_SIZE];
         let mut counter: u32 = u32::default();

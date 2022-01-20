@@ -5,14 +5,14 @@ use crate::{util::derive_keys, util::KeySet};
 use crate::{Policy, PublicKey};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite};
-use ibe::kem::cgw_fo::CGWFO;
+use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 
 use crate::stream::web::{aead_nonce, aesgcm::encrypt};
 
 pub async fn seal<Rng, R, W>(
-    pk: &PublicKey<CGWFO>,
+    pk: &PublicKey<CGWKV>,
     policies: &BTreeMap<String, Policy>,
     rng: &mut Rng,
     mut r: R,

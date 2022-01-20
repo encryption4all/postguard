@@ -2,8 +2,8 @@ use crate::metadata::*;
 use crate::util::generate_iv;
 use crate::*;
 
-use ibe::kem::cgw_fo::CGWFO;
-use ibe::kem::IBKEM;
+use ibe::kem::cgw_kv::CGWKV;
+use ibe::kem::{mr::MultiRecipient, IBKEM};
 use rand::{CryptoRng, Rng};
 use std::io::Write;
 
@@ -12,24 +12,18 @@ impl Metadata {
     ///
     /// Consumes the policies.
     pub fn new<R: Rng + CryptoRng>(
-        pk: &PublicKey<CGWFO>,
+        pk: &PublicKey<CGWKV>,
         policies: &BTreeMap<String, Policy>,
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
-        // Generate a bunch of default ciphertexts.
-        let mut cts = vec![<CGWFO as IBKEM>::Ct::default(); policies.len()];
-
         // Map policies to IBE identities.
-        let ibe_ids = policies
+        let ids = policies
             .values()
-            .map(|p| p.derive::<CGWFO>())
-            .collect::<Result<Vec<<CGWFO as IBKEM>::Id>, _>>()?;
-
-        // Map to references of IBE identities.
-        let refs: Vec<&<CGWFO as IBKEM>::Id> = ibe_ids.iter().collect();
+            .map(|p| p.derive::<CGWKV>())
+            .collect::<Result<Vec<<CGWKV as IBKEM>::Id>, _>>()?;
 
         // Generate the shared secret and ciphertexts.
-        let ss = CGWFO::multi_encaps(&pk.0, &refs[..], rng, &mut cts[..]).unwrap();
+        let (cts, ss) = CGWKV::multi_encaps(&pk.0, &ids[..], rng);
 
         // Generate all RecipientInfo's.
         let recipient_info: BTreeMap<String, RecipientInfo> = policies

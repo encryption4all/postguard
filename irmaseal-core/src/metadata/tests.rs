@@ -105,11 +105,11 @@ fn test_round() {
     // Decode, while looking for identifier2 (= "leon.botros@gmail.com").
     let mut c = Cursor::new(v);
     let decoded1 = RecipientMetadata::msgpack_from(&mut c, test_id).unwrap();
-    let keys2 = decoded1.derive_keys(test_usk, &setup.mpk).unwrap();
+    let keys2 = decoded1.derive_keys(test_usk).unwrap();
 
     // Idem, decode while looking for test_id.
     let decoded2 = RecipientMetadata::from_string(&s, test_id).unwrap();
-    let keys3 = decoded2.derive_keys(test_usk, &setup.mpk).unwrap();
+    let keys3 = decoded2.derive_keys(test_usk).unwrap();
 
     assert_eq!(&decoded1.iv, &meta.iv);
     assert_eq!(&decoded1.chunk_size, &meta.chunk_size);

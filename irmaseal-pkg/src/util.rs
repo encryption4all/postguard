@@ -1,5 +1,5 @@
 use arrayref::array_ref;
-use irmaseal_core::kem::{cgw_fo::CGWFO, IBKEM};
+use irmaseal_core::kem::{cgw_kv::CGWKV, IBKEM};
 use irmaseal_core::Compress;
 use irmaseal_core::Error;
 use paste::paste;
@@ -46,7 +46,7 @@ macro_rules! read_keypair {
     };
 }
 
-read_keypair!(CGWFO);
+read_keypair!(CGWKV);
 
 #[cfg(feature = "v1")]
 read_keypair!(KV1);

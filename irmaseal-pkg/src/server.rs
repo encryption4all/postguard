@@ -1,4 +1,4 @@
-use irmaseal_core::kem::cgw_fo::CGWFO;
+use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 
 use crate::handlers;
@@ -38,9 +38,9 @@ pub fn exec(server_opts: ServerOpts) {
         sk: kv1_read_sk(v1secret).unwrap(),
     };
 
-    let kp2 = MasterKeyPair::<CGWFO> {
-        pk: cgwfo_read_pk(public).unwrap(),
-        sk: cgwfo_read_sk(secret).unwrap(),
+    let kp2 = MasterKeyPair::<CGWKV> {
+        pk: cgwkv_read_pk(public).unwrap(),
+        sk: cgwkv_read_sk(secret).unwrap(),
     };
 
     System::new().block_on(async move {
@@ -56,13 +56,13 @@ pub fn exec(server_opts: ServerOpts) {
                         .service(
                             resource("/parameters")
                                 .app_data(Data::new(kp2.pk.clone()))
-                                .route(web::get().to(handlers::parameters::<CGWFO>)),
+                                .route(web::get().to(handlers::parameters::<CGWKV>)),
                         )
                         .service(resource("/request").route(web::post().to(handlers::request)))
                         .service(
                             resource("/request/{token}/{timestamp}")
                                 .app_data(Data::new(kp2.clone()))
-                                .route(web::get().to(handlers::request_fetch::<CGWFO>)),
+                                .route(web::get().to(handlers::request_fetch::<CGWKV>)),
                         ),
                 );
 

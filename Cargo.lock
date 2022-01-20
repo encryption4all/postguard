@@ -1143,8 +1143,8 @@ dependencies = [
 
 [[package]]
 name = "ibe"
-version = "0.1.5"
-source = "git+https://github.com/encryption4all/ibe.git?branch=features_and_docs#10664bce1f84b05350fb17dd750a4e83be2f5f44"
+version = "0.2.0-beta.0"
+source = "git+https://github.com/encryption4all/ibe.git?branch=0.2.0-beta.0#defbc070fb6f529a18297cbe3c8b01df7fbb8342"
 dependencies = [
  "arrayref",
  "byteorder",
@@ -1270,8 +1270,9 @@ dependencies = [
 
 [[package]]
 name = "irmaseal-curve"
-version = "0.1.2"
-source = "git+https://github.com/encryption4all/irmaseal-curve.git#39ebbe3dfcfda07262f2dc3ba377b93007bc0671"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6edb111e2f3a99ca6a9fed0f63179311b9d84363ec152a98e9c5292c39cb6613"
 dependencies = [
  "ff",
  "group",

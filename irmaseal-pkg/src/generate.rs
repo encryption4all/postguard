@@ -1,4 +1,4 @@
-use irmaseal_core::kem::cgw_fo::CGWFO;
+use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::{kem::IBKEM, Compress};
 
 use std::fs::OpenOptions;
@@ -43,7 +43,7 @@ pub fn exec(gen_opts: &GenOpts) {
             println!("Written {} and {}.", public, secret);
         }
         "2" => {
-            let (pk, sk) = CGWFO::setup(&mut rng);
+            let (pk, sk) = CGWKV::setup(&mut rng);
             write_owned(public, pk.to_bytes().as_ref());
             write_owned(secret, sk.to_bytes().as_ref());
             println!("Written {} and {}.", public, secret);

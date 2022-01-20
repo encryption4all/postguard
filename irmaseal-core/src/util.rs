@@ -8,7 +8,7 @@ use rand::{CryptoRng, Rng};
 pub fn version<K: IBKEM>() -> Result<&'static str, Error> {
     match K::IDENTIFIER {
         "kv1" => Ok("v1"),
-        "cgwfo" => Ok("v2"),
+        "cgwkv" => Ok("v2"),
         _ => Err(Error::IncorrectVersion),
     }
 }
