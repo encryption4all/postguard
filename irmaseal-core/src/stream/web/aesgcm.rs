@@ -45,7 +45,7 @@ async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
 
 /// One-shot encryption function, using WebCrypto's AES-GCM128.
 ///
-/// The data in the buffer is replaced by it's ciphertext.
+/// The data in the buffer is replaced by its ciphertext.
 /// The buffer is also extended using the authentication tag.
 pub async fn encrypt(
     key: &[u8],

@@ -4,6 +4,14 @@
 //!
 //! [1]: https://eprint.iacr.org/2015/189.pdf
 
+// # Note
+//
+// This module can probably be severely sped up by leveraging concurrency, since the WebCrypto API offers
+// stateless one-shot functions which returns the ciphertext (including tag) as a Promise.
+// The best way to go about this, is by using a `futures::stream::FuturesOrdered` to create a bunch
+// futures from these Promises that, in order, process the ciphertexts that come back.
+// Currently, this is performed one-by-one (using one buffer).
+
 pub mod aesgcm;
 pub mod sealer;
 pub mod unsealer;
