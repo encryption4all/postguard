@@ -60,7 +60,6 @@ wasm_stream = [
   "web-sys/CryptoKey",
   "web-sys/console"
 ]
-v1 = ["ibe/kv1"]
 
 [[bench]]
 name = "main"

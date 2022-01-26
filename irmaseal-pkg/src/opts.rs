@@ -58,14 +58,4 @@ pub struct ServerOpts {
     /// Master public key file path.
     #[clap(short = 'P', long, default_value = "./pkg.pub", value_hint = ValueHint::FilePath)]
     pub public: String,
-
-    /// Version 1 secret key file path (legacy mode).
-    #[cfg(feature = "v1")]
-    #[cfg_attr(feature = "v1", clap(short = 'X', long, default_value = "./pkg.v1.sec", value_hint = ValueHint::FilePath))]
-    pub v1secret: String,
-
-    /// Version 1 public key file path (legacy mode).
-    #[cfg(feature = "v1")]
-    #[cfg_attr(feature = "v1", clap(short = 'Y', long, default_value = "./pkg.v1.pub", value_hint = ValueHint::FilePath))]
-    pub v1public: String,
 }

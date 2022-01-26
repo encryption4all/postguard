@@ -10,9 +10,6 @@ use actix_web::{
     web::{resource, scope, Data},
 };
 
-#[cfg(feature = "v1")]
-use irmaseal_core::kem::kiltz_vahlis_one::KV1;
-
 #[derive(Clone)]
 pub struct MasterKeyPair<K: IBKEM> {
     pub pk: K::Pk,
@@ -26,17 +23,7 @@ pub fn exec(server_opts: ServerOpts) {
         irma,
         secret,
         public,
-        #[cfg(feature = "v1")]
-        v1secret,
-        #[cfg(feature = "v1")]
-        v1public,
     } = server_opts;
-
-    #[cfg(feature = "v1")]
-    let kp1 = MasterKeyPair::<KV1> {
-        pk: kv1_read_pk(v1public).unwrap(),
-        sk: kv1_read_sk(v1secret).unwrap(),
-    };
 
     let kp2 = MasterKeyPair::<CGWKV> {
         pk: cgwkv_read_pk(public).unwrap(),
@@ -45,7 +32,7 @@ pub fn exec(server_opts: ServerOpts) {
 
     System::new().block_on(async move {
         actix_web::HttpServer::new(move || {
-            let app = actix_web::App::new()
+            actix_web::App::new()
                 .wrap(actix_cors::Cors::permissive())
                 .app_data(Data::new(
                     actix_web::web::JsonConfig::default().limit(1024 * 4096),
@@ -64,26 +51,7 @@ pub fn exec(server_opts: ServerOpts) {
                                 .app_data(Data::new(kp2.clone()))
                                 .route(web::get().to(handlers::request_fetch::<CGWKV>)),
                         ),
-                );
-
-            #[cfg(feature = "v1")]
-            let app = app.service(
-                scope("/v1")
-                    .app_data(Data::new(irma.clone()))
-                    .service(
-                        resource("/parameters")
-                            .app_data(Data::new(kp1.pk.clone()))
-                            .route(web::get().to(handlers::parameters::<KV1>)),
-                    )
-                    .service(resource("/request").route(web::post().to(handlers::request)))
-                    .service(
-                        resource("/request/{token}/{timestamp}")
-                            .app_data(Data::new(kp1.clone()))
-                            .route(web::get().to(handlers::request_fetch::<KV1>)),
-                    ),
-            );
-
-            app
+                )
         })
         .bind(format!("{}:{}", host, port))
         .unwrap()

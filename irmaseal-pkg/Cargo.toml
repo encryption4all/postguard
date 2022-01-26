@@ -21,6 +21,3 @@ subtle = "2.1.1"
 
 [dependencies.irmaseal-core]
 path = "../irmaseal-core"
-
-[features]
-v1 = ["irmaseal-core/v1"]

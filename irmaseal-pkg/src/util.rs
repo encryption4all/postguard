@@ -5,9 +5,6 @@ use irmaseal_core::Error;
 use paste::paste;
 use std::path::Path;
 
-#[cfg(feature = "v1")]
-use irmaseal_core::kem::kiltz_vahlis_one::KV1;
-
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {
         Some(x.unwrap())
@@ -47,6 +44,3 @@ macro_rules! read_keypair {
 }
 
 read_keypair!(CGWKV);
-
-#[cfg(feature = "v1")]
-read_keypair!(KV1);

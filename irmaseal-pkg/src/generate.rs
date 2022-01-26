@@ -7,9 +7,6 @@ use std::path::Path;
 
 use crate::opts::*;
 
-#[cfg(feature = "v1")]
-use irmaseal_core::kem::kiltz_vahlis_one::KV1;
-
 fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
     fn inner(path: &Path, contents: &[u8]) {
         use std::io::Write;
@@ -35,13 +32,6 @@ pub fn exec(gen_opts: &GenOpts) {
     } = gen_opts;
 
     match scheme.as_ref() {
-        #[cfg(feature = "v1")]
-        "1" => {
-            let (pk, sk) = KV1::setup(&mut rng);
-            write_owned(public, pk.to_bytes().as_ref());
-            write_owned(secret, sk.to_bytes().as_ref());
-            println!("Written {} and {}.", public, secret);
-        }
         "2" => {
             let (pk, sk) = CGWKV::setup(&mut rng);
             write_owned(public, pk.to_bytes().as_ref());
