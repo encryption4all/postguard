@@ -1,4 +1,4 @@
-//! Implementation of the IRMAseal stream format. Includes zero-allocation streaming encryption and decryption.
+//! Implementation of the IRMAseal stream format.
 
 #[cfg(feature = "stream")]
 mod rust;
@@ -10,7 +10,7 @@ pub use {rust::sealer::seal, rust::unsealer::Unsealer};
 mod web;
 
 #[cfg(feature = "wasm_stream")]
-pub use {web::sealer::seal, web::unsealer::Unsealer};
+pub use {web::sealer::seal as web_seal, web::unsealer::Unsealer as WebUnsealer};
 
 #[cfg(test)]
 mod tests;

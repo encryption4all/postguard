@@ -1,3 +1,7 @@
 [workspace]
-
-members = ["irmaseal-core", "irmaseal-cli", "irmaseal-pkg"]
+members = [
+  "irmaseal-core",
+  "irmaseal-cli",
+  "irmaseal-pkg",
+  "irmaseal-wasm-bindings"
+]

@@ -1,0 +1,38 @@
+[package]
+name = "irmaseal-wasm-bindings"
+version = "0.0.5"
+authors = [
+  "Bas Westerbaan <bas@westerbaan.name>",
+  "Leon Botros <l.botros@cs.ru.nl>"
+]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+irmaseal-core = { path = "../irmaseal-core", features = ["wasm_stream"] }
+wasm-bindgen = { version = "0.2.73", features = ["serde-serialize"] }
+js-sys = "0.3.50"
+web-sys = { version = "0.3.50", features = ["console"] }
+rand = { version = "0.8.4" }
+serde = "*"
+wasm-streams = "0.2.2"
+getrandom = { version = "0.2", features = ["js"] }
+futures = "0.3.17"
+wasm-bindgen-futures = "0.4.28"
+console_error_panic_hook = "0.1.7"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.16"
+irmaseal-core = { path = "../irmaseal-core", features = [
+  "stream",
+  "wasm_stream"
+] }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Os", "--enable-mutable-globals"]
+
+[profile.release]
+lto = true
+opt-level = "s"
