@@ -26,7 +26,7 @@ const policies = {
 
 // The following call reads data from a `ReadableStream` and encrypts into `WritableStream`.
 await seal(
-  client.params.public_key,
+  params.public_key,
   policies,
   readable,
   writable
@@ -59,6 +59,8 @@ const identity = {
 
 // Create a session to retrieve a UserSecretKey (USK) for the guessed identity.
 const session = createPKGSession(identity, hidden.t)
+
+// In this example we use the irma frontend packages.
 var irma = new IrmaCore({ debugging: true, session })
 irma.use(IrmaClient)
 irma.use(IrmaPopup)
@@ -97,7 +99,8 @@ To test the bindings package, run:
 wasm-pack test --chrome --headless
 ```
 
-### Publishing
+### Publishing (on npm)
+The following command publishes the wasm module as a package on npm:
 
 ```
 wasm-pack publish
