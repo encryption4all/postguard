@@ -24,19 +24,19 @@ pub enum Error {
 // Convert any error to a Javascript error.
 impl From<Error> for JsValue {
     fn from(err: Error) -> Self {
-        JsError::new(match err {
+        match err {
             Error::Seal(e) => match e {
-                SealError::NotIRMASEAL => "Not IRMASEAL",
-                SealError::IncorrectVersion => "Incorrect version",
-                SealError::ConstraintViolation => "Constraint violation",
-                SealError::FormatViolation => "Format violation",
-                SealError::KeyError => "Wrong symmetric key size",
-                SealError::IncorrectTag => "Incorrect tag",
-                SealError::StdIO(_) => "StdIO Error",
-                SealError::FuturesIO(_) => "FuturesIO error",
-                SealError::Kem(_) => "KEM failure",
+                SealError::NotIRMASEAL => JsError::new("Not IRMASEAL"),
+                SealError::IncorrectVersion => JsError::new("Incorrect version"),
+                SealError::ConstraintViolation => JsError::new("Constraint violation"),
+                SealError::FormatViolation => JsError::new("Format violation"),
+                SealError::KeyError => JsError::new("Wrong symmetric key size"),
+                SealError::IncorrectTag => JsError::new("Incorrect tag"),
+                SealError::StdIO(x) => JsError::new(&format!("IO error: {x}")),
+                SealError::FuturesIO(x) => JsError::new(&format!("IO error: {x}")),
+                SealError::Kem(_) => JsError::new("KEM failure"),
             },
-        })
+        }
         .into()
     }
 }
