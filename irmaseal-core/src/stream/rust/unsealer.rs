@@ -3,7 +3,6 @@ use crate::metadata::*;
 use crate::util::KeySet;
 use crate::Error;
 use crate::UserSecretKey;
-use aead::Payload;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use ibe::kem::cgw_kv::CGWKV;
@@ -14,8 +13,7 @@ use aes_gcm::{Aes128Gcm, NewAead};
 
 pub struct Unsealer<R> {
     pub version: u16,
-    pub meta_buf: Vec<u8>,
-    pub meta: RecipientMetadata,
+    pub meta: Metadata,
     r: R,
 }
 
@@ -23,7 +21,7 @@ impl<R> Unsealer<R>
 where
     R: AsyncRead + Unpin,
 {
-    pub async fn new(mut r: R, id: &str) -> Result<Self, Error> {
+    pub async fn new(mut r: R) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp)
             .map_err(|_e| Error::NotIRMASEAL)
@@ -49,8 +47,7 @@ where
                 .map_err(|_e| Error::FormatViolation)?,
         ) as usize;
 
-        let mut meta_buf = Vec::with_capacity(PREAMBLE_SIZE + metadata_len);
-        meta_buf.extend_from_slice(&tmp);
+        let mut meta_buf = Vec::with_capacity(metadata_len);
 
         // Limit reader to not read past metadata
         let mut r = r.take(metadata_len as u64);
@@ -59,39 +56,36 @@ where
             .map_err(|_e| Error::FormatViolation)
             .await?;
 
-        let recipient_meta = RecipientMetadata::msgpack_from(&*meta_buf, id)?;
+        let meta: Metadata =
+            rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
 
         Ok(Unsealer {
             version,
-            meta: recipient_meta,
-            meta_buf,
+            meta,
             r: r.into_inner(), // This (new) reader is locked to the payload.
         })
     }
 
-    pub async fn unseal<W>(&mut self, usk: &UserSecretKey<CGWKV>, mut w: W) -> Result<(), Error>
+    pub async fn unseal<W>(
+        &mut self,
+        ident: &str,
+        usk: &UserSecretKey<CGWKV>,
+        mut w: W,
+    ) -> Result<(), Error>
     where
         W: AsyncWrite + Unpin,
     {
+        let rec_info = self.meta.policies.get(ident).unwrap();
+
         let KeySet {
             aes_key,
             mac_key: _,
-        } = self.meta.derive_keys(usk).unwrap();
+        } = rec_info.derive_keys(usk).unwrap();
 
         let nonce = &self.meta.iv[..NONCE_SIZE];
 
         let aes_gcm = Aes128Gcm::new(aes_key.as_ref().into());
         let mut dec = DecryptorBE32::from_aead(aes_gcm, nonce.into());
-
-        let mut meta_tag = [0u8; TAG_SIZE];
-        self.r.read_exact(&mut meta_tag).await?;
-
-        let aad = Payload {
-            msg: &meta_tag[..],
-            aad: &self.meta_buf,
-        };
-
-        dec.decrypt_next(aad).unwrap();
 
         let bufsize: usize = self.meta.chunk_size + TAG_SIZE;
         let mut buf = vec![0u8; bufsize];

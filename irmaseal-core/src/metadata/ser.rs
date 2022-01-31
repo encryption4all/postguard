@@ -9,8 +9,6 @@ use std::io::Write;
 
 impl Metadata {
     /// Create a new metadata.
-    ///
-    /// Consumes the policies.
     pub fn new<R: Rng + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &BTreeMap<String, Policy>,

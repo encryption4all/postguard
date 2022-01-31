@@ -49,27 +49,13 @@ pub struct Metadata {
     pub chunk_size: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RecipientMetadata {
-    /// Info specific to one recipient, i.e., a policy and associated ciphertext.
-    pub recipient_info: RecipientInfo,
-
-    /// The initializion vector used for symmetric encryption.
-    pub iv: [u8; IV_SIZE],
-
-    /// The size of the chunks in which to process symmetric encryption.
-    pub chunk_size: usize,
-}
-
-impl RecipientMetadata {
+impl RecipientInfo {
     /// Derives a [`KeySet`] from a [`RecipientMetadata`].
     ///
     /// This keyset can be used for AEAD.
     pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<KeySet, Error> {
-        let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(
-            &self.recipient_info.ct,
-        ))
-        .ok_or(Error::FormatViolation)?;
+        let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(&self.ct))
+            .ok_or(Error::FormatViolation)?;
         let ss = CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)?;
 
         Ok(derive_keys(&ss))

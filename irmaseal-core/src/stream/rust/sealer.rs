@@ -10,7 +10,6 @@ use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 
 use aead::stream::EncryptorBE32;
-use aead::Payload;
 use aes_gcm::{Aes128Gcm, NewAead};
 
 pub async fn seal<Rng, R, W>(
@@ -38,15 +37,7 @@ where
 
     let mut meta_vec = Vec::with_capacity(MAX_METADATA_SIZE);
     meta.msgpack_into(&mut meta_vec)?;
-
-    let aad = Payload {
-        msg: b"",
-        aad: &meta_vec[..],
-    };
-
-    let aad_tag = enc.encrypt_next(aad).unwrap();
     w.write_all(&meta_vec[..]).await?;
-    w.write_all(&aad_tag[..]).await?;
 
     let mut buf = vec![0; meta.chunk_size];
     let mut buf_tail = 0;

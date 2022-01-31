@@ -34,22 +34,7 @@ where
 
     let mut meta_vec = Vec::with_capacity(MAX_METADATA_SIZE);
     meta.msgpack_into(&mut meta_vec)?;
-
-    let mut aad_tag = Vec::new();
-
-    encrypt(
-        &aes_key,
-        &aead_nonce(nonce, counter, false),
-        &meta_vec[..],
-        &mut aad_tag,
-    )
-    .await
-    .unwrap();
-
-    counter = counter.checked_add(1).unwrap();
-
     w.write_all(&meta_vec[..]).await?;
-    w.write_all(&aad_tag[..]).await?;
 
     let mut buf = vec![0; meta.chunk_size];
     let mut buf_tail = 0;
@@ -63,7 +48,7 @@ where
         if buf_tail == meta.chunk_size {
             buf.truncate(buf_tail);
 
-            encrypt(&aes_key, &aead_nonce(&nonce, counter, false), b"", &mut buf)
+            encrypt(&aes_key, &aead_nonce(nonce, counter, false), b"", &mut buf)
                 .await
                 .unwrap();
 

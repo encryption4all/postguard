@@ -12,16 +12,15 @@ fn test_enc_dec_json() {
     let s = meta.to_json_string().unwrap();
 
     // Decode string, while looking for the first identifier.
-    let decoded = RecipientMetadata::from_string(&s, &ids[0]).unwrap();
+    let decoded = Metadata::from_json_string(&s).unwrap();
 
-    // Also decode the full metadata containing all info for all recipients.
-    let full_decoded: Metadata = serde_json::from_str(&s).unwrap();
-    assert_eq!(full_decoded.policies.len(), 2);
+    assert_eq!(decoded.policies.len(), 2);
 
     assert_eq!(
-        &decoded.recipient_info.policy,
+        &decoded.policies.get(&ids[0]).unwrap().policy,
         &setup.policies.get(&ids[0]).unwrap().to_hidden()
     );
+
     assert_eq!(&decoded.iv, &meta.iv);
     assert_eq!(&decoded.chunk_size, &meta.chunk_size);
 }
@@ -39,13 +38,11 @@ fn test_enc_dec_msgpack() {
     let mut v = Vec::new();
     meta.msgpack_into(&mut v).unwrap();
 
-    //println!("output is {} bytes", v.len());
-
     let mut c = Cursor::new(v);
-    let decoded = RecipientMetadata::msgpack_from(&mut c, &ids[0]).unwrap();
+    let decoded = Metadata::msgpack_from(&mut c).unwrap();
 
     assert_eq!(
-        &decoded.recipient_info.policy,
+        &decoded.policies.get(&ids[0]).unwrap().policy,
         &setup.policies.get(&ids[0]).unwrap().to_hidden()
     );
     assert_eq!(&decoded.iv, &meta.iv);
@@ -102,14 +99,22 @@ fn test_round() {
     // Encode to JSON string.
     let s = meta.to_json_string().unwrap();
 
-    // Decode, while looking for identifier2 (= "leon.botros@gmail.com").
     let mut c = Cursor::new(v);
-    let decoded1 = RecipientMetadata::msgpack_from(&mut c, test_id).unwrap();
-    let keys2 = decoded1.derive_keys(test_usk).unwrap();
+    let decoded1 = Metadata::msgpack_from(&mut c).unwrap();
+    let keys2 = decoded1
+        .policies
+        .get(test_id)
+        .unwrap()
+        .derive_keys(test_usk)
+        .unwrap();
 
-    // Idem, decode while looking for test_id.
-    let decoded2 = RecipientMetadata::from_string(&s, test_id).unwrap();
-    let keys3 = decoded2.derive_keys(test_usk).unwrap();
+    let decoded2 = Metadata::from_json_string(&s).unwrap();
+    let keys3 = decoded2
+        .policies
+        .get(test_id)
+        .unwrap()
+        .derive_keys(test_usk)
+        .unwrap();
 
     assert_eq!(&decoded1.iv, &meta.iv);
     assert_eq!(&decoded1.chunk_size, &meta.chunk_size);

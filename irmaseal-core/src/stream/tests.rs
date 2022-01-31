@@ -5,7 +5,7 @@ use std::io::Cursor;
 use crate::test_common::TestSetup;
 use crate::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
 
-fn seal_helper(setup: &TestSetup, plain: &Vec<u8>) -> Vec<u8> {
+fn seal_helper(setup: &TestSetup, plain: &[u8]) -> Vec<u8> {
     let mut rng = rand::thread_rng();
 
     let mut input = AllowStdIo::new(Cursor::new(plain));
@@ -26,7 +26,7 @@ fn seal_helper(setup: &TestSetup, plain: &Vec<u8>) -> Vec<u8> {
     output.into_inner()
 }
 
-fn unseal_helper(setup: &TestSetup, ct: &Vec<u8>, recipient_idx: usize) -> Vec<u8> {
+fn unseal_helper(setup: &TestSetup, ct: &[u8], recipient_idx: usize) -> Vec<u8> {
     let mut input = AllowStdIo::new(Cursor::new(ct));
     let mut output = AllowStdIo::new(Vec::new());
 
@@ -35,19 +35,19 @@ fn unseal_helper(setup: &TestSetup, ct: &Vec<u8>, recipient_idx: usize) -> Vec<u
     let usk_id = setup.usks.get(id).unwrap();
 
     block_on(async {
-        let mut unsealer = Unsealer::new(&mut input, id).await.unwrap();
+        let mut unsealer = Unsealer::new(&mut input).await.unwrap();
 
         // Normally, a user would need to retrieve a usk here via the PKG,
         // but in this case we own the master key pair.
-        unsealer.unseal(&usk_id, &mut output).await.unwrap();
+        unsealer.unseal(id, usk_id, &mut output).await.unwrap();
     });
 
     output.into_inner()
 }
 
 fn seal_and_unseal(setup: &TestSetup, plain: Vec<u8>) {
-    let ct = seal_helper(&setup, &plain);
-    let plain2 = unseal_helper(&setup, &ct, 0);
+    let ct = seal_helper(setup, &plain);
+    let plain2 = unseal_helper(setup, &ct, 0);
 
     assert_eq!(&plain, &plain2);
 }
