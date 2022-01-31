@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::stream::{web_seal, WebUnsealer};
 use irmaseal_core::util::KeySet;
-use irmaseal_core::Error as SealError;
+use irmaseal_core::{Error as SealError, HiddenPolicy};
 use irmaseal_core::{Policy, PublicKey, UserSecretKey};
 
 use wasm_bindgen::prelude::*;
@@ -76,22 +76,17 @@ pub async fn js_seal(
 
 #[wasm_bindgen(js_class = Unsealer)]
 impl JsUnsealer {
-    /// Constructs a new `Unsealer` from a Javascript `ReadableStream` and
-    /// a recipient identifier. The stream forwards up until the payload.
+    /// Constructs a new `Unsealer` from a Javascript `ReadableStream`.
+    /// The stream forwards up until the payload.
     /// The decrypting party should then use the metadata to retrieve a
     /// user secret key for using in `unseal()` or `get_keys()`.
     ///
     /// Locks the ReadableStream until this Unsealer is dropped.
     #[wasm_bindgen(constructor)]
-    pub async fn new(
-        readable: RawReadableStream,
-        recipient_id: String,
-    ) -> Result<JsUnsealer, JsValue> {
+    pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
         let read = ReadableStream::from_raw(readable).into_async_read();
 
-        let unsealer = WebUnsealer::new(read, &recipient_id)
-            .await
-            .map_err(Error::Seal)?;
+        let unsealer = WebUnsealer::new(read).await.map_err(Error::Seal)?;
 
         Ok(Self(unsealer))
     }
@@ -100,6 +95,7 @@ impl JsUnsealer {
     /// into a `WritableStream`.
     pub async fn unseal(
         mut self,
+        recipient_id: String,
         usk: JsValue,
         writable: RawWritableStream,
     ) -> Result<(), JsValue> {
@@ -108,17 +104,28 @@ impl JsUnsealer {
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
         let mut write = WritableStream::from_raw(writable).into_async_write();
 
-        self.0.unseal(&usk, &mut write).await.map_err(Error::Seal)?;
+        self.0
+            .unseal(&recipient_id, &usk, &mut write)
+            .await
+            .map_err(Error::Seal)?;
 
         write.close().await.unwrap();
 
         Ok(())
     }
 
-    /// Returns the hidden policy specific to the identifier used in `new()`.
+    /// Returns all hidden policies in the metadata.
     /// The user can use this to retrieve a `UserSecretKey`.
-    pub fn get_hidden_policy(&self) -> JsValue {
-        JsValue::from_serde(&self.0.meta.recipient_info.policy).unwrap()
+    pub fn get_hidden_policies(&self) -> JsValue {
+        let policies: BTreeMap<String, HiddenPolicy> = self
+            .0
+            .meta
+            .policies
+            .iter()
+            .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
+            .collect();
+
+        JsValue::from_serde(&policies).unwrap()
     }
 
     /// Returns the intitialization vector used for symmetric encryption.
@@ -133,18 +140,17 @@ impl JsUnsealer {
         iv
     }
 
-    /// Returns the raw metadata header as `Uint8Array`.
-    /// This can be used as associated data input to the symmetric encryption.
-    pub fn get_raw_header(&self) -> Uint8Array {
-        let header = Uint8Array::new_with_length(self.0.meta_buf.len() as u32);
-        header.copy_from(&self.0.meta_buf);
-        header
-    }
-
     /// Returns the symmetric keys derived from the unsealer and the usk/mpk.
-    pub fn derive_keys(&self, usk: &JsValue) -> WrappedKeyset {
+    pub fn derive_keys(&self, id: &str, usk: &JsValue) -> WrappedKeyset {
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
-        let keyset = self.0.meta.derive_keys(&usk).unwrap();
+        let keyset = self
+            .0
+            .meta
+            .policies
+            .get(id)
+            .unwrap()
+            .derive_keys(&usk)
+            .unwrap();
 
         WrappedKeyset(keyset)
     }

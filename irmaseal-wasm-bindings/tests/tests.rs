@@ -31,10 +31,13 @@ async fn test_stdio_with_len(len: usize) {
         .unwrap();
 
     let mut c = Cursor::new(&b);
-    let mut unsealer = Unsealer::new(&mut c, test_id).await.unwrap();
+    let mut unsealer = Unsealer::new(&mut c).await.unwrap();
 
     let mut plain2 = Vec::new();
-    unsealer.unseal(test_usk, &mut plain2).await.unwrap();
+    unsealer
+        .unseal(test_id, test_usk, &mut plain2)
+        .await
+        .unwrap();
 
     assert_eq!(&plain, &plain2);
 }
@@ -63,12 +66,14 @@ async fn test_webstreams_with_len(len: usize) {
 
     let unsealer_output = new_recording_writable_stream();
 
-    let unsealer = JsUnsealer::new(unsealer_input, "alice@example.com".to_string())
-        .await
-        .unwrap();
+    let unsealer = JsUnsealer::new(unsealer_input).await.unwrap();
 
     unsealer
-        .unseal(usk, unsealer_output.stream())
+        .unseal(
+            "alice@example.com".to_string(),
+            usk,
+            unsealer_output.stream(),
+        )
         .await
         .unwrap();
 
