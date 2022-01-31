@@ -22,3 +22,4 @@ serde_json = { version = "1.0.57" }
 tokio = { version = "0.2.5", features = ["rt-threaded", "time"] }
 irma = "0.2.1"
 indicatif = "0.16.2"
+inquire = "0.2.1"

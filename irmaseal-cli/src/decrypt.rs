@@ -2,6 +2,7 @@ use crate::client::Client;
 use crate::opts::DecOpts;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
+use inquire::Select;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::stream::Unsealer;
@@ -63,24 +64,22 @@ pub async fn exec(dec_opts: DecOpts) {
     let source = File::open(&input).unwrap();
     let mut async_read = AllowStdIo::new(&source);
 
-    let mut recipient_id = String::new();
-    eprintln!("Enter recipient_id:");
-    std::io::stdin().read_line(&mut recipient_id).unwrap();
-    let mut unsealer = Unsealer::new(&mut async_read, &recipient_id.trim().to_string())
-        .await
-        .unwrap();
-
+    let mut unsealer = Unsealer::new(&mut async_read).await.unwrap();
     eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
-    let recipient_info = &unsealer.meta.recipient_info;
-    eprintln!(
-        "Policy: {}",
-        serde_json::to_string_pretty(&recipient_info.policy).unwrap()
-    );
+    let hidden_policies = &unsealer.meta.policies;
+    //    eprintln!(
+    //        "All policies (values purged): {}",
+    //        serde_json::to_string_pretty(&hidden_policies).unwrap()
+    //    );
 
-    let client = Client::new(&pkg).unwrap();
+    let options: Vec<_> = hidden_policies.keys().cloned().collect();
+    let id = Select::new("What's your recipient identifier?", options)
+        .prompt()
+        .unwrap();
 
-    let mut reconstructed_policy = recipient_info.policy.clone();
+    let rec_info = hidden_policies.get(&id).unwrap();
+    let mut reconstructed_policy = rec_info.policy.clone();
     for attr in reconstructed_policy.con.iter_mut() {
         let mut line = String::new();
         eprintln!("Enter value for {}:", &attr.atype);
@@ -101,13 +100,14 @@ pub async fn exec(dec_opts: DecOpts) {
 
     eprintln!("Requesting key for {:?}", &keyrequest);
 
+    let client = Client::new(&pkg).unwrap();
     let sd: irma::SessionData = client.request(&keyrequest).await.unwrap();
 
     eprintln!("Please scan the following QR-code with IRMA:");
     print_qr(&sd.session_ptr);
 
     let key_resp: KeyResponse<CGWKV> =
-        wait_on_session::<CGWKV>(&client, &sd, recipient_info.policy.timestamp)
+        wait_on_session::<CGWKV>(&client, &sd, rec_info.policy.timestamp)
             .await
             .unwrap();
 
@@ -115,7 +115,7 @@ pub async fn exec(dec_opts: DecOpts) {
 
     let destination = File::create(&out_file_name).unwrap();
 
-    let pb = ProgressBar::new(source.metadata().unwrap().len() - unsealer.meta_buf.len() as u64);
+    let pb = ProgressBar::new(source.metadata().unwrap().len());
     pb.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} {binary_bytes_per_sec} ({eta} left)")
         .progress_chars("#>-"));
@@ -124,5 +124,5 @@ pub async fn exec(dec_opts: DecOpts) {
 
     eprintln!("Decrypting {}...", input);
 
-    unsealer.unseal(&usk, w).await.unwrap();
+    unsealer.unseal(&id, &usk, w).await.unwrap();
 }
