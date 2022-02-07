@@ -88,7 +88,7 @@ irma.use(IrmaPopup);
 const usk = await irma.start();
 
 // Unseal the contents of the IRMAseal packet, writing the plaintext to a `WritableStream`.
-await unsealer.unseal(usk, writable);
+await unsealer.unseal("recipient_1", usk, writable);
 ```
 
 ## Building the package from the crate
