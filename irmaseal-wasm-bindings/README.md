@@ -5,6 +5,8 @@ to call into the IRMAseal rust library from javacript.
 
 ## Usage
 
+### Encryption
+
 ```javascript
 // Retrieve the public key from PKG API:
 const resp = await fetch(`${url}/v2/parameters`);
