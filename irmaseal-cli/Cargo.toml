@@ -1,10 +1,13 @@
 [package]
-authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
+authors = [
+  "Leon Botros <l.botros@cs.ru.nl>",
+  "Wouter Geraedts <git@woutergeraedts.nl>"
+]
 description = "Commandline interface for IRMAseal"
 edition = "2018"
 license = "MIT"
 name = "irmaseal-cli"
-version = "0.1.4"
+version = "0.2.0-beta.0"
 
 [dependencies]
 futures = "0.3.4"

@@ -1,20 +1,24 @@
 [package]
 name = "irmaseal-core"
 description = "Core library for IRMAseal communication and bytestream operations."
-version = "0.1.3"
-authors = ["Wouter Geraedts <git@woutergeraedts.nl>"]
+version = "0.2.0-beta.0"
+authors = [
+  "Leon Botros <l.botros@cs.ru.nl",
+  "Wouter Geraedts <git@woutergeraedts.nl>"
+]
 edition = "2018"
 license = "MIT"
-keywords = ["ibe", "encryption", "ecc", "no_std"]
-homepage = "https://github.com/Wassasin/irmaseal/tree/master/irmaseal-core"
-categories = ["cryptography", "no-std"]
+keywords = ["ibe", "encryption", "ecc"]
+homepage = "https://github.com/encryption4all/irmaseal/tree/0.2.0-beta.0/irmaseal-core"
+categories = ["cryptography"]
 
 [dependencies]
 rand = { version = "0.8.4" }
 subtle = "2.3"
 irma = "0.2.1"
 ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "0.2.0-beta.0", features = [
-  "cgwkv", "mr"
+  "cgwkv",
+  "mr"
 ] }
 serde = { version = "1.0.126", features = ["derive"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
@@ -45,10 +49,7 @@ criterion = "0.3.5"
 
 [features]
 default = []
-stream = [
-  "aead/stream",
-  "aes-gcm"
-]
+stream = ["aead/stream", "aes-gcm"]
 wasm_stream = [
   "aead/stream",
   "wasm-bindgen",

@@ -1,9 +1,9 @@
 [package]
 name = "irmaseal-wasm-bindings"
-version = "0.0.5"
+version = "0.2.0-beta.0"
 authors = [
-  "Bas Westerbaan <bas@westerbaan.name>",
-  "Leon Botros <l.botros@cs.ru.nl>"
+  "Leon Botros <l.botros@cs.ru.nl>",
+  "Bas Westerbaan <bas@westerbaan.name>"
 ]
 edition = "2018"
 
