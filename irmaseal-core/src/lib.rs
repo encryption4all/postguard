@@ -63,8 +63,8 @@ pub mod constants {
     pub const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + METADATA_SIZE_SIZE;
 
     // Default size of symmetric encryption chunks.
-    // A reasonable default is 128 KiB.
-    pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: usize = 1024 * 128;
+    // A reasonable default is 1 MiB.
+    pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: usize = 1024 * 1024;
 
     // Symmetric crypto constants.
     // This library uses AES128 because BLS12-381 is only secure up to around 120 bits.
