@@ -128,12 +128,12 @@ impl JsUnsealer {
         JsValue::from_serde(&policies).unwrap()
     }
 
-    /// Returns the intitialization vector used for symmetric encryption.
+    /// Returns the chunk size used during symmetric encryption.
     pub fn get_chunk_size(&self) -> usize {
         self.0.meta.chunk_size
     }
 
-    /// Returns the chunk size used during symmetric encryption.
+    /// Returns the intitialization vector used for symmetric encryption.
     pub fn get_iv(&self) -> Uint8Array {
         let iv = Uint8Array::new_with_length(self.0.meta.iv.len() as u32);
         iv.copy_from(&self.0.meta.iv);
