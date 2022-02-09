@@ -8,7 +8,7 @@ use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use ibe::kem::cgw_kv::CGWKV;
 use std::convert::TryInto;
 
-use crate::stream::web::{aead_nonce, aesgcm::decrypt};
+use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
 
 pub struct Unsealer<R> {
     pub version: u16,
@@ -46,7 +46,11 @@ where
                 .map_err(|_e| Error::FormatViolation)?,
         ) as usize;
 
-        let mut meta_buf = Vec::with_capacity(PREAMBLE_SIZE + metadata_len);
+        if metadata_len > MAX_METADATA_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
+
+        let mut meta_buf = Vec::with_capacity(metadata_len);
 
         // Limit reader to not read past metadata
         let mut r = r.take(metadata_len as u64);
@@ -57,6 +61,10 @@ where
 
         let meta: Metadata =
             rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
+
+        if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
 
         Ok(Unsealer {
             version,
@@ -80,6 +88,8 @@ where
             mac_key: _,
         } = rec_info.derive_keys(usk).unwrap();
 
+        let key = get_key(&aes_key).await.unwrap();
+
         let nonce = &self.meta.iv[..NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
@@ -92,7 +102,7 @@ where
             buf_tail += read;
 
             if buf_tail == bufsize {
-                decrypt(&aes_key, &aead_nonce(nonce, counter, false), b"", &mut buf)
+                decrypt(&key, &aead_nonce(nonce, counter, false), b"", &mut buf)
                     .await
                     .unwrap();
 
@@ -104,7 +114,7 @@ where
             } else if read == 0 {
                 buf.truncate(buf_tail);
 
-                decrypt(&aes_key, &aead_nonce(nonce, counter, true), b"", &mut buf)
+                decrypt(&key, &aead_nonce(nonce, counter, true), b"", &mut buf)
                     .await
                     .unwrap();
 

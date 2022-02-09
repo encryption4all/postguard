@@ -46,7 +46,7 @@ pub mod constants {
     /// conjunctions. For this version we required the metadata to be dynamic.
     pub const VERSION_V2: u16 = 1;
 
-    /// The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
+    // The tag 'IRMASEAL' with which all IRMAseal bytestreams start.
     pub const PRELUDE_SIZE: usize = 4;
     pub const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
     pub const VERSION_SIZE: usize = std::mem::size_of::<u16>();
@@ -55,6 +55,9 @@ pub mod constants {
     /// The maximum size of the metadata (4 MiB).
     pub const MAX_METADATA_SIZE: usize = 1024 * 1024 * 4;
 
+    /// The maximum size of symmetric chunks (4 MiB).
+    pub const MAX_SYMMETRIC_CHUNK_SIZE: usize = 1024 * 1024 * 4;
+
     // PREAMBLE contains the following:
     // * Prelude: 4 bytes,
     // * Version identifier: 2 bytes,
@@ -62,7 +65,7 @@ pub mod constants {
     // * Totalling: 4 + 2 + 4 = 12 bytes.
     pub const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + METADATA_SIZE_SIZE;
 
-    // Default size of symmetric encryption chunks.
+    /// Default size of symmetric encryption chunks.
     // A reasonable default is 1 MiB.
     pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: usize = 1024 * 1024;
 

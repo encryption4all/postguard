@@ -48,13 +48,12 @@ impl Metadata {
         ))
     }
 
-    /// Writes binary msgPack format into a std::io::Writer.
+    /// Writes binary MessagePack format into a [`std::io::Write`].
     ///
     /// Internally uses the "named" convention, which preserves field names.
     /// Fields names are shortened to limit overhead:
-    /// `rs`: sequence of serialized `RecipientInfo`s,
-    ///     `id`: serialized `RecipientIdentifier`,
-    ///     `p`: serialized `HiddenPolicy`:
+    /// `rs`: map of serialized `RecipientInfo`s with keyed by recipient identifier,
+    ///     `p`: serialized `HiddenPolicy`,
     ///     `ct`: associated ciphertext with this policy,
     /// `iv`: 16-byte initialization vector,
     /// `cs`: chunk size in bytes used in the symmetrical encryption.
@@ -62,29 +61,30 @@ impl Metadata {
         w.write_all(&PRELUDE)?;
         w.write_all(&VERSION_V2.to_be_bytes())?;
 
-        // For this to work, we need know the length of the metadata in advance.
-        // For now, buffer it and determine the length.
-        // TODO: could optimize this, or at least use a max capacity.
-        let mut meta_vec = Vec::new();
+        let mut meta_vec = Vec::with_capacity(MAX_METADATA_SIZE);
         let mut serializer = rmp_serde::encode::Serializer::new(&mut meta_vec).with_struct_map();
 
         self.serialize(&mut serializer)
             .map_err(|_e| Error::ConstraintViolation)?;
 
+        // Write the length first.
         w.write_all(
             &u32::try_from(meta_vec.len())
                 .map_err(|_e| Error::ConstraintViolation)?
                 .to_be_bytes(),
         )?;
+
+        // Write the rest of the metadata.
         w.write_all(&meta_vec)?;
 
         Ok(())
     }
 
-    /// Writes to a pretty json string.
+    /// Serializes the metadata to a json string.
     ///
-    /// Should only be used for small metadata or development purposes.
+    /// Should only be used for small metadata or development purposes,
+    /// or when compactness is not required.
     pub fn to_json_string(&self) -> Result<String, Error> {
-        serde_json::to_string_pretty(&self).or(Err(Error::FormatViolation))
+        serde_json::to_string(&self).or(Err(Error::FormatViolation))
     }
 }

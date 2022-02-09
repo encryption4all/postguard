@@ -4,7 +4,7 @@ use std::io::Read;
 use crate::*;
 
 impl Metadata {
-    /// Deserialize the metadata from binary messagePack format.
+    /// Deserialize the metadata from binary MessagePack format.
     pub fn msgpack_from<R: Read>(mut r: R) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp).map_err(|_e| Error::NotIRMASEAL)?;

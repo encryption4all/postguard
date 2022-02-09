@@ -17,25 +17,7 @@ use serde_big_array::BigArray;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-impl From<std::io::Error> for crate::Error {
-    fn from(e: std::io::Error) -> Self {
-        Error::StdIO(e)
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RecipientInfo {
-    /// The hidden policy associated with this identifier.
-    #[serde(rename = "p")]
-    pub policy: HiddenPolicy,
-
-    /// Ciphertext for this specific recipient.
-    #[serde(with = "BigArray")]
-    pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
-}
-
-/// This struct containts metadata for _ALL_ recipients.  It only needs to be in memory for
-/// encoding purposes, for decoding for specific recipient see [`RecipientMetadata`].
+/// This struct containts metadata for _ALL_ recipients.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
     #[serde(rename = "rs")]
@@ -49,15 +31,33 @@ pub struct Metadata {
     pub chunk_size: usize,
 }
 
+/// Contains data specific to one recipient.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecipientInfo {
+    /// The hidden policy associated with this identifier.
+    #[serde(rename = "p")]
+    pub policy: HiddenPolicy,
+
+    /// Ciphertext for this specific recipient.
+    #[serde(with = "BigArray")]
+    pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
+}
+
 impl RecipientInfo {
-    /// Derives a [`KeySet`] from a [`RecipientMetadata`].
+    /// Derives a [`KeySet`] from a [`RecipientInfo`].
     ///
-    /// This keyset can be used for AEAD.
+    /// This key set can be used for AEAD for example.
     pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<KeySet, Error> {
         let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(&self.ct))
             .ok_or(Error::FormatViolation)?;
         let ss = CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)?;
 
         Ok(derive_keys(&ss))
+    }
+}
+
+impl From<std::io::Error> for crate::Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::StdIO(e)
     }
 }

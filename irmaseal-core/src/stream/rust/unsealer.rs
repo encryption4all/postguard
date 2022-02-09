@@ -47,6 +47,10 @@ where
                 .map_err(|_e| Error::FormatViolation)?,
         ) as usize;
 
+        if metadata_len > MAX_METADATA_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
+
         let mut meta_buf = Vec::with_capacity(metadata_len);
 
         // Limit reader to not read past metadata
@@ -58,6 +62,10 @@ where
 
         let meta: Metadata =
             rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
+
+        if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
 
         Ok(Unsealer {
             version,
