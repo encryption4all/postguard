@@ -9,6 +9,7 @@ use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 use std::convert::TryInto;
+use wasm_bindgen::JsValue;
 
 use crate::stream::web::{aead_nonce, aesgcm::encrypt, aesgcm::get_key};
 
@@ -21,8 +22,8 @@ pub async fn seal<Rng, R, W>(
 ) -> Result<(), Error>
 where
     Rng: RngCore + CryptoRng,
-    R: Stream<Item = Uint8Array> + Unpin,
-    W: Sink<Uint8Array> + Unpin + 'static,
+    R: Stream<Item = Result<Uint8Array, JsValue>> + Unpin,
+    W: Sink<Uint8Array> + Unpin,
 {
     let (meta, ss) = Metadata::new(pk, policies, rng)?;
     let KeySet {
@@ -46,7 +47,7 @@ where
     let mut buf_tail: u32 = 0;
     let buf = Uint8Array::new_with_length(chunk_size);
 
-    while let Some(data) = r.next().await {
+    while let Some(Ok(data)) = r.next().await {
         let len = data.byte_length();
         let rem = buf.byte_length() - buf_tail;
 

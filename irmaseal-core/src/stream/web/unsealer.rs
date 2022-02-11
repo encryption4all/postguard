@@ -7,6 +7,7 @@ use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
 use std::convert::TryInto;
+use wasm_bindgen::JsValue;
 
 use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
 
@@ -19,7 +20,7 @@ pub struct Unsealer<R> {
 
 impl<R> Unsealer<R>
 where
-    R: Stream<Item = Uint8Array> + Unpin,
+    R: Stream<Item = Result<Uint8Array, JsValue>> + Unpin,
 {
     pub async fn new(mut r: R) -> Result<Self, Error> {
         let preamble_size: u32 = PREAMBLE_SIZE.try_into().unwrap();
@@ -28,7 +29,7 @@ where
 
         let mut meta_buf = Vec::new();
 
-        while let (Some(data), true) = (r.next().await, read < preamble_size) {
+        while let (Some(Ok(data)), true) = (r.next().await, read < preamble_size) {
             let len = data.byte_length();
             let rem = preamble_size - read;
 
@@ -72,7 +73,7 @@ where
 
         let mut spill = Vec::new();
 
-        while let (Some(data), true) = (r.next().await, read < metadata_len) {
+        while let (Some(Ok(data)), true) = (r.next().await, read < metadata_len) {
             let len = data.byte_length();
             let rem = metadata_len - read;
 
@@ -125,7 +126,7 @@ where
         buf.copy_from(&self.spill);
         let mut buf_tail: u32 = self.spill.len().try_into().unwrap();
 
-        while let Some(data) = self.r.next().await {
+        while let Some(Ok(data)) = self.r.next().await {
             let len = data.byte_length();
             let rem = buf.byte_length() - buf_tail;
 

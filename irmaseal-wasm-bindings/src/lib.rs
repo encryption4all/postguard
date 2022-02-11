@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use futures::stream::Map;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::stream::{web_seal, WebUnsealer};
 use irmaseal_core::util::KeySet;
@@ -8,12 +9,12 @@ use irmaseal_core::{Policy, PublicKey, UserSecretKey};
 
 use wasm_bindgen::JsValue;
 use wasm_bindgen::{prelude::*, JsCast};
-use wasm_streams::readable::IntoAsyncRead;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
+use wasm_streams::readable::{IntoAsyncRead, IntoStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
 use futures::io::AsyncWriteExt;
-use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt, Future};
+use futures::{Future, Sink, SinkExt, Stream, StreamExt, TryStreamExt};
 use js_sys::{Error as JsError, Uint8Array};
 
 extern crate console_error_panic_hook;
@@ -43,7 +44,7 @@ impl From<Error> for JsValue {
 }
 
 #[wasm_bindgen(js_name = Unsealer)]
-pub struct JsUnsealer(WebUnsealer<IntoAsyncRead<'static>>);
+pub struct JsUnsealer(WebUnsealer<Stream<Item = Result<Uint8Array, JsValue>>>);
 
 #[wasm_bindgen(js_name = KeySet)]
 pub struct WrappedKeyset(KeySet);
@@ -63,8 +64,16 @@ pub async fn js_seal(
     let pols: BTreeMap<String, Policy> = policies.into_serde().unwrap();
 
     let mut read = ReadableStream::from_raw(readable);
-    let mut stream = read.into_stream().map_ok(|x| x.dyn_into());
+    let mut stream = read
+        .into_stream()
+        .map(|x: Result<JsValue, JsValue>| match x {
+            Ok(val) => val.dyn_into::<Uint8Array>(),
+            Err(err) => Err(err),
+        });
+
     let mut sink = WritableStream::from_raw(writable)
+        .into_sink()
+        .with(|x: Uint8Array| async move { x.dyn_into::<JsValue>() });
 
     web_seal(&pk, &pols, &mut rng, &mut stream, &mut sink)
         .await
@@ -83,7 +92,13 @@ impl JsUnsealer {
     /// Locks the ReadableStream until this Unsealer is dropped.
     #[wasm_bindgen(constructor)]
     pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
-        let read = ReadableStream::from_raw(readable).into_async_read();
+        let read =
+            ReadableStream::from_raw(readable)
+                .into_stream()
+                .map(|x: Result<JsValue, JsValue>| match x {
+                    Ok(val) => val.dyn_into::<Uint8Array>(),
+                    Err(err) => Err(err),
+                });
 
         let unsealer = WebUnsealer::new(read).await.map_err(Error::Seal)?;
 
