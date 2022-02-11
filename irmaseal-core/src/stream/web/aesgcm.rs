@@ -50,34 +50,20 @@ pub async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
 pub async fn encrypt(
     key: &CryptoKey,
     iv: &[u8],
-    aad: &[u8],
-    data: &mut dyn Buffer,
-) -> Result<(), Error> {
-    let len = data.len();
+    aad: &Uint8Array,
+    data: &Uint8Array,
+) -> Result<Uint8Array, Error> {
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
-    pars.additional_data(&Uint8Array::from(aad));
+    pars.additional_data(aad);
     pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
 
-    let plain = Uint8Array::from(data.as_ref());
-    let result = subtle.encrypt_with_object_and_buffer_source(&pars, &key, &plain);
+    let result = subtle.encrypt_with_object_and_buffer_source(&pars, &key, &data);
     let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
     let ct = Uint8Array::new(&array_buffer);
 
-    // copy the ciphertext, if there is any, it should fit.
-    ct.subarray(0, len.try_into().unwrap())
-        .copy_to(&mut data.as_mut()[..len]);
-
-    // slice off the tag and extend the buffer with this tag.
-    let tag = ct.slice(
-        len.try_into().unwrap(),
-        (len + TAG_SIZE).try_into().unwrap(),
-    );
-
-    data.extend_from_slice(tag.to_vec().as_slice()).unwrap();
-
-    Ok(())
+    Ok(ct)
 }
 
 /// One-shot decryption function, using WebCrypto's AES-GCM128.
@@ -87,23 +73,18 @@ pub async fn encrypt(
 pub async fn decrypt(
     key: &CryptoKey,
     iv: &[u8],
-    aad: &[u8],
-    data: &mut dyn Buffer,
-) -> Result<(), Error> {
+    aad: &Uint8Array,
+    data: &Uint8Array,
+) -> Result<Uint8Array, Error> {
     let subtle = get_crypto().subtle();
-    let len = data.len();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
-    pars.additional_data(&Uint8Array::from(aad));
+    pars.additional_data(aad);
     pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
 
-    let ct = Uint8Array::from(data.as_ref());
-    let result = subtle.decrypt_with_object_and_buffer_source(&pars, &key, &ct);
+    let result = subtle.decrypt_with_object_and_buffer_source(&pars, &key, &data);
     let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
     let plain = Uint8Array::new(&array_buffer);
 
-    plain.copy_to(&mut data.as_mut()[..len - TAG_SIZE]);
-    data.truncate(len - TAG_SIZE);
-
-    Ok(())
+    Ok(plain)
 }

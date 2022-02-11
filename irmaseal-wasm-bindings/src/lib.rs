@@ -6,13 +6,14 @@ use irmaseal_core::util::KeySet;
 use irmaseal_core::{Error as SealError, HiddenPolicy};
 use irmaseal_core::{Policy, PublicKey, UserSecretKey};
 
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
+use wasm_bindgen::{prelude::*, JsCast};
 use wasm_streams::readable::IntoAsyncRead;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
 use futures::io::AsyncWriteExt;
+use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt, Future};
 use js_sys::{Error as JsError, Uint8Array};
 
 extern crate console_error_panic_hook;
@@ -62,14 +63,12 @@ pub async fn js_seal(
     let pols: BTreeMap<String, Policy> = policies.into_serde().unwrap();
 
     let mut read = ReadableStream::from_raw(readable);
-    let mut async_read = read.get_byob_reader().into_async_read();
-    let mut async_write = WritableStream::from_raw(writable).into_async_write();
+    let mut stream = read.into_stream().map_ok(|x| x.dyn_into());
+    let mut sink = WritableStream::from_raw(writable)
 
-    web_seal(&pk, &pols, &mut rng, &mut async_read, &mut async_write)
+    web_seal(&pk, &pols, &mut rng, &mut stream, &mut sink)
         .await
         .map_err(Error::Seal)?;
-
-    async_write.close().await.unwrap();
 
     Ok(())
 }
