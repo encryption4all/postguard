@@ -2,7 +2,6 @@ use futures::io::Cursor;
 use irmaseal_core::stream::{seal, Unsealer};
 use irmaseal_wasm_bindings::{js_seal, JsUnsealer};
 use js_sys::Uint8Array;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
 
@@ -10,11 +9,6 @@ use wasm_bindgen_test::*;
 mod helpers;
 
 use helpers::*;
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
@@ -65,15 +59,6 @@ async fn test_webstreams_with_len(len: usize) {
     js_seal(mpk.clone(), policies, sealer_input, sealer_output.stream())
         .await
         .unwrap();
-
-    //let tmp: Vec<u8> = sealer_output
-    //    .written()
-    //    .iter()
-    //    .map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-    //    .flatten()
-    //    .collect();
-
-    //log(&format!("written seal stream: {:?} {}", tmp, tmp.len()));
 
     let unsealer_input =
         new_readable_stream_from_array(sealer_output.written().to_vec().into_boxed_slice());

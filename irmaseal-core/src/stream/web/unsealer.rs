@@ -7,17 +7,10 @@ use futures::{stream::iter, Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
 use std::convert::TryInto;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
 
 pub struct Unsealer<R> {
     pub version: u16,
@@ -53,9 +46,6 @@ where
             }
         }
 
-        //log(&format!("got the preamble, after reading {} bytes", read));
-        //log(&format!("meta_buf: {:?}", meta_buf));
-
         if read < preamble_len || preamble[..PRELUDE_SIZE] != PRELUDE {
             return Err(JsValue::from(Error::NotIRMASEAL));
         }
@@ -80,11 +70,8 @@ where
             return Err(JsValue::from(Error::ConstraintViolation));
         }
 
-        // log(&format!("retrieved meta len: {}", metadata_len));
-
         if read > preamble_len + metadata_len {
             // We read into the payload
-            //log("whoops, read into the payload");
             payload.extend_from_slice(&meta_buf[metadata_len as usize..]);
             meta_buf.truncate(metadata_len as usize);
         } else {
@@ -93,7 +80,6 @@ where
                 let len = array.byte_length();
                 let rem = preamble_len + metadata_len - read;
                 read += len;
-                //log(&format!("len: {len}, rem: {rem}"));
 
                 if len < rem {
                     meta_buf.extend_from_slice(array.to_vec().as_slice());
@@ -105,23 +91,12 @@ where
             }
         }
 
-        //log(&format!(
-        //    "metadata buffer: {:?} len: {}",
-        //    meta_buf,
-        //    meta_buf.len()
-        //));
-
         let meta: Metadata =
             rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
-
-        //log(&format!("metadata: {:?}", meta));
 
         if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
             return Err(JsValue::from(Error::ConstraintViolation));
         }
-
-        //log(&format!("start done, payload: {:?}", payload));
-        //log(&format!("total read: {}", read));
 
         Ok(Unsealer {
             version,
@@ -211,7 +186,6 @@ where
         .unwrap();
 
         w.send(final_plain.into()).await?;
-
         w.close().await
     }
 }

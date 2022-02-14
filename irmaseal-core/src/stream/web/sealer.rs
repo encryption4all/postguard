@@ -9,16 +9,9 @@ use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::stream::web::{aead_nonce, aesgcm::encrypt, aesgcm::get_key};
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
 
 pub async fn seal<Rng, R, W>(
     pk: &PublicKey<CGWKV>,
@@ -113,6 +106,5 @@ where
     .unwrap();
 
     w.send(final_ct.into()).await?;
-
     w.close().await
 }
