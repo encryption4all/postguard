@@ -3,7 +3,7 @@ use crate::metadata::*;
 use crate::util::KeySet;
 use crate::Error;
 use crate::UserSecretKey;
-use futures::{Sink, SinkExt, Stream, StreamExt};
+use futures::{stream::iter, Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
 use std::convert::TryInto;
@@ -53,8 +53,8 @@ where
             }
         }
 
-        log(&format!("got the preamble, after reading {} bytes", read));
-        log(&format!("meta_buf: {:?}", meta_buf));
+        //log(&format!("got the preamble, after reading {} bytes", read));
+        //log(&format!("meta_buf: {:?}", meta_buf));
 
         if read < preamble_len || preamble[..PRELUDE_SIZE] != PRELUDE {
             return Err(JsValue::from(Error::NotIRMASEAL));
@@ -80,11 +80,11 @@ where
             return Err(JsValue::from(Error::ConstraintViolation));
         }
 
-        log(&format!("retrieved meta len: {}", metadata_len));
+        // log(&format!("retrieved meta len: {}", metadata_len));
 
         if read > preamble_len + metadata_len {
             // We read into the payload
-            log("whoops, read into the payload");
+            //log("whoops, read into the payload");
             payload.extend_from_slice(&meta_buf[metadata_len as usize..]);
             meta_buf.truncate(metadata_len as usize);
         } else {
@@ -105,23 +105,23 @@ where
             }
         }
 
-        log(&format!(
-            "metadata buffer: {:?} len: {}",
-            meta_buf,
-            meta_buf.len()
-        ));
+        //log(&format!(
+        //    "metadata buffer: {:?} len: {}",
+        //    meta_buf,
+        //    meta_buf.len()
+        //));
 
         let meta: Metadata =
             rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
 
-        log(&format!("metadata: {:?}", meta));
+        //log(&format!("metadata: {:?}", meta));
 
         if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
             return Err(JsValue::from(Error::ConstraintViolation));
         }
 
-        log(&format!("start done, payload: {:?}", payload));
-        log(&format!("total read: {}", read));
+        //log(&format!("start done, payload: {:?}", payload));
+        //log(&format!("total read: {}", read));
 
         Ok(Unsealer {
             version,
@@ -132,7 +132,7 @@ where
     }
 
     pub async fn unseal<W>(
-        &mut self,
+        mut self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
@@ -157,13 +157,15 @@ where
         let buf = Uint8Array::new_with_length(chunk_size);
         let mut buf_tail = 0;
 
-        if !self.payload.is_empty() {
-            buf.set(&Uint8Array::from(&self.payload[..]), 0);
-            buf_tail = self.payload.len().try_into().unwrap();
-            self.payload.clear();
-        }
+        let mut stream = iter(if self.payload.is_empty() {
+            vec![]
+        } else {
+            vec![Ok(JsValue::from(Uint8Array::from(&self.payload[..])))]
+        })
+        .chain(self.r);
+        self.payload.clear();
 
-        while let Some(Ok(data)) = self.r.next().await {
+        while let Some(Ok(data)) = stream.next().await {
             let mut array: Uint8Array = data.dyn_into()?;
 
             while array.byte_length() != 0 {

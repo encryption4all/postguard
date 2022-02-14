@@ -26,10 +26,10 @@ pub struct WrappedKeyset(KeySet);
 ///
 /// # Arguments
 ///
-/// * [`mpk`]: Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
-/// * [`policies`]: The policies to use for key encapsulation.
-/// * [`readable`]: The plaintext `ReadableStream` for data encapsulation.
-/// * [`writable`]: The `WritableStream` to which the ciphertext is written.
+/// * `mpk` - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
+/// * `policies` - The policies to use for key encapsulation.
+/// * `readable` - The plaintext `ReadableStream` for data encapsulation.
+/// * `writable`-  The `WritableStream` to which the ciphertext is written.
 #[wasm_bindgen(js_name = seal)]
 pub async fn js_seal(
     mpk: JsValue,
@@ -71,7 +71,7 @@ impl JsUnsealer {
     /// Decrypts the remaining data in the `ReadableStream` (the payload)
     /// into a `WritableStream`.
     pub async fn unseal(
-        mut self,
+        self,
         recipient_id: String,
         usk: JsValue,
         writable: RawWritableStream,
