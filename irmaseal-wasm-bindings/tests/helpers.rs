@@ -8,7 +8,7 @@ use wasm_streams::writable::sys::WritableStream as RawWritableStream;
 
 #[wasm_bindgen(module = "/tests/helpers.js")]
 extern "C" {
-    pub fn new_readable_byte_stream_from_array(chunks: Box<[JsValue]>) -> RawReadableStream;
+    pub fn new_readable_stream_from_array(chunks: Box<[JsValue]>) -> RawReadableStream;
 }
 
 #[wasm_bindgen(module = "/tests/helpers.js")]

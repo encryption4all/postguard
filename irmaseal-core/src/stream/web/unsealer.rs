@@ -30,33 +30,35 @@ impl<R> Unsealer<R>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
 {
-    pub async fn new(mut r: R) -> Result<Self, Error> {
-        let preamble_size: u32 = PREAMBLE_SIZE.try_into().unwrap();
+    pub async fn new(mut r: R) -> Result<Self, JsValue> {
+        let preamble_len: u32 = PREAMBLE_SIZE.try_into().unwrap();
         let mut read: u32 = 0;
+
         let mut preamble = Vec::new();
         let mut meta_buf = Vec::new();
         let mut payload = Vec::new();
 
-        while let (Some(Ok(data)), true) = (r.next().await, read < preamble_size) {
-            let array: Uint8Array = data.dyn_into().unwrap();
+        while let Some(Ok(data)) = r.next().await {
+            let array: Uint8Array = data.dyn_into()?;
             let len = array.byte_length();
-            let rem = preamble_size - read;
+            let rem = preamble_len - read;
+            read += len;
 
             if len < rem {
                 preamble.extend_from_slice(array.to_vec().as_slice());
             } else {
                 preamble.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
                 meta_buf.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
+                break;
             }
-            read += len;
-        }
-
-        if read < preamble_size || preamble[..PRELUDE_SIZE] != PRELUDE {
-            return Err(Error::NotIRMASEAL);
         }
 
         log(&format!("got the preamble, after reading {} bytes", read));
         log(&format!("meta_buf: {:?}", meta_buf));
+
+        if read < preamble_len || preamble[..PRELUDE_SIZE] != PRELUDE {
+            return Err(JsValue::from(Error::NotIRMASEAL));
+        }
 
         let version = u16::from_be_bytes(
             preamble[PRELUDE_SIZE..PRELUDE_SIZE + VERSION_SIZE]
@@ -65,42 +67,49 @@ where
         );
 
         if version != VERSION_V2 {
-            return Err(Error::IncorrectVersion);
+            return Err(JsValue::from(Error::IncorrectVersion));
         }
 
         let metadata_len = u32::from_be_bytes(
-            preamble[6..10]
+            preamble[PREAMBLE_SIZE - METADATA_SIZE_SIZE..PREAMBLE_SIZE]
                 .try_into()
                 .map_err(|_e| Error::FormatViolation)?,
         );
 
         if (metadata_len as usize) > MAX_METADATA_SIZE {
-            return Err(Error::ConstraintViolation);
+            return Err(JsValue::from(Error::ConstraintViolation));
         }
 
         log(&format!("retrieved meta len: {}", metadata_len));
 
-        if read > preamble_size + metadata_len {
+        if read > preamble_len + metadata_len {
+            // We read into the payload
             log("whoops, read into the payload");
             payload.extend_from_slice(&meta_buf[metadata_len as usize..]);
             meta_buf.truncate(metadata_len as usize);
-        }
+        } else {
+            while let Some(Ok(data)) = r.next().await {
+                let array: Uint8Array = data.dyn_into()?;
+                let len = array.byte_length();
+                let rem = preamble_len + metadata_len - read;
+                read += len;
+                //log(&format!("len: {len}, rem: {rem}"));
 
-        while let (Some(Ok(data)), true) = (r.next().await, read < preamble_size + metadata_len) {
-            let array: Uint8Array = data.dyn_into().unwrap();
-            let len = array.byte_length();
-            let rem = preamble_size + metadata_len - read;
-
-            log(&format!("len: {len}, rem: {rem}"));
-
-            if len < rem {
-                meta_buf.extend_from_slice(array.to_vec().as_slice());
-            } else {
-                meta_buf.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
-                payload.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
+                if len < rem {
+                    meta_buf.extend_from_slice(array.to_vec().as_slice());
+                } else {
+                    meta_buf.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
+                    payload.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
+                    break;
+                }
             }
-            read += len;
         }
+
+        log(&format!(
+            "metadata buffer: {:?} len: {}",
+            meta_buf,
+            meta_buf.len()
+        ));
 
         let meta: Metadata =
             rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
@@ -108,7 +117,7 @@ where
         log(&format!("metadata: {:?}", meta));
 
         if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
-            return Err(Error::ConstraintViolation);
+            return Err(JsValue::from(Error::ConstraintViolation));
         }
 
         log(&format!("start done, payload: {:?}", payload));
@@ -127,86 +136,79 @@ where
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
-    ) -> Result<(), Error>
+    ) -> Result<(), JsValue>
     where
-        W: Sink<JsValue> + Unpin,
+        W: Sink<JsValue, Error = JsValue> + Unpin,
     {
         let rec_info = self.meta.policies.get(ident).unwrap();
+
         let KeySet {
             aes_key,
             mac_key: _,
         } = rec_info.derive_keys(usk).unwrap();
 
-        let key = get_key(&aes_key).await.unwrap();
-
+        let key = get_key(&aes_key).await?;
         let nonce = &self.meta.iv[..NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
         let chunk_size: u32 = (self.meta.chunk_size + TAG_SIZE).try_into().unwrap();
-        log(&format!("chunk_size: {chunk_size}"));
+        //log(&format!("chunk_size: {chunk_size}"));
+
         let buf = Uint8Array::new_with_length(chunk_size);
         let mut buf_tail = 0;
+
         if !self.payload.is_empty() {
             buf.set(&Uint8Array::from(&self.payload[..]), 0);
             buf_tail = self.payload.len().try_into().unwrap();
+            self.payload.clear();
         }
-        log("leggo");
 
         while let Some(Ok(data)) = self.r.next().await {
-            log("leggo, got data");
-            let array: Uint8Array = data.dyn_into().unwrap();
+            let mut array: Uint8Array = data.dyn_into()?;
 
-            let vec1 = array.to_vec();
-            log(&format!("extra data: {vec1:?}"));
+            while array.byte_length() != 0 {
+                let len = array.byte_length();
+                let rem = buf.byte_length() - buf_tail;
 
-            let len = array.byte_length();
-            let rem = buf.byte_length() - buf_tail;
+                if rem == 0 {
+                    let plain = decrypt(
+                        &key,
+                        &aead_nonce(nonce, counter, false),
+                        &Uint8Array::new_with_length(0),
+                        &buf,
+                    )
+                    .await?;
 
-            if len < rem {
-                buf.set(&array, buf_tail);
-                buf_tail += len;
-            } else {
-                buf.set(&array.slice(0, rem), buf_tail);
-
-                let plain = decrypt(
-                    &key,
-                    &aead_nonce(nonce, counter, false),
-                    &Uint8Array::new_with_length(0),
-                    &buf,
-                )
-                .await
-                .unwrap();
-
-                w.feed(plain.into())
-                    .await
-                    .map_err(|_e| Error::ConstraintViolation)?;
-
-                if len > rem {
-                    buf.set(&array.slice(rem, len), 0)
+                    w.feed(plain.into()).await?;
+                    counter = counter.checked_add(1).unwrap();
+                    buf_tail = 0;
+                } else if len <= rem {
+                    buf.set(&array, buf_tail);
+                    array = Uint8Array::new_with_length(0);
+                    buf_tail += len;
+                } else {
+                    buf.set(&array.slice(0, rem), buf_tail);
+                    array = array.slice(rem, len);
+                    buf_tail += rem;
                 }
-
-                buf_tail = len - rem;
-                counter = counter.checked_add(1).unwrap();
             }
         }
-        log(&format!("no more data, buf tail = {}", buf_tail));
 
-        if buf_tail > 0 {
-            log(&format!("got some remainder: {buf_tail}"));
-            let plain = decrypt(
-                &key,
-                &aead_nonce(nonce, counter, true),
-                &Uint8Array::new_with_length(0),
-                &buf.slice(0, buf_tail),
-            )
-            .await
-            .unwrap();
+        let final_ct = if buf_tail > 0 {
+            buf.slice(0, buf_tail)
+        } else {
+            Uint8Array::new_with_length(0)
+        };
 
-            w.feed(plain.into())
-                .await
-                .map_err(|_e| Error::ConstraintViolation)?;
-        }
+        let final_plain = decrypt(
+            &key,
+            &aead_nonce(nonce, counter, true),
+            &Uint8Array::new_with_length(0),
+            &final_ct,
+        )
+        .await
+        .unwrap();
 
-        w.flush().await.map_err(|_e| Error::ConstraintViolation)
+        w.send(final_plain.into()).await
     }
 }

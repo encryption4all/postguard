@@ -1,6 +1,5 @@
 use crate::constants::*;
 use crate::Error;
-use aead::Buffer;
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::convert::TryInto;
 use wasm_bindgen::{prelude::*, JsValue};
@@ -59,7 +58,7 @@ pub async fn encrypt(
     pars.additional_data(aad);
     pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
 
-    let result = subtle.encrypt_with_object_and_buffer_source(&pars, &key, &data);
+    let result = subtle.encrypt_with_object_and_buffer_source(&pars, key, data);
     let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
     let ct = Uint8Array::new(&array_buffer);
 
@@ -82,7 +81,7 @@ pub async fn decrypt(
     pars.additional_data(aad);
     pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
 
-    let result = subtle.decrypt_with_object_and_buffer_source(&pars, &key, &data);
+    let result = subtle.decrypt_with_object_and_buffer_source(&pars, key, data);
     let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
     let plain = Uint8Array::new(&array_buffer);
 

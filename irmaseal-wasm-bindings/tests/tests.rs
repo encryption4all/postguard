@@ -59,25 +59,24 @@ async fn test_webstreams_with_len(len: usize) {
     let a = rand_vec(len);
     let js_plain = Uint8Array::from(&a[..]);
 
-    let sealer_input =
-        new_readable_byte_stream_from_array(vec![js_plain.into()].into_boxed_slice());
+    let sealer_input = new_readable_stream_from_array(vec![js_plain.into()].into_boxed_slice());
     let sealer_output = new_recording_writable_stream();
 
     js_seal(mpk.clone(), policies, sealer_input, sealer_output.stream())
         .await
         .unwrap();
 
-    let tmp: Vec<u8> = sealer_output
-        .written()
-        .iter()
-        .map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .flatten()
-        .collect();
+    //let tmp: Vec<u8> = sealer_output
+    //    .written()
+    //    .iter()
+    //    .map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
+    //    .flatten()
+    //    .collect();
 
-    log(&format!("written seal stream: {:?} {}", tmp, tmp.len()));
+    //log(&format!("written seal stream: {:?} {}", tmp, tmp.len()));
 
     let unsealer_input =
-        new_readable_byte_stream_from_array(sealer_output.written().to_vec().into_boxed_slice());
+        new_readable_stream_from_array(sealer_output.written().to_vec().into_boxed_slice());
 
     let unsealer_output = new_recording_writable_stream();
 
@@ -106,18 +105,18 @@ async fn test_webstreams_with_len(len: usize) {
 async fn test_seal_unseal_stdio() {
     test_stdio_with_len(1).await;
     test_stdio_with_len(512).await;
-    //    test_stdio_with_len(128 * 1024 - 1).await;
-    //    test_stdio_with_len(128 * 1024).await;
-    //    test_stdio_with_len(128 * 1024 + 1).await;
-    //    test_stdio_with_len(128 * 2048 + 12324).await;
+    test_stdio_with_len(128 * 1024 - 1).await;
+    test_stdio_with_len(128 * 1024).await;
+    test_stdio_with_len(128 * 1024 + 1).await;
+    test_stdio_with_len(128 * 2048 + 12324).await;
 }
 
 #[wasm_bindgen_test]
 async fn test_seal_unseal_webstreams() {
     test_webstreams_with_len(100).await;
     test_webstreams_with_len(512).await;
-    //    test_webstreams_with_len(128 * 1024 - 1).await;
-    //    test_webstreams_with_len(128 * 1024).await;
-    //    test_webstreams_with_len(128 * 1024 + 2).await;
-    //    test_webstreams_with_len(128 * 2048 + 12324).await;
+    test_webstreams_with_len(128 * 1024 - 1).await;
+    test_webstreams_with_len(128 * 1024).await;
+    test_webstreams_with_len(128 * 1024 + 2).await;
+    test_webstreams_with_len(128 * 2048 + 12324).await;
 }

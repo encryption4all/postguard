@@ -1,47 +1,20 @@
 use std::collections::BTreeMap;
 
-use futures::stream::Map;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::stream::{web_seal, WebUnsealer};
 use irmaseal_core::util::KeySet;
-use irmaseal_core::{Error as SealError, HiddenPolicy};
-use irmaseal_core::{Policy, PublicKey, UserSecretKey};
+use irmaseal_core::{HiddenPolicy, Policy, PublicKey, UserSecretKey};
 
+use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
-use wasm_bindgen::{prelude::*, JsCast};
+use wasm_streams::readable::IntoStream;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
-use wasm_streams::readable::{IntoAsyncRead, IntoStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
-use futures::io::AsyncWriteExt;
-use futures::{Future, Sink, SinkExt, Stream, StreamExt, TryStreamExt};
-use js_sys::{Error as JsError, Uint8Array};
+use futures::SinkExt;
+use js_sys::Uint8Array;
 
 extern crate console_error_panic_hook;
-
-pub enum Error {
-    Seal(irmaseal_core::Error),
-}
-
-// Convert any error to a Javascript error.
-impl From<Error> for JsValue {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::Seal(e) => match e {
-                SealError::NotIRMASEAL => JsError::new("Not IRMASEAL"),
-                SealError::IncorrectVersion => JsError::new("Incorrect version"),
-                SealError::ConstraintViolation => JsError::new("Constraint violation"),
-                SealError::FormatViolation => JsError::new("Format violation"),
-                SealError::KeyError => JsError::new("Wrong symmetric key size"),
-                SealError::IncorrectTag => JsError::new("Incorrect tag"),
-                SealError::StdIO(x) => JsError::new(&format!("IO error: {x}")),
-                SealError::FuturesIO(x) => JsError::new(&format!("IO error: {x}")),
-                SealError::Kem(_) => JsError::new("KEM failure"),
-            },
-        }
-        .into()
-    }
-}
 
 #[wasm_bindgen(js_name = Unsealer)]
 pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
@@ -50,6 +23,13 @@ pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
 pub struct WrappedKeyset(KeySet);
 
 /// Seals the contents of a `ReadableStream` into a `WritableStream`.
+///
+/// # Arguments
+///
+/// * [`mpk`]: Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
+/// * [`policies`]: The policies to use for key encapsulation.
+/// * [`readable`]: The plaintext `ReadableStream` for data encapsulation.
+/// * [`writable`]: The `WritableStream` to which the ciphertext is written.
 #[wasm_bindgen(js_name = seal)]
 pub async fn js_seal(
     mpk: JsValue,
@@ -67,9 +47,7 @@ pub async fn js_seal(
     let mut stream = read.into_stream();
     let mut sink = WritableStream::from_raw(writable).into_sink();
 
-    web_seal(&pk, &pols, &mut rng, &mut stream, &mut sink)
-        .await
-        .map_err(Error::Seal)?;
+    web_seal(&pk, &pols, &mut rng, &mut stream, &mut sink).await?;
 
     Ok(())
 }
@@ -85,8 +63,7 @@ impl JsUnsealer {
     #[wasm_bindgen(constructor)]
     pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
         let read = ReadableStream::from_raw(readable).into_stream();
-
-        let unsealer = WebUnsealer::new(read).await.map_err(Error::Seal)?;
+        let unsealer = WebUnsealer::new(read).await?;
 
         Ok(Self(unsealer))
     }
@@ -104,10 +81,7 @@ impl JsUnsealer {
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
         let mut write = WritableStream::from_raw(writable).into_sink();
 
-        self.0
-            .unseal(&recipient_id, &usk, &mut write)
-            .await
-            .map_err(Error::Seal)?;
+        self.0.unseal(&recipient_id, &usk, &mut write).await?;
 
         write.close().await.unwrap();
 
