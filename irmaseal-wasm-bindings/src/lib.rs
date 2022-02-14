@@ -5,14 +5,12 @@ use irmaseal_core::stream::{web_seal, WebUnsealer};
 use irmaseal_core::util::KeySet;
 use irmaseal_core::{HiddenPolicy, Policy, PublicKey, UserSecretKey};
 
+use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 use wasm_streams::readable::IntoStream;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
-
-use futures::SinkExt;
-use js_sys::Uint8Array;
 
 extern crate console_error_panic_hook;
 
@@ -82,8 +80,6 @@ impl JsUnsealer {
         let mut write = WritableStream::from_raw(writable).into_sink();
 
         self.0.unseal(&recipient_id, &usk, &mut write).await?;
-
-        write.close().await.unwrap();
 
         Ok(())
     }

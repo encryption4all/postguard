@@ -112,5 +112,7 @@ where
     .await
     .unwrap();
 
-    w.send(final_ct.into()).await
+    w.send(final_ct.into()).await?;
+
+    w.close().await
 }

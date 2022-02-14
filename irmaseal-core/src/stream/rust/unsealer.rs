@@ -117,6 +117,7 @@ where
             }
         }
 
+        w.close().await?;
         Ok(())
     }
 }

@@ -152,7 +152,6 @@ where
         let mut counter: u32 = u32::default();
 
         let chunk_size: u32 = (self.meta.chunk_size + TAG_SIZE).try_into().unwrap();
-        //log(&format!("chunk_size: {chunk_size}"));
 
         let buf = Uint8Array::new_with_length(chunk_size);
         let mut buf_tail = 0;
@@ -211,6 +210,8 @@ where
         .await
         .unwrap();
 
-        w.send(final_plain.into()).await
+        w.send(final_plain.into()).await?;
+
+        w.close().await
     }
 }
