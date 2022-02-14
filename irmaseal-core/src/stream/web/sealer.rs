@@ -9,9 +9,17 @@ use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 use std::convert::TryInto;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::stream::web::{aead_nonce, aesgcm::encrypt, aesgcm::get_key};
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
 
 pub async fn seal<Rng, R, W>(
     pk: &PublicKey<CGWKV>,
@@ -22,8 +30,8 @@ pub async fn seal<Rng, R, W>(
 ) -> Result<(), Error>
 where
     Rng: RngCore + CryptoRng,
-    R: Stream<Item = Result<Uint8Array, JsValue>> + Unpin,
-    W: Sink<Uint8Array> + Unpin,
+    R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
+    W: Sink<JsValue> + Unpin,
 {
     let (meta, ss) = Metadata::new(pk, policies, rng)?;
     let KeySet {
@@ -39,7 +47,7 @@ where
     let mut meta_vec = Vec::with_capacity(MAX_METADATA_SIZE);
     meta.msgpack_into(&mut meta_vec)?;
 
-    w.feed(Uint8Array::from(&meta_vec[..]))
+    w.feed(Uint8Array::from(&meta_vec[..]).into())
         .await
         .map_err(|_e| Error::ConstraintViolation)?;
 
@@ -48,14 +56,17 @@ where
     let buf = Uint8Array::new_with_length(chunk_size);
 
     while let Some(Ok(data)) = r.next().await {
-        let len = data.byte_length();
+        let array: Uint8Array = data.dyn_into().unwrap();
+        let vec = array.to_vec();
+        log(&format!("encrypting: {:?} {}", vec, vec.len()));
+        let len = array.byte_length();
         let rem = buf.byte_length() - buf_tail;
 
         if len < rem {
-            buf.set(&data, buf_tail);
+            buf.set(&array, buf_tail);
             buf_tail += len;
         } else {
-            buf.set(&data.slice(0, rem), buf_tail);
+            buf.set(&array.slice(0, rem), buf_tail);
 
             let ct = encrypt(
                 &key,
@@ -66,28 +77,33 @@ where
             .await
             .unwrap();
 
-            w.feed(ct).await.map_err(|_e| Error::ConstraintViolation)?;
+            w.feed(ct.into())
+                .await
+                .map_err(|_e| Error::ConstraintViolation)?;
 
             if len > rem {
-                buf.set(&data.slice(rem, len), 0)
+                buf.set(&array.slice(rem, len), 0)
             }
 
             buf_tail = len - rem;
-
             counter = counter.checked_add(1).unwrap();
         }
     }
 
-    let ct = encrypt(
-        &key,
-        &aead_nonce(nonce, counter, true),
-        &Uint8Array::new_with_length(0),
-        &buf.slice(0, buf_tail),
-    )
-    .await
-    .unwrap();
+    if buf_tail > 0 {
+        log(&format!("encrypting: last "));
+        let ct = encrypt(
+            &key,
+            &aead_nonce(nonce, counter, true),
+            &Uint8Array::new_with_length(0),
+            &buf.slice(0, buf_tail),
+        )
+        .await
+        .unwrap();
+        w.feed(ct.into())
+            .await
+            .map_err(|_e| Error::ConstraintViolation)?;
+    }
 
-    w.send(ct).await.map_err(|_e| Error::ConstraintViolation)?;
-
-    Ok(())
+    w.flush().await.map_err(|_e| Error::ConstraintViolation)
 }

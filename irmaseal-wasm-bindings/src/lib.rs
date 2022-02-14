@@ -44,7 +44,7 @@ impl From<Error> for JsValue {
 }
 
 #[wasm_bindgen(js_name = Unsealer)]
-pub struct JsUnsealer(WebUnsealer<Stream<Item = Result<Uint8Array, JsValue>>>);
+pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
 
 #[wasm_bindgen(js_name = KeySet)]
 pub struct WrappedKeyset(KeySet);
@@ -63,17 +63,9 @@ pub async fn js_seal(
     let pk: PublicKey<CGWKV> = mpk.into_serde().unwrap();
     let pols: BTreeMap<String, Policy> = policies.into_serde().unwrap();
 
-    let mut read = ReadableStream::from_raw(readable);
-    let mut stream = read
-        .into_stream()
-        .map(|x: Result<JsValue, JsValue>| match x {
-            Ok(val) => val.dyn_into::<Uint8Array>(),
-            Err(err) => Err(err),
-        });
-
-    let mut sink = WritableStream::from_raw(writable)
-        .into_sink()
-        .with(|x: Uint8Array| async move { x.dyn_into::<JsValue>() });
+    let read = ReadableStream::from_raw(readable);
+    let mut stream = read.into_stream();
+    let mut sink = WritableStream::from_raw(writable).into_sink();
 
     web_seal(&pk, &pols, &mut rng, &mut stream, &mut sink)
         .await
@@ -92,13 +84,7 @@ impl JsUnsealer {
     /// Locks the ReadableStream until this Unsealer is dropped.
     #[wasm_bindgen(constructor)]
     pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
-        let read =
-            ReadableStream::from_raw(readable)
-                .into_stream()
-                .map(|x: Result<JsValue, JsValue>| match x {
-                    Ok(val) => val.dyn_into::<Uint8Array>(),
-                    Err(err) => Err(err),
-                });
+        let read = ReadableStream::from_raw(readable).into_stream();
 
         let unsealer = WebUnsealer::new(read).await.map_err(Error::Seal)?;
 
@@ -116,7 +102,7 @@ impl JsUnsealer {
         console_error_panic_hook::set_once();
 
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
-        let mut write = WritableStream::from_raw(writable).into_async_write();
+        let mut write = WritableStream::from_raw(writable).into_sink();
 
         self.0
             .unseal(&recipient_id, &usk, &mut write)

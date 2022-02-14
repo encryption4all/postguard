@@ -62,7 +62,7 @@ pub mod constants {
     // * Prelude: 4 bytes,
     // * Version identifier: 2 bytes,
     // * Size of metadata: 4 bytes,
-    // * Totalling: 4 + 2 + 4 = 12 bytes.
+    // * Totalling: 4 + 2 + 4 = 10 bytes.
     pub const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + METADATA_SIZE_SIZE;
 
     /// Default size of symmetric encryption chunks.
