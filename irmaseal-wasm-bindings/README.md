@@ -1,7 +1,10 @@
 ## IRMAseal wasm bindings
 
 This package contains automatically generated javascript wasm-bindgen bindings
-to call into the IRMAseal rust library from javacript.
+to call into the IRMAseal rust library from javacript. The `ReadableStream`
+bytestream and `WritableStream` Web APIs are required. If not available, make
+sure to polyfill them, see
+[web-streams-polyfill](https://www.npmjs.com/package/web-streams-polyfill).
 
 ## Usage
 
