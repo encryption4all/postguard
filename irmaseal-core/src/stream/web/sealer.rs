@@ -8,6 +8,7 @@ use futures::{AsyncRead, AsyncWrite};
 use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 
 use crate::stream::web::{aead_nonce, aesgcm::encrypt, aesgcm::get_key};
 
@@ -34,8 +35,19 @@ where
     let nonce = &meta.iv[..NONCE_SIZE];
     let mut counter: u32 = u32::default();
 
+    w.write_all(&PRELUDE).await?;
+    w.write_all(&VERSION_V2.to_be_bytes()).await?;
+
     let mut meta_vec = Vec::with_capacity(MAX_METADATA_SIZE);
     meta.msgpack_into(&mut meta_vec)?;
+
+    w.write_all(
+        &u32::try_from(meta_vec.len())
+            .map_err(|_e| Error::ConstraintViolation)?
+            .to_be_bytes(),
+    )
+    .await?;
+
     w.write_all(&meta_vec[..]).await?;
 
     let mut buf = vec![0; meta.chunk_size];

@@ -29,3 +29,9 @@ pub use {web::sealer::seal as web_seal, web::unsealer::Unsealer as WebUnsealer};
 
 #[cfg(test)]
 mod tests;
+
+impl From<std::io::Error> for crate::Error {
+    fn from(e: std::io::Error) -> Self {
+        crate::Error::StdIO(e)
+    }
+}
