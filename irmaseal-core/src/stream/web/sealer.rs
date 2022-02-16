@@ -62,7 +62,7 @@ where
     while let Some(Ok(data)) = r.next().await {
         let mut array: Uint8Array = data.dyn_into()?;
 
-        while array.byte_length() != 0 {
+        loop {
             let len = array.byte_length();
             let rem = buf.byte_length() - buf_tail;
 
@@ -78,6 +78,8 @@ where
                 w.feed(ct.into()).await?;
                 counter = counter.checked_add(1).unwrap();
                 buf_tail = 0;
+            } else if len == 0 {
+                break;
             } else if len <= rem {
                 buf.set(&array, buf_tail);
                 array = Uint8Array::new_with_length(0);
@@ -90,21 +92,16 @@ where
         }
     }
 
-    let final_plain = if buf_tail > 0 {
-        buf.slice(0, buf_tail)
-    } else {
-        Uint8Array::new_with_length(0)
-    };
-
     let final_ct = encrypt(
         &key,
         &aead_nonce(nonce, counter, true),
         &Uint8Array::new_with_length(0),
-        &final_plain,
+        &buf.slice(0, buf_tail),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    w.send(final_ct.into()).await?;
+    w.feed(final_ct.into()).await?;
+
+    w.flush().await?;
     w.close().await
 }

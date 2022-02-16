@@ -91,8 +91,7 @@ where
             }
         }
 
-        let meta: Metadata =
-            rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
+        let meta = Metadata::msgpack_from(&*meta_buf)?;
 
         if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
             return Err(JsValue::from(Error::ConstraintViolation));
@@ -137,12 +136,13 @@ where
             vec![Ok(JsValue::from(Uint8Array::from(&self.payload[..])))]
         })
         .chain(self.r);
+
         self.payload.clear();
 
         while let Some(Ok(data)) = stream.next().await {
             let mut array: Uint8Array = data.dyn_into()?;
 
-            while array.byte_length() != 0 {
+            loop {
                 let len = array.byte_length();
                 let rem = buf.byte_length() - buf_tail;
 
@@ -158,6 +158,8 @@ where
                     w.feed(plain.into()).await?;
                     counter = counter.checked_add(1).unwrap();
                     buf_tail = 0;
+                } else if len == 0 {
+                    break;
                 } else if len <= rem {
                     buf.set(&array, buf_tail);
                     array = Uint8Array::new_with_length(0);
@@ -170,22 +172,17 @@ where
             }
         }
 
-        let final_ct = if buf_tail > 0 {
-            buf.slice(0, buf_tail)
-        } else {
-            Uint8Array::new_with_length(0)
-        };
-
         let final_plain = decrypt(
             &key,
             &aead_nonce(nonce, counter, true),
             &Uint8Array::new_with_length(0),
-            &final_ct,
+            &buf.slice(0, buf_tail),
         )
-        .await
-        .unwrap();
+        .await?;
 
-        w.send(final_plain.into()).await?;
+        w.feed(final_plain.into()).await?;
+
+        w.flush().await?;
         w.close().await
     }
 }

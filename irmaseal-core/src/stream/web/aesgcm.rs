@@ -1,5 +1,4 @@
 use crate::constants::*;
-use crate::Error;
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::convert::TryInto;
 use wasm_bindgen::{prelude::*, JsValue};
@@ -16,15 +15,14 @@ extern "C" {
     fn get_crypto() -> Crypto;
 }
 
-pub async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
+pub async fn get_key(key: &[u8]) -> Result<CryptoKey, JsValue> {
     let subtle = get_crypto().subtle();
     let algorithm: JsValue = Object::new().into();
     Reflect::set(
         &algorithm,
         &JsValue::from_str("name"),
         &JsValue::from_str(MODE),
-    )
-    .unwrap();
+    )?;
 
     let key_usages = Array::of2(&JsValue::from_str("encrypt"), &JsValue::from_str("decrypt"));
     let key_value: Uint8Array = key.into();
@@ -34,12 +32,9 @@ pub async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
         &algorithm.into(),
         false,
         &key_usages,
-    );
+    )?;
 
-    JsFuture::from(key_promise.unwrap())
-        .await
-        .map(|v| v.into())
-        .map_err(|_e| Error::KeyError)
+    JsFuture::from(key_promise).await.map(|k| k.into())
 }
 
 /// One-shot encryption function, using WebCrypto's AES-GCM128.
@@ -51,15 +46,15 @@ pub async fn encrypt(
     iv: &[u8],
     aad: &Uint8Array,
     data: &Uint8Array,
-) -> Result<Uint8Array, Error> {
+) -> Result<Uint8Array, JsValue> {
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
     pars.additional_data(aad);
     pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
 
-    let result = subtle.encrypt_with_object_and_buffer_source(&pars, key, data);
-    let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
+    let result = subtle.encrypt_with_object_and_buffer_source(&pars, key, data)?;
+    let array_buffer = JsFuture::from(result).await?;
     let ct = Uint8Array::new(&array_buffer);
 
     Ok(ct)
@@ -74,15 +69,15 @@ pub async fn decrypt(
     iv: &[u8],
     aad: &Uint8Array,
     data: &Uint8Array,
-) -> Result<Uint8Array, Error> {
+) -> Result<Uint8Array, JsValue> {
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
     pars.additional_data(aad);
     pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
 
-    let result = subtle.decrypt_with_object_and_buffer_source(&pars, key, data);
-    let array_buffer = JsFuture::from(result.unwrap()).await.unwrap();
+    let result = subtle.decrypt_with_object_and_buffer_source(&pars, key, data)?;
+    let array_buffer = JsFuture::from(result).await?;
     let plain = Uint8Array::new(&array_buffer);
 
     Ok(plain)

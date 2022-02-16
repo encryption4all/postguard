@@ -60,8 +60,7 @@ where
             .map_err(|_e| Error::FormatViolation)
             .await?;
 
-        let meta: Metadata =
-            rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
+        let meta = Metadata::msgpack_from(&*meta_buf)?;
 
         if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
             return Err(Error::ConstraintViolation);
