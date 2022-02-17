@@ -100,7 +100,7 @@ impl JsUnsealer {
         self.0.meta.chunk_size
     }
 
-    /// Returns the intitialization vector used for symmetric encryption.
+    /// Returns the initialization vector used for symmetric encryption.
     pub fn get_iv(&self) -> Uint8Array {
         let iv = Uint8Array::new_with_length(self.0.meta.iv.len() as u32);
         iv.copy_from(&self.0.meta.iv);

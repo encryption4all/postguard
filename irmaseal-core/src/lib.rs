@@ -73,7 +73,14 @@ pub mod constants {
     // This library uses AES128 because BLS12-381 is only secure up to around 120 bits.
     pub const SYMMETRIC_CRYPTO_IDENTIFIER: &str = "STREAM_32BE_AES128_GCM";
     pub const KEY_SIZE: usize = 16;
-    pub const IV_SIZE: usize = 12;
+
+    // We always generate 16 bytes of initialization vector.
+    pub const IV_SIZE: usize = 16;
+
+    // The STREAM construction needs only 12 bytes:
+    // A 7-byte nonce, a 4-byte counter (u32) and an all-zero or all-one byte,
+    // depending on if the chunk is the final chunk.
+    pub const STREAM_IV_SIZE: usize = 12;
     pub const NONCE_SIZE: usize = 7;
     pub const TAG_SIZE: usize = 16;
 }
