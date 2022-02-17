@@ -40,7 +40,6 @@ web-sys = { version = "0.3.55", features = [
   "AesGcmParams",
   "Crypto",
   "CryptoKey",
-  "console"
 ], optional = true }
 
 [dev-dependencies]
@@ -59,7 +58,6 @@ wasm_stream = [
   "web-sys/AesGcmParams",
   "web-sys/Crypto",
   "web-sys/CryptoKey",
-  "web-sys/console"
 ]
 
 [[bench]]
