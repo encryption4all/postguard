@@ -1,6 +1,5 @@
 use crate::artifacts::UserSecretKey;
 use crate::util::generate_iv;
-use crate::util::{derive_keys, KeySet};
 use crate::*;
 use crate::{Error, HiddenPolicy, IV_SIZE};
 use ibe::kem::cgw_kv::CGWKV;
@@ -42,15 +41,14 @@ pub struct RecipientInfo {
 }
 
 impl RecipientInfo {
-    /// Derives a [`KeySet`] from a [`RecipientInfo`].
+    /// Derives a [`ibe::kem::SharedSecret`] from a [`RecipientInfo`].
     ///
-    /// This key set can be used for AEAD for example.
-    pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<KeySet, Error> {
+    /// These bytes can either directly be used for an AEAD, or a key derivation function.
+    pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
         let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(&self.ct))
             .ok_or(Error::FormatViolation)?;
-        let ss = CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)?;
 
-        Ok(derive_keys(&ss))
+        CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)
     }
 }
 
@@ -84,10 +82,12 @@ impl Metadata {
             })
             .collect();
 
+        let iv = generate_iv(rng);
+
         Ok((
             Metadata {
                 policies: recipient_info,
-                iv: generate_iv(rng),
+                iv,
                 chunk_size: SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
             },
             ss,
@@ -210,7 +210,6 @@ mod tests {
     #[test]
     fn test_round() {
         // This test tests that both encoding methods derive the same keys as the sender.
-        use crate::util::derive_keys;
         use std::io::Cursor;
 
         let mut rng = rand::thread_rng();
@@ -220,9 +219,7 @@ mod tests {
         let test_id = &ids[1];
         let test_usk = &setup.usks.get(test_id).unwrap();
 
-        let (meta, ss) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
-        let keys1 = derive_keys(&ss);
-
+        let (meta, ss1) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         // Encode to binary via MessagePack.
         let mut v = Vec::new();
         meta.msgpack_into(&mut v).unwrap();
@@ -232,7 +229,7 @@ mod tests {
 
         let mut c = Cursor::new(v);
         let decoded1 = Metadata::msgpack_from(&mut c).unwrap();
-        let keys2 = decoded1
+        let ss2 = decoded1
             .policies
             .get(test_id)
             .unwrap()
@@ -240,7 +237,7 @@ mod tests {
             .unwrap();
 
         let decoded2 = Metadata::from_json_string(&s).unwrap();
-        let keys3 = decoded2
+        let ss3 = decoded2
             .policies
             .get(test_id)
             .unwrap()
@@ -251,10 +248,7 @@ mod tests {
         assert_eq!(&decoded1.chunk_size, &meta.chunk_size);
 
         // Make sure we derive the same keys.
-        assert_eq!(&keys1.aes_key, &keys2.aes_key);
-        assert_eq!(&keys1.mac_key, &keys2.mac_key);
-
-        assert_eq!(&keys1.aes_key, &keys3.aes_key);
-        assert_eq!(&keys1.mac_key, &keys3.mac_key);
+        assert_eq!(&ss1, &ss2);
+        assert_eq!(&ss1, &ss3);
     }
 }

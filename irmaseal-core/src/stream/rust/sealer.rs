@@ -1,7 +1,6 @@
 use crate::constants::*;
 use crate::metadata::*;
 use crate::Error;
-use crate::{util::derive_keys, util::KeySet};
 use crate::{Policy, PublicKey};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite};
@@ -26,12 +25,9 @@ where
     W: AsyncWrite + Unpin,
 {
     let (meta, ss) = Metadata::new(pk, policies, rng)?;
-    let KeySet {
-        aes_key,
-        mac_key: _,
-    } = derive_keys(&ss);
+    let aes_key = &ss.0[..KEY_SIZE];
 
-    let aes_gcm = Aes128Gcm::new(aes_key.as_ref().into());
+    let aes_gcm = Aes128Gcm::new_from_slice(aes_key).map_err(|_e| Error::KeyError)?;
     let nonce = &meta.iv[..NONCE_SIZE];
 
     let mut enc = EncryptorBE32::from_aead(aes_gcm, nonce.into());

@@ -1,7 +1,6 @@
 use crate::constants::*;
 use crate::metadata::*;
 use crate::Error;
-use crate::{util::derive_keys, util::KeySet};
 use crate::{Policy, PublicKey};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
@@ -26,12 +25,9 @@ where
     W: Sink<JsValue, Error = JsValue> + Unpin,
 {
     let (meta, ss) = Metadata::new(pk, policies, rng)?;
-    let KeySet {
-        aes_key,
-        mac_key: _,
-    } = derive_keys(&ss);
+    let aes_key = &ss.0[..KEY_SIZE];
 
-    let key = get_key(&aes_key).await.unwrap();
+    let key = get_key(aes_key).await?;
 
     let nonce = &meta.iv[..NONCE_SIZE];
     let mut counter: u32 = u32::default();

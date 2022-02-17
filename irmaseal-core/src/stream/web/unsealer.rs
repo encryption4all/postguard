@@ -1,6 +1,5 @@
 use crate::constants::*;
 use crate::metadata::*;
-use crate::util::KeySet;
 use crate::Error;
 use crate::UserSecretKey;
 use futures::{stream::iter, Sink, SinkExt, Stream, StreamExt};
@@ -115,13 +114,11 @@ where
         W: Sink<JsValue, Error = JsValue> + Unpin,
     {
         let rec_info = self.meta.policies.get(ident).unwrap();
+        let ss = rec_info.derive_keys(usk)?;
 
-        let KeySet {
-            aes_key,
-            mac_key: _,
-        } = rec_info.derive_keys(usk).unwrap();
-
+        let aes_key = &ss.0[..KEY_SIZE];
         let key = get_key(&aes_key).await?;
+
         let nonce = &self.meta.iv[..NONCE_SIZE];
         let mut counter: u32 = u32::default();
 

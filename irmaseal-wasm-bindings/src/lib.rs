@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use irmaseal_core::kem::cgw_kv::CGWKV;
+use irmaseal_core::kem::SS_BYTES;
 use irmaseal_core::stream::{web_seal, WebUnsealer};
-use irmaseal_core::util::KeySet;
 use irmaseal_core::{HiddenPolicy, Policy, PublicKey, UserSecretKey};
 
 use js_sys::Uint8Array;
@@ -16,9 +16,6 @@ extern crate console_error_panic_hook;
 
 #[wasm_bindgen(js_name = Unsealer)]
 pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
-
-#[wasm_bindgen(js_name = KeySet)]
-pub struct WrappedKeyset(KeySet);
 
 /// Seals the contents of a `ReadableStream` into a `WritableStream`.
 ///
@@ -111,9 +108,9 @@ impl JsUnsealer {
     }
 
     /// Returns the symmetric keys derived from the unsealer and the usk/mpk.
-    pub fn derive_keys(&self, id: &str, usk: &JsValue) -> WrappedKeyset {
+    pub fn derive_keys(&self, id: &str, usk: &JsValue) -> Uint8Array {
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
-        let keyset = self
+        let ss = self
             .0
             .meta
             .policies
@@ -122,23 +119,9 @@ impl JsUnsealer {
             .derive_keys(&usk)
             .unwrap();
 
-        WrappedKeyset(keyset)
-    }
-}
+        let ss_js = Uint8Array::new_with_length(SS_BYTES as u32);
+        ss_js.copy_from(&ss.0);
 
-#[wasm_bindgen(js_class = KeySet)]
-impl WrappedKeyset {
-    #[wasm_bindgen(getter)]
-    pub fn aes_key(&self) -> Uint8Array {
-        let key = Uint8Array::new_with_length(self.0.aes_key.len() as u32);
-        key.copy_from(&self.0.aes_key);
-        key
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn mac_key(&self) -> Uint8Array {
-        let key = Uint8Array::new_with_length(self.0.mac_key.len() as u32);
-        key.copy_from(&self.0.mac_key);
-        key
+        ss_js
     }
 }

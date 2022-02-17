@@ -1,6 +1,5 @@
 use crate::constants::*;
 use crate::metadata::*;
-use crate::util::KeySet;
 use crate::Error;
 use crate::UserSecretKey;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
@@ -83,15 +82,12 @@ where
         W: AsyncWrite + Unpin,
     {
         let rec_info = self.meta.policies.get(ident).unwrap();
-
-        let KeySet {
-            aes_key,
-            mac_key: _,
-        } = rec_info.derive_keys(usk).unwrap();
+        let ss = rec_info.derive_keys(usk)?;
+        let aes_key = &ss.0[..KEY_SIZE];
 
         let nonce = &self.meta.iv[..NONCE_SIZE];
 
-        let aes_gcm = Aes128Gcm::new(aes_key.as_ref().into());
+        let aes_gcm = Aes128Gcm::new_from_slice(aes_key).map_err(|_e| Error::KeyError)?;
         let mut dec = DecryptorBE32::from_aead(aes_gcm, nonce.into());
 
         let bufsize: usize = self.meta.chunk_size + TAG_SIZE;
