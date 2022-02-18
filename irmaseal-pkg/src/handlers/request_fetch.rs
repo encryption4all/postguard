@@ -10,7 +10,7 @@ use crate::server::MasterKeyPair;
 use crate::Error;
 
 /// Fetch identity iff valid, or else yield nothing.
-fn fetch_policy(timestamp: u64, disclosed: &Vec<Vec<DisclosedAttribute>>) -> Option<Policy> {
+fn fetch_policy(timestamp: u64, disclosed: &[Vec<DisclosedAttribute>]) -> Option<Policy> {
     // Convert disclosed attributes to a Policy
     let res: Result<Vec<Attribute>, _> = disclosed
         .iter()
@@ -43,13 +43,15 @@ where
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .map_err(|_e| Error::Unexpected)?
         .as_secs();
     if timestamp > now {
         return Err(Error::ChronologyError);
     }
 
-    let client = IrmaClientBuilder::new(&irma_url).unwrap().build();
+    let client = IrmaClientBuilder::new(&irma_url)
+        .map_err(|_e| Error::Unexpected)?
+        .build();
     let result = client.result(&SessionToken(token)).await;
 
     let d = |status: KeyStatus| Ok(KeyResponse { status, key: None });

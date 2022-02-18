@@ -1,6 +1,7 @@
 use actix_web::web::{Data, HttpResponse, Json};
 use irmaseal_core::api::KeyRequest;
 
+use crate::Error;
 use irma::*;
 
 pub async fn request(
@@ -25,7 +26,9 @@ pub async fn request(
             .collect()])
         .build();
 
-    let client = IrmaClientBuilder::new(&irma_url).unwrap().build();
+    let client = IrmaClientBuilder::new(&irma_url)
+        .map_err(|_e| Error::Unexpected)?
+        .build();
 
     let session = client
         .request(&dr)
