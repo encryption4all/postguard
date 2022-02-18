@@ -8,7 +8,6 @@ const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
 
 /// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
-// TODO: consider implementing Ord ourselves.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
@@ -23,14 +22,15 @@ pub struct Attribute {
 /// Contains a timestamp and a conjuction of Attribute(Requests).
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct Policy {
-    #[serde(rename = "t")]
+    #[serde(rename = "ts")]
     pub timestamp: u64,
     #[serde(rename = "c")]
     pub con: Vec<Attribute>,
 }
 
-/// An IRMAseal AttributeRequest.
+/// A hidden IRMAseal policy.
 ///
+/// The attribute values of this type are (partly) hidden.
 /// We split this from Attribut by type to ensure no mixups!
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct HiddenAttribute {
@@ -43,7 +43,7 @@ pub struct HiddenAttribute {
 /// An IRMAseal hidden policy.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct HiddenPolicy {
-    #[serde(rename = "t")]
+    #[serde(rename = "ts")]
     pub timestamp: u64,
     #[serde(rename = "c")]
     pub con: Vec<HiddenAttribute>,

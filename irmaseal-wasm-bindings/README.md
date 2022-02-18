@@ -24,7 +24,7 @@ const module = await import("@e4a/irmaseal-wasm-bindings");
 // We provide the policies which we want to use for encryption.
 const policies = {
   recipient_1: {
-    t: Math.round(Date.now() / 1000),
+    ts: Math.round(Date.now() / 1000),
     c: [
       { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@example.com" },
       { t: "pbdf.gemeente.personalData.fullname", v: "John" },
@@ -53,7 +53,7 @@ const hidden = unsealer.get_hidden_policy();
 // In this case it will yield:
 // {
 //  'recipient_1': {                                  // recipient identifier
-//    t: 1643634276,                                  // timestamp
+//    ts: 1643634276,                                 // timestamp
 //    c: [                                            // conjunction of attributes
 //      { t: "pbdf.sidn-pbdf.email.email", v: "" },   // type/value pairs
 //      { t: "pbdf.gemeente.personalData.fullname", v: "" },
@@ -69,7 +69,7 @@ const identity = {
   ],
 };
 
-const timestamp = hidden["recipient_1"].t;
+const timestamp = hidden["recipient_1"].ts;
 
 // Create a session to retrieve a User Secret Key (USK) for the guessed identity.
 // In this example we use the irma frontend packages,
