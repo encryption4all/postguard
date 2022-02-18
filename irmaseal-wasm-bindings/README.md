@@ -75,17 +75,24 @@ const timestamp = hidden["recipient_1"].ts;
 // In this example we use the irma frontend packages,
 // see [`irma-frontend-packages`](https://irma.app/docs/irma-frontend/).
 const session = {
-  session: {
-    url, // PKG URL
-    start: {
-      url: (o) => `${o.url}/v2/request`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(identity),
-    },
-    result: {
-      url: (o, { sessionToken }) =>
-        `${o.url}/v2/request/${sessionToken}/${timestamp.toString()}`,
+  url: pkg,
+  start: {
+    url: (o) => `${o.url}/v2/request`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(identity),
+  },
+  result: {
+    url: (o, { sessionToken }) =>
+      `${o.url}/v2/request/${sessionToken}/${timestamp.toString()}`,
+    parseResponse: (r) => {
+      return new Promise((resolve, reject) => {
+        if (r.status != "200") reject("not ok");
+        r.json().then((json) => {
+          if (json.status !== "DONE_VALID") reject("not done and valid");
+          resolve(json.key);
+        });
+      });
     },
   },
 };
