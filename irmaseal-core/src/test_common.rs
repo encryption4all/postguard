@@ -31,7 +31,7 @@ impl Default for TestSetup {
             ],
         };
 
-        let policies = BTreeMap::<String, Policy>::from([(id1.clone(), p1), (id2.clone(), p2)]);
+        let policies = BTreeMap::<String, Policy>::from([(id1, p1), (id2, p2)]);
 
         let (tmpk, msk) = ibe::kem::cgw_kv::CGWKV::setup(&mut rng);
         let mpk = PublicKey::<CGWKV>(tmpk);
