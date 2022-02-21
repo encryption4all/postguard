@@ -115,9 +115,7 @@ where
     {
         let rec_info = self.meta.policies.get(ident).unwrap();
         let ss = rec_info.derive_keys(usk)?;
-
-        let aes_key = &ss.0[..KEY_SIZE];
-        let key = get_key(&aes_key).await?;
+        let key = get_key(&ss.0[..KEY_SIZE]).await?;
 
         let nonce = &self.meta.iv[..NONCE_SIZE];
         let mut counter: u32 = u32::default();
@@ -139,11 +137,18 @@ where
         while let Some(Ok(data)) = stream.next().await {
             let mut array: Uint8Array = data.dyn_into()?;
 
-            loop {
+            while array.byte_length() != 0 {
                 let len = array.byte_length();
                 let rem = buf.byte_length() - buf_tail;
 
-                if rem == 0 {
+                if len < rem {
+                    buf.set(&array, buf_tail);
+                    array = Uint8Array::new_with_length(0);
+                    buf_tail += len;
+                } else {
+                    buf.set(&array.slice(0, rem), buf_tail);
+                    array = array.slice(rem, len);
+
                     let plain = decrypt(
                         &key,
                         &aead_nonce(nonce, counter, false),
@@ -153,18 +158,9 @@ where
                     .await?;
 
                     w.feed(plain.into()).await?;
+
                     counter = counter.checked_add(1).unwrap();
                     buf_tail = 0;
-                } else if len == 0 {
-                    break;
-                } else if len <= rem {
-                    buf.set(&array, buf_tail);
-                    array = Uint8Array::new_with_length(0);
-                    buf_tail += len;
-                } else {
-                    buf.set(&array.slice(0, rem), buf_tail);
-                    array = array.slice(rem, len);
-                    buf_tail += rem;
                 }
             }
         }
