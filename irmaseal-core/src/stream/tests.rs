@@ -1,5 +1,6 @@
 use crate::stream::{seal, Unsealer};
 use futures::{executor::block_on, io::AllowStdIo};
+use rand::RngCore;
 use std::io::Cursor;
 
 use crate::test_common::TestSetup;
@@ -53,7 +54,9 @@ fn seal_and_unseal(setup: &TestSetup, plain: Vec<u8>) {
 }
 
 fn rand_vec(length: usize) -> Vec<u8> {
-    (0..length).map(|_| rand::random::<u8>()).collect()
+    let mut vec = vec![0u8; length];
+    rand::thread_rng().fill_bytes(&mut vec);
+    vec
 }
 
 #[test]

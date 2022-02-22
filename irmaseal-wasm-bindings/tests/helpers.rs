@@ -1,6 +1,7 @@
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::{Attribute, Policy, PublicKey, UserSecretKey};
+use rand::RngCore;
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 use wasm_streams::readable::sys::ReadableStream as RawReadableStream;
@@ -50,7 +51,9 @@ impl RecordingWritableStream {
 }
 
 pub fn rand_vec(length: usize) -> Vec<u8> {
-    (0..length).map(|_| rand::random::<u8>()).collect()
+    let mut vec = vec![0u8; length];
+    rand::thread_rng().fill_bytes(&mut vec);
+    vec
 }
 
 pub struct TestSetup {
