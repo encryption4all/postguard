@@ -6,6 +6,7 @@ use crate::opts::*;
 use crate::util::*;
 use actix_rt::System;
 use actix_web::{
+    http::header,
     web,
     web::{resource, scope, Data},
 };
@@ -33,7 +34,13 @@ pub fn exec(server_opts: ServerOpts) {
     System::new().block_on(async move {
         actix_web::HttpServer::new(move || {
             actix_web::App::new()
-                .wrap(actix_cors::Cors::permissive())
+                .wrap(
+                    actix_cors::Cors::default()
+                        .allow_any_origin()
+                        .allowed_methods(vec!["GET", "POST"])
+                        .allowed_header(header::CONTENT_TYPE)
+                        .max_age(3600),
+                )
                 .app_data(Data::new(
                     actix_web::web::JsonConfig::default().limit(1024 * 4096),
                 ))
