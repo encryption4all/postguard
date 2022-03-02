@@ -14,10 +14,7 @@ categories = ["cryptography"]
 
 [dependencies]
 irma = "0.2.1"
-ibe = { git = "https://github.com/encryption4all/ibe.git", branch = "0.2.0-beta.0", features = [
-  "cgwkv",
-  "mr"
-] }
+ibe = { version = "0.2.0-beta.0", features = ["cgwkv", "mr"] }
 rand = { version = "0.8.4" }
 subtle = "2.3"
 serde = { version = "1.0.126", features = ["derive"] }
@@ -26,7 +23,7 @@ rmp-serde = "0.15.5"
 serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
-futures = { version = "0.3.21" , optional = true }
+futures = { version = "0.3.21", optional = true }
 # For normal stream feature
 aead = { version = "0.4.3", features = ["stream", "alloc"], optional = true }
 aes-gcm = { version = "0.9.4", optional = true }
