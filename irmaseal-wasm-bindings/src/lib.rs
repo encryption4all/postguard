@@ -21,10 +21,10 @@ pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
 ///
 /// # Arguments
 ///
-/// * `mpk` - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
+/// * `mpk`      - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
 /// * `policies` - The policies to use for key encapsulation.
 /// * `readable` - The plaintext `ReadableStream` for data encapsulation.
-/// * `writable`-  The `WritableStream` to which the ciphertext is written.
+/// * `writable` - The `WritableStream` to which the ciphertext is written.
 #[wasm_bindgen(js_name = seal)]
 pub async fn js_seal(
     mpk: JsValue,
@@ -52,10 +52,9 @@ impl JsUnsealer {
     /// Constructs a new `Unsealer` from a Javascript `ReadableStream`.
     /// The stream forwards up until the payload.
     /// The decrypting party should then use the metadata to retrieve a
-    /// user secret key for using in `unseal()` or `get_keys()`.
+    /// user secret key for using in `unseal()` or `derive_key()`.
     ///
-    /// Locks the ReadableStream until this Unsealer is dropped.
-    #[wasm_bindgen(constructor)]
+    /// Locks the ReadableStream until this Unsealer is dropped.`
     pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
         let read = ReadableStream::from_raw(readable).into_stream();
         let unsealer = WebUnsealer::new(read).await?;
@@ -65,6 +64,12 @@ impl JsUnsealer {
 
     /// Decrypts the remaining data in the `ReadableStream` (the payload)
     /// into a `WritableStream`.
+    ///
+    /// # Arguments
+    ///
+    /// * `recipient_id` - The recipient identifier used for unsealing.
+    /// * `usk`          - The User Secret Key associated with the policy of this recipient.
+    /// * `writable`     - A `WritableStream` to which the plaintext chunks will be written.
     pub async fn unseal(
         self,
         recipient_id: String,
@@ -82,7 +87,7 @@ impl JsUnsealer {
     }
 
     /// Returns all hidden policies in the metadata.
-    /// The user can use this to retrieve a `UserSecretKey`.
+    /// The user should use this to retrieve a `UserSecretKey`.
     pub fn get_hidden_policies(&self) -> JsValue {
         let policies: BTreeMap<String, HiddenPolicy> = self
             .0
@@ -100,15 +105,15 @@ impl JsUnsealer {
         self.0.meta.chunk_size
     }
 
-    /// Returns the initialization vector used for symmetric encryption.
+    /// Returns the 16-byte initialization vector used for symmetric encryption.
     pub fn get_iv(&self) -> Uint8Array {
         let iv = Uint8Array::new_with_length(self.0.meta.iv.len() as u32);
         iv.copy_from(&self.0.meta.iv);
         iv
     }
 
-    /// Returns the symmetric keys derived from the unsealer and the usk/mpk.
-    pub fn derive_keys(&self, id: &str, usk: &JsValue) -> Uint8Array {
+    /// Returns the 32-byte shared secret derived from the unsealer and the usk/mpk.
+    pub fn derive_key(&self, id: &str, usk: &JsValue) -> Uint8Array {
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
         let ss = self
             .0

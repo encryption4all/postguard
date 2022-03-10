@@ -1,15 +1,19 @@
 ## IRMAseal wasm bindings
 
-This package contains automatically generated javascript wasm-bindgen bindings
-to call into the IRMAseal rust library from javacript. The `ReadableStream` and
-`WritableStream` Web APIs are required. Most notably, `WritableStream` is not
-supported on Firefox, Internet Explorer and Firefox for Android, see
+This package contains automatically generated WebAssembly bindings to call into
+the IRMAseal rust library from javascript. This library has been designed to
+run in a browser via a bundler.
+
+The `ReadableStream` and `WritableStream` Web APIs are required. Most notably,
+`WritableStream` is (at the time of writing) not supported on Firefox, Internet
+Explorer and Firefox for Android, see
 [WritableStream](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream).
 
 If not available, please consider using a polyfill, see
 [web-streams-polyfill](https://www.npmjs.com/package/web-streams-polyfill).
 
 ## Usage
+
 
 ### Encryption
 
@@ -40,6 +44,7 @@ await module.seal(pk, policies, readable, writable);
 
 ```javascript
 // We assume we know the identifier of the recipient.
+
 // Load the WASM module.
 const module = await import("@e4a/irmaseal-wasm-bindings");
 
@@ -105,6 +110,13 @@ const usk = await irma.start();
 // Unseal the contents of the IRMAseal packet, writing the plaintext to a `WritableStream`.
 await unsealer.unseal("recipient_1", usk, writable);
 ```
+
+### Leveraging Web Workers
+
+Since `ReadableStream` and `WritableStream` are
+[transferrable](https://developer.mozilla.org/en-US/docs/Glossary/Transferable_objects),
+it is advised to perform the sealing and unsealing in a [Web
+Worker](https://developer.mozilla.org/en-US/docs/Web/API/Worker).
 
 ## Building the package from the crate
 
