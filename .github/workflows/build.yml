@@ -117,9 +117,11 @@ jobs:
           args: --manifest-path irmaseal-cli/Cargo.toml --all -- --check
           command: fmt
 
-  test-wasm-bindings:
-    name: Run wasm tests in browser
+  test-wasm-bindings-chrome:
+    name: Run wasm tests in Google Chrome
     runs-on: ubuntu-latest
+    env:
+      WASM_BINDGEN_TEST_TIMEOUT: 60
     steps:
       - uses: actions/checkout@v2
       - name: Install
@@ -127,3 +129,16 @@ jobs:
 
       - run: cargo test
       - run: wasm-pack test --headless --chrome ./irmaseal-wasm-bindings
+
+  test-wasm-bindings-safari:
+    name: Run wasm tests in Safari
+    runs-on: macos-latest
+    env:
+      WASM_BINDGEN_TEST_TIMEOUT: 60
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - run: cargo test
+      - run: wasm-pack test --headless --safari ./irmaseal-wasm-bindings
