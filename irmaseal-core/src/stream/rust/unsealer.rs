@@ -1,6 +1,5 @@
 use crate::constants::*;
 use crate::metadata::*;
-use crate::util::KeySet;
 use crate::Error;
 use crate::UserSecretKey;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
@@ -47,6 +46,10 @@ where
                 .map_err(|_e| Error::FormatViolation)?,
         ) as usize;
 
+        if metadata_len > MAX_METADATA_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
+
         let mut meta_buf = Vec::with_capacity(metadata_len);
 
         // Limit reader to not read past metadata
@@ -56,8 +59,11 @@ where
             .map_err(|_e| Error::FormatViolation)
             .await?;
 
-        let meta: Metadata =
-            rmp_serde::from_read(&*meta_buf).map_err(|_e| Error::FormatViolation)?;
+        let meta = Metadata::msgpack_from(&*meta_buf)?;
+
+        if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
 
         Ok(Unsealer {
             version,
@@ -76,15 +82,12 @@ where
         W: AsyncWrite + Unpin,
     {
         let rec_info = self.meta.policies.get(ident).unwrap();
-
-        let KeySet {
-            aes_key,
-            mac_key: _,
-        } = rec_info.derive_keys(usk).unwrap();
+        let ss = rec_info.derive_keys(usk)?;
+        let aes_key = &ss.0[..KEY_SIZE];
 
         let nonce = &self.meta.iv[..NONCE_SIZE];
 
-        let aes_gcm = Aes128Gcm::new(aes_key.as_ref().into());
+        let aes_gcm = Aes128Gcm::new_from_slice(aes_key).map_err(|_e| Error::KeyError)?;
         let mut dec = DecryptorBE32::from_aead(aes_gcm, nonce.into());
 
         let bufsize: usize = self.meta.chunk_size + TAG_SIZE;
@@ -109,6 +112,7 @@ where
             }
         }
 
+        w.close().await?;
         Ok(())
     }
 }

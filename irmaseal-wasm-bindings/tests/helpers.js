@@ -3,22 +3,14 @@
  * https://github.com/MattiasBuelens/wasm-streams/tree/master/tests/js.
  */
 
-export function new_readable_byte_stream_from_array(chunks) {
+export function new_readable_stream_from_array(chunks) {
     return new ReadableStream({
-        type: "bytes",
         start(controller) {
-            this.controller = controller;
             for (let chunk of chunks) {
                 controller.enqueue(chunk);
             }
             controller.close();
-        },
-        cancel() {
-            const byobRequest = this.controller.byobRequest;
-            if (byobRequest) {
-                byobRequest.respond(0);
-            }
-        },
+        }
     });
 }
 

@@ -1,11 +1,15 @@
 [package]
 name = "irmaseal-wasm-bindings"
-version = "0.2.0-beta.0"
+version = "0.2.0-beta.3"
 authors = [
   "Leon Botros <l.botros@cs.ru.nl>",
   "Bas Westerbaan <bas@westerbaan.name>"
 ]
 edition = "2018"
+license = "MIT"
+description = "IRMAseal WebAssembly bindings for the browser"
+repository = "https://github.com/encryption4all/irmaseal/tree/0.2.0-beta.0/irmaseal-wasm-bindings"
+keywords = ["ibe", "encryption", "ecc"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

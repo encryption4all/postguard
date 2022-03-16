@@ -1,6 +1,7 @@
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::{Attribute, Policy, PublicKey, UserSecretKey};
+use rand::RngCore;
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 use wasm_streams::readable::sys::ReadableStream as RawReadableStream;
@@ -8,7 +9,7 @@ use wasm_streams::writable::sys::WritableStream as RawWritableStream;
 
 #[wasm_bindgen(module = "/tests/helpers.js")]
 extern "C" {
-    pub fn new_readable_byte_stream_from_array(chunks: Box<[JsValue]>) -> RawReadableStream;
+    pub fn new_readable_stream_from_array(chunks: Box<[JsValue]>) -> RawReadableStream;
 }
 
 #[wasm_bindgen(module = "/tests/helpers.js")]
@@ -50,7 +51,9 @@ impl RecordingWritableStream {
 }
 
 pub fn rand_vec(length: usize) -> Vec<u8> {
-    (0..length).map(|_| rand::random::<u8>()).collect()
+    let mut vec = vec![0u8; length];
+    rand::thread_rng().fill_bytes(&mut vec);
+    vec
 }
 
 pub struct TestSetup {

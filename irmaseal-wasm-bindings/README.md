@@ -1,7 +1,16 @@
 ## IRMAseal wasm bindings
 
-This package contains automatically generated javascript wasm-bindgen bindings
-to call into the IRMAseal rust library from javacript.
+This package contains automatically generated WebAssembly bindings to call into
+the IRMAseal rust library from javascript. This library has been designed to
+run in a browser via a bundler.
+
+The `ReadableStream` and `WritableStream` Web APIs are required. Most notably,
+`WritableStream` is (at the time of writing) not supported on Firefox, Internet
+Explorer and Firefox for Android, see
+[WritableStream](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream).
+
+If not available, please consider using a polyfill, see
+[web-streams-polyfill](https://www.npmjs.com/package/web-streams-polyfill).
 
 ## Usage
 
@@ -18,7 +27,7 @@ const module = await import("@e4a/irmaseal-wasm-bindings");
 // We provide the policies which we want to use for encryption.
 const policies = {
   recipient_1: {
-    t: Math.round(Date.now() / 1000),
+    ts: Math.round(Date.now() / 1000),
     c: [
       { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@example.com" },
       { t: "pbdf.gemeente.personalData.fullname", v: "John" },
@@ -27,6 +36,7 @@ const policies = {
 };
 
 // The following call reads data from a `ReadableStream` and seals it into `WritableStream`.
+// Make sure that only chunks of type `Uint8Array` are enqueued to `readable`.
 await module.seal(pk, policies, readable, writable);
 ```
 
@@ -34,20 +44,21 @@ await module.seal(pk, policies, readable, writable);
 
 ```javascript
 // We assume we know the identifier of the recipient.
+
 // Load the WASM module.
 const module = await import("@e4a/irmaseal-wasm-bindings");
 
 // Start reading from the IRMAseal bytestream. This will read
 // the metadata up until the actual payload. The stream is still locked.
-const unsealer = await new module.Unsealer(readable);
+const unsealer = await module.Unsealer.new(readable);
 
 // Retrieve the hidden (purged of attribute values) policy of this recipient.
-const hidden = unsealer.get_hidden_policy();
+const hidden = unsealer.get_hidden_policies();
 
 // In this case it will yield:
 // {
 //  'recipient_1': {                                  // recipient identifier
-//    t: 1643634276,                                  // timestamp
+//    ts: 1643634276,                                 // timestamp
 //    c: [                                            // conjunction of attributes
 //      { t: "pbdf.sidn-pbdf.email.email", v: "" },   // type/value pairs
 //      { t: "pbdf.gemeente.personalData.fullname", v: "" },
@@ -63,23 +74,30 @@ const identity = {
   ],
 };
 
-const timestamp = hidden["recipient_1"].t;
+const timestamp = hidden["recipient_1"].ts;
 
 // Create a session to retrieve a User Secret Key (USK) for the guessed identity.
 // In this example we use the irma frontend packages,
 // see [`irma-frontend-packages`](https://irma.app/docs/irma-frontend/).
 const session = {
-  session: {
-    url, // PKG URL
-    start: {
-      url: (o) => `${o.url}/v2/request`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(identity),
-    },
-    result: {
-      url: (o, { sessionToken }) =>
-        `${o.url}/v2/request/${sessionToken}/${timestamp.toString()}`,
+  url: pkg,
+  start: {
+    url: (o) => `${o.url}/v2/request`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(identity),
+  },
+  result: {
+    url: (o, { sessionToken }) =>
+      `${o.url}/v2/request/${sessionToken}/${timestamp.toString()}`,
+    parseResponse: (r) => {
+      return new Promise((resolve, reject) => {
+        if (r.status != "200") reject("not ok");
+        r.json().then((json) => {
+          if (json.status !== "DONE_VALID") reject("not done and valid");
+          resolve(json.key);
+        });
+      });
     },
   },
 };
@@ -92,6 +110,13 @@ const usk = await irma.start();
 // Unseal the contents of the IRMAseal packet, writing the plaintext to a `WritableStream`.
 await unsealer.unseal("recipient_1", usk, writable);
 ```
+
+### Leveraging Web Workers
+
+Since `ReadableStream` and `WritableStream` are
+[transferrable](https://developer.mozilla.org/en-US/docs/Glossary/Transferable_objects),
+it is advised to perform the sealing and unsealing in a [Web
+Worker](https://developer.mozilla.org/en-US/docs/Web/API/Worker).
 
 ## Building the package from the crate
 

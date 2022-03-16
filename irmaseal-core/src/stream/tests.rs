@@ -1,9 +1,20 @@
 use crate::stream::{seal, Unsealer};
-use futures::{executor::block_on, io::AllowStdIo};
-use std::io::Cursor;
-
 use crate::test_common::TestSetup;
 use crate::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
+use futures::{executor::block_on, io::AllowStdIo};
+use rand::RngCore;
+use std::io::Cursor;
+
+const LENGTHS: &[usize] = &[
+    1,
+    512,
+    SYMMETRIC_CRYPTO_DEFAULT_CHUNK - 3,
+    SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
+    SYMMETRIC_CRYPTO_DEFAULT_CHUNK + 3,
+    3 * SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
+    3 * SYMMETRIC_CRYPTO_DEFAULT_CHUNK + 16,
+    3 * SYMMETRIC_CRYPTO_DEFAULT_CHUNK - 17,
+];
 
 fn seal_helper(setup: &TestSetup, plain: &[u8]) -> Vec<u8> {
     let mut rng = rand::thread_rng();
@@ -53,22 +64,18 @@ fn seal_and_unseal(setup: &TestSetup, plain: Vec<u8>) {
 }
 
 fn rand_vec(length: usize) -> Vec<u8> {
-    (0..length).map(|_| rand::random::<u8>()).collect()
+    let mut vec = vec![0u8; length];
+    rand::thread_rng().fill_bytes(&mut vec);
+    vec
 }
 
 #[test]
 fn test_reflection_seal_unsealer() {
     let setup = TestSetup::default();
 
-    seal_and_unseal(&setup, rand_vec(1));
-    seal_and_unseal(&setup, rand_vec(5));
-    seal_and_unseal(&setup, rand_vec(32));
-    seal_and_unseal(&setup, rand_vec(33));
-    seal_and_unseal(&setup, rand_vec(511));
-    seal_and_unseal(&setup, rand_vec(512));
-    seal_and_unseal(&setup, rand_vec(1023));
-    seal_and_unseal(&setup, rand_vec(60000));
-    seal_and_unseal(&setup, rand_vec(SYMMETRIC_CRYPTO_DEFAULT_CHUNK + 3));
+    for l in LENGTHS {
+        seal_and_unseal(&setup, rand_vec(*l));
+    }
 }
 
 #[test]

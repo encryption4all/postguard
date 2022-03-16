@@ -2,7 +2,7 @@ use crate::client::Client;
 use crate::opts::DecOpts;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
-use inquire::Select;
+use inquire::{Select, Text};
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::stream::Unsealer;
@@ -81,10 +81,9 @@ pub async fn exec(dec_opts: DecOpts) {
     let rec_info = hidden_policies.get(&id).unwrap();
     let mut reconstructed_policy = rec_info.policy.clone();
     for attr in reconstructed_policy.con.iter_mut() {
-        let mut line = String::new();
-        eprintln!("Enter value for {}:", &attr.atype);
-        let val = std::io::stdin().read_line(&mut line).unwrap();
-        attr.hidden_value = (val > 0).then(|| line.strip_suffix('\n').unwrap().to_string());
+        attr.hidden_value = Text::new(&format!("Enter value for {}?", attr.atype))
+            .prompt()
+            .ok();
     }
 
     let keyrequest = KeyRequest {
