@@ -14,7 +14,6 @@ If not available, please consider using a polyfill, see
 
 ## Usage
 
-
 ### Encryption
 
 ```javascript
@@ -37,6 +36,7 @@ const policies = {
 };
 
 // The following call reads data from a `ReadableStream` and seals it into `WritableStream`.
+// Make sure that only chunks of type `Uint8Array` are enqueued to `readable`.
 await module.seal(pk, policies, readable, writable);
 ```
 
@@ -50,10 +50,10 @@ const module = await import("@e4a/irmaseal-wasm-bindings");
 
 // Start reading from the IRMAseal bytestream. This will read
 // the metadata up until the actual payload. The stream is still locked.
-const unsealer = await new module.Unsealer(readable);
+const unsealer = await module.Unsealer.new(readable);
 
 // Retrieve the hidden (purged of attribute values) policy of this recipient.
-const hidden = unsealer.get_hidden_policy();
+const hidden = unsealer.get_hidden_policies();
 
 // In this case it will yield:
 // {

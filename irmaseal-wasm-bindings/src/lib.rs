@@ -17,14 +17,19 @@ extern crate console_error_panic_hook;
 #[wasm_bindgen(js_name = Unsealer)]
 pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
 
-/// Seals the contents of a `ReadableStream` into a `WritableStream`.
+/// Seals the contents of a `ReadableStream` into a `WritableStream` using
+/// the given master public key and policies.
 ///
 /// # Arguments
 ///
 /// * `mpk`      - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
 /// * `policies` - The policies to use for key encapsulation.
-/// * `readable` - The plaintext `ReadableStream` for data encapsulation.
-/// * `writable` - The `WritableStream` to which the ciphertext is written.
+/// * `readable` - The plaintext `ReadableStream` for data encapsulation. Only chunks of type `Uint8Array` should be enqueued.
+/// * `writable` - The `WritableStream` to which the ciphertext is written. Writes chunks of type `Uint8Array`.
+///
+/// # Errors
+///
+/// The seal function expects `Uint8Array` chunks and will error otherwise.
 #[wasm_bindgen(js_name = seal)]
 pub async fn js_seal(
     mpk: JsValue,
@@ -51,8 +56,8 @@ pub async fn js_seal(
 impl JsUnsealer {
     /// Constructs a new `Unsealer` from a Javascript `ReadableStream`.
     /// The stream forwards up until the payload.
-    /// The decrypting party should then use the metadata to retrieve a
-    /// user secret key for using in `unseal()` or `derive_key()`.
+    /// The decrypting party should then use `Unsealer::get_hidden_policies()`
+    /// to retrieve a user secret key for using in `unseal()` or `derive_key()`.
     ///
     /// Locks the ReadableStream until this Unsealer is dropped.`
     pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
@@ -70,6 +75,11 @@ impl JsUnsealer {
     /// * `recipient_id` - The recipient identifier used for unsealing.
     /// * `usk`          - The User Secret Key associated with the policy of this recipient.
     /// * `writable`     - A `WritableStream` to which the plaintext chunks will be written.
+    ///
+    /// # Errors
+    ///
+    /// An error occurs when the ciphertext data is not of type `Uint8Array`.
+    /// A WebCrypto error can also occur when the data is not succesfully authenticated.
     pub async fn unseal(
         self,
         recipient_id: String,
