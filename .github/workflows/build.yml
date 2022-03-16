@@ -127,7 +127,6 @@ jobs:
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - run: cargo test
       - run: wasm-pack test --headless --chrome ./irmaseal-wasm-bindings
 
   test-wasm-bindings-safari:
@@ -140,5 +139,4 @@ jobs:
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - run: cargo test
       - run: wasm-pack test --headless --safari ./irmaseal-wasm-bindings
