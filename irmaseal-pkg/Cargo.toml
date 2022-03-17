@@ -9,9 +9,10 @@ name = "irmaseal-pkg"
 version = "0.2.0-beta.0"
 
 [dependencies]
-actix-rt = "2.3.0"
-actix-web = "4.0.0-beta.10"
-actix-cors = "0.6.0-beta.3"
+actix-rt = "2.7.0"
+actix-web = "4.0.1"
+actix-cors = "0.6.1"
+actix-web-httpauth = "0.6.0"
 arrayref = "0.3.5"
 clap = { version = "3.0.10", features = ["derive"] }
 futures = { version = "0.3", features = ["executor"] }
@@ -21,6 +22,8 @@ rand = "0.8.4"
 serde = "*"
 serde_json = "1.0.68"
 subtle = "2.1.1"
+reqwest = "0.11.10"
+jsonwebtoken = { version = "8.0.1", features = ["use_pem"] }
 
 [dependencies.irmaseal-core]
 path = "../irmaseal-core"

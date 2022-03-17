@@ -1,9 +1,11 @@
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
+use jsonwebtoken::DecodingKey;
 
 use crate::handlers;
 use crate::opts::*;
 use crate::util::*;
+use actix_cors::Cors;
 use actix_rt::System;
 use actix_web::{
     http::header,
@@ -26,19 +28,28 @@ pub fn exec(server_opts: ServerOpts) {
         public,
     } = server_opts;
 
-    let kp2 = MasterKeyPair::<CGWKV> {
+    let kp = MasterKeyPair::<CGWKV> {
         pk: cgwkv_read_pk(public).unwrap(),
         sk: cgwkv_read_sk(secret).unwrap(),
     };
 
     System::new().block_on(async move {
+        let jwt_pk_bytes = reqwest::get(&format!("{irma}/publickey"))
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        let decoding_key = DecodingKey::from_rsa_pem(&jwt_pk_bytes).unwrap();
+
         actix_web::HttpServer::new(move || {
             actix_web::App::new()
                 .wrap(
-                    actix_cors::Cors::default()
+                    Cors::default()
                         .allow_any_origin()
                         .allowed_methods(vec!["GET", "POST"])
                         .allowed_header(header::CONTENT_TYPE)
+                        .allowed_header(header::AUTHORIZATION)
                         .max_age(3600),
                 )
                 .app_data(Data::new(
@@ -46,17 +57,26 @@ pub fn exec(server_opts: ServerOpts) {
                 ))
                 .service(
                     scope("/v2")
-                        .app_data(Data::new(irma.clone()))
                         .service(
                             resource("/parameters")
-                                .app_data(Data::new(kp2.pk.clone()))
+                                .app_data(Data::new(kp.pk))
                                 .route(web::get().to(handlers::parameters::<CGWKV>)),
                         )
-                        .service(resource("/request").route(web::post().to(handlers::request)))
                         .service(
-                            resource("/request/{token}/{timestamp}")
-                                .app_data(Data::new(kp2.clone()))
-                                .route(web::get().to(handlers::request_fetch::<CGWKV>)),
+                            resource("/request")
+                                .app_data(Data::new(irma.clone()))
+                                .route(web::post().to(handlers::request)),
+                        )
+                        .service(
+                            resource("/request_jwt/{token}")
+                                .app_data(Data::new(irma.clone()))
+                                .route(web::get().to(handlers::request_jwt)),
+                        )
+                        .service(
+                            resource("/request_key/{timestamp}")
+                                .app_data(Data::new(kp.sk))
+                                .app_data(Data::new(decoding_key.clone()))
+                                .route(web::get().to(handlers::request_key::<CGWKV>)),
                         ),
                 )
         })

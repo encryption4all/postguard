@@ -1,4 +1,4 @@
-use actix_web::web::{Data, HttpResponse};
+use actix_web::{web::Data, HttpResponse};
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::{api::Parameters, PublicKey};
 use serde::Serialize;

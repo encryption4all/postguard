@@ -1,8 +1,9 @@
-use actix_web::web::{Data, HttpResponse, Json};
+use crate::Error;
+use actix_web::{web::Data, web::Json, HttpResponse};
+use irma::*;
 use irmaseal_core::api::KeyRequest;
 
-use crate::Error;
-use irma::*;
+const MAX_VALIDITY: u64 = 60 * 60 * 24;
 
 pub async fn request(
     url: Data<String>,
@@ -11,9 +12,6 @@ pub async fn request(
     let irma_url = url.get_ref().clone();
     let kr = value.into_inner();
 
-    // TODO:
-    // if the attributes are from the same credential, put them in 1 discon (inner).
-    // if the attributes are from different credentials, put them in seperate discons.
     let dr = DisclosureRequestBuilder::new()
         .add_discon(vec![kr
             .con
@@ -26,12 +24,22 @@ pub async fn request(
             .collect()])
         .build();
 
+    // Might be better to respond with error.
+    let validity_checked = kr.validity.map(|v| std::cmp::min(v, MAX_VALIDITY));
+
+    let er = ExtendedIrmaRequest {
+        timeout: None,
+        callback_url: None,
+        validity: validity_checked,
+        request: dr,
+    };
+
     let client = IrmaClientBuilder::new(&irma_url)
         .map_err(|_e| Error::Unexpected)?
         .build();
 
     let session = client
-        .request(&dr)
+        .request_extended(&er)
         .await
         .or(Err(crate::Error::Unexpected))?;
 
