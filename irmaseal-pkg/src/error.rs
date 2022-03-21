@@ -19,6 +19,7 @@ impl ResponseError for Error {
             Error::ChronologyError | Error::VersionError => StatusCode::BAD_REQUEST,
             Error::SessionNotFound => StatusCode::NOT_FOUND,
             Error::UpstreamError => StatusCode::SERVICE_UNAVAILABLE,
+            Error::DecodingError => StatusCode::UNAUTHORIZED,
             Error::Unexpected => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -31,6 +32,7 @@ pub enum Error {
     SessionNotFound,
     UpstreamError,
     VersionError,
+    DecodingError,
     Unexpected,
 }
 
@@ -45,6 +47,7 @@ impl Display for Error {
                 Error::SessionNotFound => "session not found",
                 Error::UpstreamError => "upstream error",
                 Error::VersionError => "no such protocol version",
+                Error::DecodingError => "JWT decoding error",
                 Error::Unexpected => "unexpected",
             }
         )

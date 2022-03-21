@@ -2,6 +2,7 @@
 
 use crate::*;
 use ibe::kem::IBKEM;
+use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
 
 /// Set of public parameters for the Private Key Generator (PKG).
@@ -24,32 +25,17 @@ pub struct KeyRequest {
     pub validity: Option<u64>,
 }
 
-/// The status of a key request.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum KeyStatus {
-    /// The IRMA session has been initialized.
-    Initialized,
-    /// The IRMA session is in the pairing stage.
-    Pairing,
-    /// The IRMA app has connected to the API server.
-    Connected,
-    /// The IRMA session was cancelled.
-    Cancelled,
-    /// The IRMA session was completed succesfully, but it did not contain a valid attribute disclosure proof.
-    DoneInvalid,
-    /// The IRMA session was completed succesfully, and it contains a valid attribute disclosure proof.
-    DoneValid,
-    /// The IRMA session has timed out.
-    Timeout,
-}
-
 /// The response to the key request.
 #[derive(Serialize, Deserialize)]
 pub struct KeyResponse<K: IBKEM> {
-    /// The current status of the key request.
-    pub status: KeyStatus,
-    /// The key will remain `None` until the status is `DoneValid`.
+    /// The current IRMA session status.
+    pub status: SessionStatus,
+
+    /// The current IRMA session proof status.
+    #[serde(rename = "proofStatus", skip_serializing_if = "Option::is_none")]
+    pub proof_status: Option<ProofStatus>,
+
+    /// The key will remain `None` until the status is `Done` and the proof is `Valid`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(bound(
         serialize = "UserSecretKey<K>: Serialize",
