@@ -38,7 +38,6 @@ where
     for _ in 0..120 {
         let jwt: String = client.request_jwt(&sp.token).await.ok()?;
         let kr: KeyResponse<K> = client.request_key(timestamp, &jwt).await.ok()?;
-        dbg!(&format!("{:?}", kr.status));
 
         match kr {
             kr @ KeyResponse::<K> {
