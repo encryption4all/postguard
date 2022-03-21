@@ -10,12 +10,12 @@ pub async fn request_jwt(
 
     let jwt = reqwest::get(&format!("{irma_url}/session/{token}/result-jwt"))
         .await
-        .map_err(|_e| crate::Error::Unexpected)?
+        .or(Err(crate::Error::Unexpected))?
+        .error_for_status()
+        .or(Err(crate::Error::UpstreamError))?
         .text()
         .await
-        .map_err(|_e| crate::Error::Unexpected)?;
-
-    dbg!(&jwt);
+        .or(Err(crate::Error::Unexpected))?;
 
     Ok(HttpResponse::Ok()
         .content_type(ContentType::plaintext())

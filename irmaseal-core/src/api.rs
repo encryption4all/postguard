@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct Parameters<K: IBKEM> {
     pub format_version: u8,
-    pub max_age: u64,
     #[serde(bound(
         serialize = "PublicKey<K>: Serialize",
         deserialize = "PublicKey<K>: Deserialize<'de>"
@@ -31,7 +30,7 @@ pub struct KeyResponse<K: IBKEM> {
     /// The current IRMA session status.
     pub status: SessionStatus,
 
-    /// The current IRMA session proof status.
+    /// The current IRMA session proof status, if there is one.
     #[serde(rename = "proofStatus", skip_serializing_if = "Option::is_none")]
     pub proof_status: Option<ProofStatus>,
 

@@ -9,7 +9,6 @@ where
 {
     let pars = Parameters::<K> {
         format_version: 0x00,
-        max_age: 300,
         public_key: PublicKey(mpk.get_ref().clone()),
     };
 

@@ -36,11 +36,13 @@ pub fn exec(server_opts: ServerOpts) {
     System::new().block_on(async move {
         let jwt_pk_bytes = reqwest::get(&format!("{irma}/publickey"))
             .await
-            .unwrap()
+            .expect("could not retrieve JWT public key")
             .bytes()
             .await
-            .unwrap();
-        let decoding_key = DecodingKey::from_rsa_pem(&jwt_pk_bytes).unwrap();
+            .expect("could not retrieve JWT public key bytes");
+
+        let decoding_key =
+            DecodingKey::from_rsa_pem(&jwt_pk_bytes).expect("could not parse JWT public key");
 
         actix_web::HttpServer::new(move || {
             actix_web::App::new()
@@ -63,17 +65,17 @@ pub fn exec(server_opts: ServerOpts) {
                                 .route(web::get().to(handlers::parameters::<CGWKV>)),
                         )
                         .service(
-                            resource("/request")
+                            resource("/request/start")
                                 .app_data(Data::new(irma.clone()))
                                 .route(web::post().to(handlers::request)),
                         )
                         .service(
-                            resource("/request_jwt/{token}")
+                            resource("/request/jwt/{token}")
                                 .app_data(Data::new(irma.clone()))
                                 .route(web::get().to(handlers::request_jwt)),
                         )
                         .service(
-                            resource("/request_key/{timestamp}")
+                            resource("/request/key/{timestamp}")
                                 .app_data(Data::new(kp.sk))
                                 .app_data(Data::new(decoding_key.clone()))
                                 .route(web::get().to(handlers::request_key::<CGWKV>)),

@@ -2,6 +2,18 @@ use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use serde_json::json;
 use std::fmt::{Display, Formatter};
 
+#[derive(Debug)]
+pub enum Error {
+    Core(irmaseal_core::Error),
+    ChronologyError,
+    SessionNotFound,
+    UpstreamError,
+    VersionError,
+    DecodingError,
+    ValidityError,
+    Unexpected,
+}
+
 /// Show the error as an HTTP response for Actix-web.
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {
@@ -20,20 +32,10 @@ impl ResponseError for Error {
             Error::SessionNotFound => StatusCode::NOT_FOUND,
             Error::UpstreamError => StatusCode::SERVICE_UNAVAILABLE,
             Error::DecodingError => StatusCode::UNAUTHORIZED,
+            Error::ValidityError => StatusCode::BAD_REQUEST,
             Error::Unexpected => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    Core(irmaseal_core::Error),
-    ChronologyError,
-    SessionNotFound,
-    UpstreamError,
-    VersionError,
-    DecodingError,
-    Unexpected,
 }
 
 impl Display for Error {
@@ -48,6 +50,7 @@ impl Display for Error {
                 Error::UpstreamError => "upstream error",
                 Error::VersionError => "no such protocol version",
                 Error::DecodingError => "JWT decoding error",
+                Error::ValidityError => "validity exceeds maximum validity",
                 Error::Unexpected => "unexpected",
             }
         )

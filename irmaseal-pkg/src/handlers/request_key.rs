@@ -11,16 +11,19 @@ use serde::{Deserialize, Serialize};
 /// Custom claims signed by the IRMA server.
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
-    // Mandatory fields
+    // Mandatory JWT fields.
     exp: u64,
     iat: u64,
     iss: String,
     sub: String,
+
+    // Mandatory IRMA claims, always present.
     token: irma::SessionToken,
     status: irma::SessionStatus,
     r#type: irma::SessionType,
 
-    // Optional fields
+    // Optional fields, only present when the
+    // session is a finished disclosure session.
     #[serde(rename = "proofStatus")]
     proof_status: Option<irma::ProofStatus>,
     disclosed: Option<Vec<Vec<DisclosedAttribute>>>,
@@ -63,16 +66,24 @@ where
         .map_err(|_e| Error::Unexpected)?
         .as_secs();
 
+    // It is not allowed to ask for USKs with a timestamp somewhere in the future.
     if timestamp > now {
         return Err(Error::ChronologyError);
     }
 
     let token = auth.token();
-    let decoded =
-        decode::<Claims>(token, &decoding_key, &Validation::new(Algorithm::RS256)).unwrap();
-    //        .or(Err(Error::DecodingError))?;
 
-    dbg!(&decoded.claims);
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.leeway = 0;
+
+    // This also checks that the expiry date has not passed.
+    let decoded =
+        decode::<Claims>(token, &decoding_key, &validation).or(Err(Error::DecodingError))?;
+
+    // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
+    if timestamp > decoded.claims.exp {
+        return Err(Error::ChronologyError);
+    }
 
     let usk = match decoded.claims {
         Claims {
@@ -80,9 +91,8 @@ where
             proof_status: Some(ProofStatus::Valid),
             r#type: SessionType::Disclosing,
             disclosed: Some(ref disclosed),
-            exp,
             ..
-        } if timestamp < exp => match fetch_policy(timestamp, disclosed) {
+        } => match fetch_policy(timestamp, disclosed) {
             Some(p) => {
                 let k = p.derive::<K>().map_err(|_e| crate::Error::Unexpected)?;
                 let mut rng = rand::thread_rng();
