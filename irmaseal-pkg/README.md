@@ -1,7 +1,17 @@
 # irmaseal-pkg
 
 This crate contains the IRMAseal PKG service HTTP API. The crate is powered by
-the [actix-web](https://actix.rs/) framework.
+the [actix-web](https://actix.rs/) framework. The PKG communicates with an IRMA
+server to validate identities before issuing decryption keys.  This IRMA server
+is required to have a JWT private key configured, see [signed session
+results](https://irma.app/docs/irma-server/#signed-jwt-session-results).
+
+## Usage
+
+For its usage, see the help:
+```
+irmaseal-pkg --help
+```
 
 ## API description
 
