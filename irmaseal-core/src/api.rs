@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Set of public parameters for the Private Key Generator (PKG).
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Parameters<K: IBKEM> {
     pub format_version: u8,
     #[serde(bound(
@@ -26,12 +27,13 @@ pub struct KeyRequest {
 
 /// The response to the key request.
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyResponse<K: IBKEM> {
     /// The current IRMA session status.
     pub status: SessionStatus,
 
     /// The current IRMA session proof status, if there is one.
-    #[serde(rename = "proofStatus", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub proof_status: Option<ProofStatus>,
 
     /// The key will remain `None` until the status is `Done` and the proof is `Valid`.
