@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Custom claims signed by the IRMA server.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Claims {
     // Mandatory JWT fields.
     exp: u64,
@@ -22,9 +23,7 @@ struct Claims {
     status: irma::SessionStatus,
     r#type: irma::SessionType,
 
-    // Optional fields, only present when the
-    // session is a finished disclosure session.
-    #[serde(rename = "proofStatus")]
+    // Optional fields, only present when the session is a finished disclosure session.
     proof_status: Option<irma::ProofStatus>,
     disclosed: Option<Vec<Vec<DisclosedAttribute>>>,
 }
