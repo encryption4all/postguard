@@ -1,5 +1,5 @@
 use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{api::*, util::version, PublicKey};
+use irmaseal_core::{api::*, PublicKey};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ impl<'a> Client<'a> {
         PublicKey<K>: DeserializeOwned,
     {
         self.client
-            .get(self.create_url(&format!("{}/parameters", version::<K>().unwrap())))
+            .get(self.create_url("v2/parameters"))
             .send()
             .await?
             .error_for_status()?
@@ -42,9 +42,9 @@ impl<'a> Client<'a> {
             .await
     }
 
-    pub async fn request(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
+    pub async fn request_start(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
         self.client
-            .post(self.create_url("v2/request"))
+            .post(self.create_url("v2/request/start"))
             .json(kr)
             .send()
             .await?
@@ -53,21 +53,28 @@ impl<'a> Client<'a> {
             .await
     }
 
-    pub async fn result<K>(
+    pub async fn request_jwt(&self, token: &irma::SessionToken) -> Result<String, ClientError> {
+        self.client
+            .get(self.create_url(&format!("v2/request/jwt/{}", token.0)))
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await
+    }
+
+    pub async fn request_key<K>(
         &self,
-        token: &irma::SessionToken,
         timestamp: u64,
+        auth: &str,
     ) -> Result<KeyResponse<K>, ClientError>
     where
         K: IBKEM,
         KeyResponse<K>: DeserializeOwned,
     {
         self.client
-            .get(
-                self.create_url(&format!("{}/request/", version::<K>().unwrap()))
-                    .join(&format!("{}/{}", token.0, timestamp))
-                    .unwrap(),
-            )
+            .get(self.create_url(&format!("v2/request/key/{timestamp}")))
+            .bearer_auth(auth)
             .send()
             .await?
             .error_for_status()?

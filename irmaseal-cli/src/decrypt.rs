@@ -36,13 +36,19 @@ where
     KeyResponse<K>: DeserializeOwned,
 {
     for _ in 0..120 {
-        let r: KeyResponse<K> = client.result(&sp.token, timestamp).await.ok()?;
+        let jwt: String = client.request_jwt(&sp.token).await.ok()?;
+        let kr: KeyResponse<K> = client.request_key(timestamp, &jwt).await.ok()?;
+        dbg!(&format!("{:?}", kr.status));
 
-        if r.status != KeyStatus::DoneValid {
-            delay_for(Duration::new(0, 500_000_000)).await;
-        } else {
-            return Some(r);
-        }
+        match kr {
+            kr @ KeyResponse::<K> {
+                status: irma::SessionStatus::Done,
+                ..
+            } => return Some(kr),
+            _ => {
+                delay_for(Duration::new(0, 500_000_000)).await;
+            }
+        };
     }
 
     None
@@ -53,12 +59,12 @@ pub async fn exec(dec_opts: DecOpts) {
 
     eprintln!("Opening {}", input);
 
-    let file_ext = format!(".{}", "irma");
+    let file_ext = format!(".{}", "enc");
 
     let out_file_name = if input.ends_with(&file_ext) {
         &input[..input.len() - file_ext.len()]
     } else {
-        panic!("Input file name does not end with .irma")
+        panic!("Input file name does not end with .enc")
     };
 
     let source = File::open(&input).unwrap();
@@ -68,11 +74,6 @@ pub async fn exec(dec_opts: DecOpts) {
     eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
     let hidden_policies = &unsealer.meta.policies;
-    //    eprintln!(
-    //        "All policies (values purged): {}",
-    //        serde_json::to_string_pretty(&hidden_policies).unwrap()
-    //    );
-
     let options: Vec<_> = hidden_policies.keys().cloned().collect();
     let id = Select::new("What's your recipient identifier?", options)
         .prompt()
@@ -95,12 +96,13 @@ pub async fn exec(dec_opts: DecOpts) {
                 value: attr.hidden_value.clone(),
             })
             .collect(),
+        validity: None,
     };
 
     eprintln!("Requesting key for {:?}", &keyrequest);
 
     let client = Client::new(&pkg).unwrap();
-    let sd: irma::SessionData = client.request(&keyrequest).await.unwrap();
+    let sd: irma::SessionData = client.request_start(&keyrequest).await.unwrap();
 
     eprintln!("Please scan the following QR-code with IRMA:");
     print_qr(&sd.session_ptr);
