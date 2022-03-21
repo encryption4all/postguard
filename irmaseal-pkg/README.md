@@ -32,8 +32,8 @@ Starts a session to retrieve a USK. The request must include a JSON body
 containing a `KeyRequest`.  As an example, we want to request a key for someone
 named Alice.  Note that since this credential is from the demo scheme, anyone
 can retrieve such a credential.  We also request for the authentication to be
-valid for 1 day, or 86400 seconds, which is also the maximum. By default a the 
-authentication is valid for 5 minutes. If the requested valitidy exceeds the maximum
+valid for 1 day, or 86400 seconds, which is also the maximum. By default the 
+authentication is valid for 5 minutes. If the requested validity exceeds the maximum
 a `401` (`BAD REQUEST`) is returned.
 
 ```JSON
