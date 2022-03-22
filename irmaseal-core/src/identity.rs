@@ -24,7 +24,6 @@ pub struct Attribute {
 pub struct Policy {
     #[serde(rename = "ts")]
     pub timestamp: u64,
-    #[serde(rename = "c")]
     pub con: Vec<Attribute>,
 }
 
@@ -45,7 +44,6 @@ pub struct HiddenAttribute {
 pub struct HiddenPolicy {
     #[serde(rename = "ts")]
     pub timestamp: u64,
-    #[serde(rename = "c")]
     pub con: Vec<HiddenAttribute>,
 }
 
