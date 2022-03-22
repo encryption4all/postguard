@@ -26,13 +26,13 @@ const module = await import("@e4a/irmaseal-wasm-bindings");
 
 // We provide the policies which we want to use for encryption.
 const policies = {
-	recipient_1: {
-		ts: Math.round(Date.now() / 1000),
-		con: [
-			{ t: "pbdf.sidn-pbdf.email.email", v: "john.doe@example.com" },
-			{ t: "pbdf.gemeente.personalData.fullname", v: "John" },
-		],
-	},
+  recipient_1: {
+    ts: Math.round(Date.now() / 1000),
+    con: [
+      { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@example.com" },
+      { t: "pbdf.gemeente.personalData.fullname", v: "John" },
+    ],
+  },
 };
 
 // The following call reads data from a `ReadableStream` and seals it into `WritableStream`.
@@ -68,10 +68,10 @@ const hidden = unsealer.get_hidden_policies();
 
 // Guess the values of each of attribute right (note: we do no include the timestamp here).
 const keyRequest = {
-	con: [
-		{ t: "pbdf.sidn-pbdf.email.email", v: "john.doe@xample.com" },
-		{ t: "pbdf.gemeente.personalData.fullname", v: "John" },
-	],
+  con: [
+    { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@xample.com" },
+    { t: "pbdf.gemeente.personalData.fullname", v: "John" },
+  ],
 };
 
 const timestamp = hidden["recipient_1"].ts;
@@ -80,42 +80,34 @@ const timestamp = hidden["recipient_1"].ts;
 // In this example we use the irma frontend packages,
 // see [`irma-frontend-packages`](https://irma.app/docs/irma-frontend/).
 const session = {
-	url,
-	start: {
-		url: (o) => `${o.url}/v2/request/start`,
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(keyRequest),
-	},
-	//    mapping: {
-	//      // temporary fix
-	//      sessionPtr: (r) => {
-	//        const ptr = r.sessionPtr;
-	//        ptr.u = `https://ihub.ru.nl/irma/1/${ptr.u}`;
-	//        return ptr;
-	//      },
-	//    },
-	result: {
-		url: (o, { sessionToken }) => `${o.url}/v2/request/jwt/${sessionToken}`,
-		parseResponse: (r) => {
-			return r
-				.text()
-				.then((jwt) =>
-					fetch(`${pkg}/v2/request/key/${timestamp.toString()}`, {
-						headers: {
-							Authorization: `Bearer ${jwt}`,
-						},
-					})
-				)
-				.then((r) => r.json())
-				.then((json) => {
-					if (json.status !== "DONE" || json.proofStatus !== "VALID")
-						throw new Error("not done and valid");
-					return json.key;
-				})
-				.catch((e) => console.log("error: ", e));
-		},
-	},
+  url,
+  start: {
+    url: (o) => `${o.url}/v2/request/start`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(keyRequest),
+  },
+  result: {
+    url: (o, { sessionToken }) => `${o.url}/v2/request/jwt/${sessionToken}`,
+    parseResponse: (r) => {
+      return r
+        .text()
+        .then((jwt) =>
+          fetch(`${pkg}/v2/request/key/${timestamp.toString()}`, {
+            headers: {
+              Authorization: `Bearer ${jwt}`,
+            },
+          })
+        )
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.status !== "DONE" || json.proofStatus !== "VALID")
+            throw new Error("not done and valid");
+          return json.key;
+        })
+        .catch((e) => console.log("error: ", e));
+    },
+  },
 };
 
 var irma = new IrmaCore({ debugging: true, session });
