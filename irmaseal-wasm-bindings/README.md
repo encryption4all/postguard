@@ -19,20 +19,20 @@ If not available, please consider using a polyfill, see
 ```javascript
 // Retrieve the public key from PKG API:
 const resp = await fetch(`${url}/v2/parameters`);
-const pk = await resp.json().then((r) => r.public_key);
+const pk = await resp.json().then((r) => r.publicKey);
 
 // Load the WASM module.
 const module = await import("@e4a/irmaseal-wasm-bindings");
 
 // We provide the policies which we want to use for encryption.
 const policies = {
-  recipient_1: {
-    ts: Math.round(Date.now() / 1000),
-    c: [
-      { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@example.com" },
-      { t: "pbdf.gemeente.personalData.fullname", v: "John" },
-    ],
-  },
+	recipient_1: {
+		ts: Math.round(Date.now() / 1000),
+		con: [
+			{ t: "pbdf.sidn-pbdf.email.email", v: "john.doe@example.com" },
+			{ t: "pbdf.gemeente.personalData.fullname", v: "John" },
+		],
+	},
 };
 
 // The following call reads data from a `ReadableStream` and seals it into `WritableStream`.
@@ -59,7 +59,7 @@ const hidden = unsealer.get_hidden_policies();
 // {
 //  'recipient_1': {                                  // recipient identifier
 //    ts: 1643634276,                                 // timestamp
-//    c: [                                            // conjunction of attributes
+//    con: [                                          // conjunction of attributes
 //      { t: "pbdf.sidn-pbdf.email.email", v: "" },   // type/value pairs
 //      { t: "pbdf.gemeente.personalData.fullname", v: "" },
 //    ],
@@ -67,11 +67,11 @@ const hidden = unsealer.get_hidden_policies();
 // }
 
 // Guess the values of each of attribute right (note: we do no include the timestamp here).
-const identity = {
-  con: [
-    { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@xample.com" },
-    { t: "pbdf.gemeente.personalData.fullname", v: "John" },
-  ],
+const keyRequest = {
+	con: [
+		{ t: "pbdf.sidn-pbdf.email.email", v: "john.doe@xample.com" },
+		{ t: "pbdf.gemeente.personalData.fullname", v: "John" },
+	],
 };
 
 const timestamp = hidden["recipient_1"].ts;
@@ -80,26 +80,42 @@ const timestamp = hidden["recipient_1"].ts;
 // In this example we use the irma frontend packages,
 // see [`irma-frontend-packages`](https://irma.app/docs/irma-frontend/).
 const session = {
-  url: pkg,
-  start: {
-    url: (o) => `${o.url}/v2/request`,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(identity),
-  },
-  result: {
-    url: (o, { sessionToken }) =>
-      `${o.url}/v2/request/${sessionToken}/${timestamp.toString()}`,
-    parseResponse: (r) => {
-      return new Promise((resolve, reject) => {
-        if (r.status != "200") reject("not ok");
-        r.json().then((json) => {
-          if (json.status !== "DONE_VALID") reject("not done and valid");
-          resolve(json.key);
-        });
-      });
-    },
-  },
+	url,
+	start: {
+		url: (o) => `${o.url}/v2/request/start`,
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(keyRequest),
+	},
+	//    mapping: {
+	//      // temporary fix
+	//      sessionPtr: (r) => {
+	//        const ptr = r.sessionPtr;
+	//        ptr.u = `https://ihub.ru.nl/irma/1/${ptr.u}`;
+	//        return ptr;
+	//      },
+	//    },
+	result: {
+		url: (o, { sessionToken }) => `${o.url}/v2/request/jwt/${sessionToken}`,
+		parseResponse: (r) => {
+			return r
+				.text()
+				.then((jwt) =>
+					fetch(`${pkg}/v2/request/key/${timestamp.toString()}`, {
+						headers: {
+							Authorization: `Bearer ${jwt}`,
+						},
+					})
+				)
+				.then((r) => r.json())
+				.then((json) => {
+					if (json.status !== "DONE" || json.proofStatus !== "VALID")
+						throw new Error("not done and valid");
+					return json.key;
+				})
+				.catch((e) => console.log("error: ", e));
+		},
+	},
 };
 
 var irma = new IrmaCore({ debugging: true, session });
@@ -114,7 +130,7 @@ await unsealer.unseal("recipient_1", usk, writable);
 ### Leveraging Web Workers
 
 Since `ReadableStream` and `WritableStream` are
-[transferrable](https://developer.mozilla.org/en-US/docs/Glossary/Transferable_objects),
+[transferable](https://developer.mozilla.org/en-US/docs/Glossary/Transferable_objects),
 it is advised to perform the sealing and unsealing in a [Web
 Worker](https://developer.mozilla.org/en-US/docs/Web/API/Worker).
 
