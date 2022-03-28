@@ -5,7 +5,7 @@ use irma::*;
 use irmaseal_core::api::KeyResponse;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::{Attribute, Policy, UserSecretKey};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
 /// Custom claims signed by the IRMA server.
@@ -59,17 +59,6 @@ where
 {
     let sk = msk.get_ref();
     let timestamp = path.into_inner();
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_e| Error::Unexpected)?
-        .as_secs();
-
-    // It is not allowed to ask for USKs with a timestamp somewhere in the future.
-    if timestamp > now {
-        return Err(Error::ChronologyError);
-    }
-
     let token = auth.token();
 
     let mut validation = Validation::new(Algorithm::RS256);
@@ -77,7 +66,10 @@ where
 
     // This also checks that the expiry date has not passed.
     let decoded =
-        decode::<Claims>(token, &decoding_key, &validation).or(Err(Error::DecodingError))?;
+        decode::<Claims>(token, &decoding_key, &validation).map_err(|e| match e.into_kind() {
+            ErrorKind::ExpiredSignature => Error::ChronologyError,
+            _ => Error::DecodingError,
+        })?;
 
     // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
     if timestamp > decoded.claims.exp {
