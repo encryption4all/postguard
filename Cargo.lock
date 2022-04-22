@@ -1198,9 +1198,9 @@ dependencies = [
 
 [[package]]
 name = "ibe"
-version = "0.2.0-beta.0"
+version = "0.2.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7196ea23aa19748ed0c77b26f8ecb73f03b54e230a19d25a10ae4e599c74c19a"
+checksum = "8e50cbe3a82e5dd5be428fb0666998c6fe4ec8d9c4e5d241dd05747b30c169d9"
 dependencies = [
  "arrayref",
  "byteorder",
@@ -1317,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "irmaseal-core"
-version = "0.2.0-beta.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -1378,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "irmaseal-wasm-bindings"
-version = "0.2.0-beta.4"
+version = "0.2.0-beta.6"
 dependencies = [
  "console_error_panic_hook",
  "futures",
