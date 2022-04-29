@@ -81,7 +81,7 @@ impl JsUnsealer {
     /// An error occurs when the ciphertext data is not of type `Uint8Array`.
     /// A WebCrypto error can also occur when the data is not succesfully authenticated.
     pub async fn unseal(
-        self,
+        mut self,
         recipient_id: String,
         usk: JsValue,
         writable: RawWritableStream,

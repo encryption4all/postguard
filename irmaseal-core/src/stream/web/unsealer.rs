@@ -2,7 +2,7 @@ use crate::constants::*;
 use crate::metadata::*;
 use crate::Error;
 use crate::UserSecretKey;
-use futures::{stream::iter, Sink, SinkExt, Stream, StreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
 use std::convert::TryInto;
@@ -105,7 +105,7 @@ where
     }
 
     pub async fn unseal<W>(
-        mut self,
+        &mut self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
@@ -125,17 +125,20 @@ where
         let buf = Uint8Array::new_with_length(chunk_size);
         let mut buf_tail = 0;
 
-        let mut stream = iter(if self.payload.is_empty() {
-            vec![]
-        } else {
-            vec![Ok(JsValue::from(Uint8Array::from(&self.payload[..])))]
-        })
-        .chain(self.r);
-
-        self.payload.clear();
-
-        while let Some(Ok(data)) = stream.next().await {
-            let mut array: Uint8Array = data.dyn_into()?;
+        loop {
+            // First exhaust whatever of the payload was already read,
+            // then, exhaust the rest of the stream.
+            let mut array: Uint8Array = if !self.payload.is_empty() {
+                let payload_len: u32 = self.payload.len().try_into().unwrap();
+                let arr = Uint8Array::new_with_length(payload_len);
+                arr.copy_from(&self.payload[..]);
+                self.payload.clear();
+                arr
+            } else if let Some(Ok(data)) = self.r.next().await {
+                data.dyn_into()?
+            } else {
+                break;
+            };
 
             while array.byte_length() != 0 {
                 let len = array.byte_length();
