@@ -86,8 +86,7 @@ async fn test_web_to_web(len: usize) {
     let plain2: Vec<u8> = unsealer_output
         .written()
         .iter()
-        .map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .flatten()
+        .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
         .collect();
 
     assert_eq!(&plain, &plain2);
@@ -113,8 +112,7 @@ async fn test_web_to_rust(len: usize) {
     let unsealer_input: Vec<u8> = sealer_output
         .written()
         .iter()
-        .map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .flatten()
+        .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
         .collect();
 
     let mut tmp = Cursor::new(&unsealer_input);
@@ -122,7 +120,7 @@ async fn test_web_to_rust(len: usize) {
 
     let mut plain2 = Vec::new();
     unsealer
-        .unseal(&"alice@example.com".to_string(), usk, &mut plain2)
+        .unseal("alice@example.com", usk, &mut plain2)
         .await
         .unwrap();
 
@@ -162,8 +160,7 @@ async fn test_rust_to_web(len: usize) {
     let plain2: Vec<u8> = unsealer_output
         .written()
         .iter()
-        .map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .flatten()
+        .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
         .collect();
 
     assert_eq!(&plain, &plain2);
