@@ -52,6 +52,7 @@ pub fn exec(server_opts: ServerOpts) {
                         .allowed_methods(vec!["GET", "POST"])
                         .allowed_header(header::CONTENT_TYPE)
                         .allowed_header(header::AUTHORIZATION)
+                        .allowed_header("X-Postguard-Client-Version")
                         .max_age(3600),
                 )
                 .app_data(Data::new(
