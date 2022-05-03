@@ -86,7 +86,9 @@ fn test_corrupt_body() {
     let plain = rand_vec(100);
     let mut ct = seal_helper(&setup, &plain);
 
-    ct[1000] += 2;
+    // Flip a byte that is guaranteed to be in the encrypted payload.
+    let ct_len = ct.len();
+    ct[ct_len - 5] = !ct[ct_len - 5];
 
     // This should panic.
     let _plain2 = unseal_helper(&setup, &ct, 1);
@@ -101,7 +103,7 @@ fn test_corrupt_mac() {
     let mut ct = seal_helper(&setup, &plain);
 
     let len = ct.len();
-    ct[len - 5] += 2;
+    ct[len - 5] = !ct[len - 5];
 
     // This should panic as well.
     let _plain2 = unseal_helper(&setup, &ct, 1);
