@@ -1,111 +1,128 @@
-use clap::ArgMatches;
+use crate::client::Client;
+use crate::opts::DecOpts;
+use futures::io::AllowStdIo;
+use indicatif::{ProgressBar, ProgressStyle};
+use inquire::{Select, Text};
+use irmaseal_core::kem::cgw_kv::CGWKV;
+use irmaseal_core::kem::IBKEM;
 use irmaseal_core::stream::Unsealer;
-use irmaseal_core::{api::*, stream::Readable, MetadataReader, MetadataReaderResult};
-
-use core::panic;
+use irmaseal_core::{api::*, Attribute};
+use qrcode::render::Pixel;
+use qrcode::Color;
+use serde::de::DeserializeOwned;
+use std::fs::File;
 use std::time::Duration;
 use tokio::time::delay_for;
 
-use crate::client::{Client, ClientError, OwnedKeyChallenge};
-
-fn print_qr(s: &str) {
-    let code = qrcode::QrCode::new(s).unwrap();
+fn print_qr(qr: &irma::Qr) {
+    let code = qrcode::QrCode::new(serde_json::to_string(qr).unwrap()).unwrap();
     let scode = code
         .render::<char>()
-        .quiet_zone(false)
+        .quiet_zone(true)
         .module_dimensions(2, 1)
+        .light_color(Pixel::default_color(Color::Dark))
+        .dark_color(Pixel::default_color(Color::Light))
         .build();
 
-    println!("\n\n{}", scode);
+    eprintln!("\n\n{}", scode);
 }
 
-async fn wait_on_session(
-    client: Client<'_>,
-    sp: &OwnedKeyChallenge,
+async fn wait_on_session<K: IBKEM>(
+    client: &Client<'_>,
+    sp: &irma::SessionData,
     timestamp: u64,
-) -> Result<Option<KeyResponse>, ClientError> {
+) -> Option<KeyResponse<K>>
+where
+    KeyResponse<K>: DeserializeOwned,
+{
     for _ in 0..120 {
-        let r: KeyResponse = client.result(&sp.token, timestamp).await?;
+        let jwt: String = client.request_jwt(&sp.token).await.ok()?;
+        let kr: KeyResponse<K> = client.request_key(timestamp, &jwt).await.ok()?;
 
-        if r.status != KeyStatus::DoneValid {
-            delay_for(Duration::new(0, 500_000_000)).await;
-        } else {
-            return Ok(Some(r));
-        }
+        match kr {
+            kr @ KeyResponse::<K> {
+                status: irma::SessionStatus::Done,
+                ..
+            } => return Some(kr),
+            _ => {
+                delay_for(Duration::new(0, 500_000_000)).await;
+            }
+        };
     }
 
-    Ok(None)
+    None
 }
 
-pub async fn exec(m: &ArgMatches<'_>) {
-    let input = m.value_of("INPUT").unwrap();
-    let server = m.value_of("server").unwrap();
+pub async fn exec(dec_opts: DecOpts) {
+    let DecOpts { input, pkg } = dec_opts;
 
     eprintln!("Opening {}", input);
 
-    let file_ext = format!(".{}", crate::util::IRMASEALEXT);
+    let file_ext = format!(".{}", "enc");
 
     let out_file_name = if input.ends_with(&file_ext) {
         &input[..input.len() - file_ext.len()]
     } else {
-        panic!("Input file name does not end with .irma")
+        panic!("Input file name does not end with .enc")
     };
 
-    let mut r = crate::util::FileReader::new(std::fs::File::open(input).unwrap());
+    let source = File::open(&input).unwrap();
+    let mut async_read = AllowStdIo::new(&source);
 
-    let read_blocks_size = 32;
-    let mut meta_reader = MetadataReader::new();
+    let mut unsealer = Unsealer::new(&mut async_read).await.unwrap();
+    eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
-    let (_, header, metadata) = loop {
-        let read_size = std::cmp::min(read_blocks_size, meta_reader.get_safe_write_size());
-        match meta_reader
-            .write(r.read_bytes_strict(read_size).unwrap())
-            .unwrap()
-        {
-            MetadataReaderResult::Hungry => continue,
-            MetadataReaderResult::Saturated {
-                unconsumed,
-                header,
-                metadata,
-            } => break (unconsumed, header, metadata),
-        }
-    };
-
-    let timestamp = metadata.identity.timestamp;
-
-    let client = Client::new(server).unwrap();
-
-    eprintln!(
-        "Requesting private key for {:#?}",
-        metadata.identity.attribute
-    );
-
-    let sp: OwnedKeyChallenge = client
-        .request(&KeyRequest {
-            attribute: metadata.identity.attribute.clone(),
-        })
-        .await
+    let hidden_policies = &unsealer.meta.policies;
+    let options: Vec<_> = hidden_policies.keys().cloned().collect();
+    let id = Select::new("What's your recipient identifier?", options)
+        .prompt()
         .unwrap();
+
+    let rec_info = hidden_policies.get(&id).unwrap();
+    let mut reconstructed_policy = rec_info.policy.clone();
+    for attr in reconstructed_policy.con.iter_mut() {
+        attr.hidden_value = Text::new(&format!("Enter value for {}?", attr.atype))
+            .prompt()
+            .ok();
+    }
+
+    let keyrequest = KeyRequest {
+        con: reconstructed_policy
+            .con
+            .iter()
+            .map(|attr| Attribute {
+                atype: attr.atype.clone(),
+                value: attr.hidden_value.clone(),
+            })
+            .collect(),
+        validity: None,
+    };
+
+    eprintln!("Requesting key for {:?}", &keyrequest);
+
+    let client = Client::new(&pkg).unwrap();
+    let sd: irma::SessionData = client.request_start(&keyrequest).await.unwrap();
 
     eprintln!("Please scan the following QR-code with IRMA:");
+    print_qr(&sd.session_ptr);
 
-    print_qr(&sp.qr);
+    let key_resp: KeyResponse<CGWKV> =
+        wait_on_session::<CGWKV>(&client, &sd, rec_info.policy.timestamp)
+            .await
+            .unwrap();
 
-    if let Some(kr) = wait_on_session(client, &sp, timestamp).await.unwrap() {
-        eprintln!("Disclosure successful, decrypting {}", input);
+    let usk = key_resp.key.unwrap();
 
-        let mut unsealer = crate::util::FileUnsealerRead::new(
-            Unsealer::new(&metadata, header, &kr.key.unwrap(), r).unwrap(),
-        );
+    let destination = File::create(&out_file_name).unwrap();
 
-        std::io::copy(
-            &mut unsealer,
-            &mut std::fs::File::create(out_file_name).unwrap(),
-        )
-        .unwrap();
+    let pb = ProgressBar::new(source.metadata().unwrap().len());
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} {binary_bytes_per_sec} ({eta} left)")
+        .progress_chars("#>-"));
 
-        eprintln!("Succesfully decrypted.");
-    } else {
-        eprintln!("Did not scan the QR code and disclose in time");
-    };
+    let w = AllowStdIo::new(pb.wrap_write(destination));
+
+    eprintln!("Decrypting {}...", input);
+
+    unsealer.unseal(&id, &usk, w).await.unwrap();
 }

@@ -1,6 +1,10 @@
-use clap::ArgMatches;
-use irmaseal_core::stream::Sealer;
-use irmaseal_core::Identity;
+use crate::opts::EncOpts;
+use futures::io::AllowStdIo;
+use indicatif::{ProgressBar, ProgressStyle};
+use irmaseal_core::stream::seal;
+use irmaseal_core::{Attribute, Policy};
+use std::collections::BTreeMap;
+use std::fs::File;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -11,53 +15,64 @@ fn now() -> u64 {
         .as_secs()
 }
 
-pub async fn exec(m: &ArgMatches<'_>) {
+pub async fn exec(enc_opts: EncOpts) {
     let mut rng = rand::thread_rng();
 
-    let input = m.value_of("INPUT").unwrap();
-    let email = m.value_of("email");
-    let bsn = m.value_of("bsn");
-    let server = m.value_of("server").unwrap();
+    let EncOpts {
+        input,
+        identity,
+        pkg,
+    } = enc_opts;
+
     let timestamp = now();
 
-    let i = match (email, bsn) {
-        (Some(email), None) => {
-            Identity::new(timestamp, "pbdf.sidn-pbdf.email.email", Some(email)).unwrap()
-        }
-        (None, Some(bsn)) => {
-            Identity::new(timestamp, "pbdf.gemeente.personalData.bsn", Some(bsn)).unwrap()
-        }
-        _ => {
-            eprintln!("Expected either email or BSN");
-            return;
-        }
-    };
+    let x: BTreeMap<String, Vec<Attribute>> = serde_json::from_str(&identity).unwrap();
+    let identifiers: Vec<String> = x.keys().cloned().collect();
+    let policies: BTreeMap<String, Policy> = x
+        .iter()
+        .map(|(id, con)| {
+            (
+                id.clone(),
+                Policy {
+                    timestamp,
+                    con: con.clone(),
+                },
+            )
+        })
+        .collect();
 
-    let client = crate::client::Client::new(server).unwrap();
+    let client = crate::client::Client::new(&pkg).unwrap();
 
     let parameters = client.parameters().await.unwrap();
-    eprintln!("Fetched parameters from {}", server);
-    eprintln!("Encrypting for recipient {:#?}", i);
 
-    let input_path = Path::new(input);
+    eprintln!("Fetched parameters from {}", pkg);
+    eprintln!(
+        "Encrypting for the following recipients:\n{:#?}\n using the following policies:\n{}",
+        identifiers,
+        serde_json::to_string_pretty(&policies).unwrap()
+    );
+
+    let input_path = Path::new(&input);
     let file_name_path = input_path.file_name().unwrap();
     let file_name = file_name_path.to_str().unwrap();
 
-    let output = format!("{}.{}", file_name, crate::util::IRMASEALEXT);
+    let output = format!("{}.{}", file_name, "irma");
 
-    let mut w = crate::util::FileWriter::new(std::fs::File::create(&output).unwrap());
+    let source = File::open(&input_path).unwrap();
+    let destination = File::create(&output).unwrap();
 
-    let mut sealer_write = crate::util::FileSealerWrite::new(
-        Sealer::new(i, &parameters.public_key, &mut rng, &mut w).unwrap(),
-    );
+    let pb = ProgressBar::new(source.metadata().unwrap().len());
+
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} {binary_bytes_per_sec} ({eta} left)")
+        .progress_chars("#>-"));
+
+    let r = AllowStdIo::new(pb.wrap_read(source));
+    let w = AllowStdIo::new(destination);
 
     eprintln!("Encrypting {}...", input);
 
-    std::io::copy(
-        &mut std::fs::File::open(input_path).unwrap(),
-        &mut sealer_write,
-    )
-    .unwrap();
-
-    eprintln!("Finished encrypting.");
+    seal(&parameters.public_key, &policies, &mut rng, r, w)
+        .await
+        .unwrap();
 }

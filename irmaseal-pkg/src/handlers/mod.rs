@@ -1,7 +1,9 @@
 mod parameters;
 mod request;
-mod request_fetch;
+mod request_jwt;
+mod request_key;
 
 pub use parameters::*;
 pub use request::*;
-pub use request_fetch::*;
+pub use request_jwt::*;
+pub use request_key::*;

@@ -1,55 +1,93 @@
-use actix_rt::System;
-use clap::ArgMatches;
+use irmaseal_core::kem::cgw_kv::CGWKV;
+use irmaseal_core::kem::IBKEM;
+use jsonwebtoken::DecodingKey;
 
 use crate::handlers;
-use crate::util::{read_pk, read_sk};
+use crate::opts::*;
+use crate::util::*;
+use actix_cors::Cors;
+use actix_rt::System;
+use actix_web::{
+    http::header,
+    web,
+    web::{resource, scope, Data},
+};
 
 #[derive(Clone)]
-pub struct AppState {
-    pub pk: ibe::kiltz_vahlis_one::PublicKey,
-    pub sk: ibe::kiltz_vahlis_one::SecretKey,
-    pub irma_server_host: String,
+pub struct MasterKeyPair<K: IBKEM> {
+    pub pk: K::Pk,
+    pub sk: K::Sk,
 }
 
-pub fn exec(m: &ArgMatches) {
-    let host = m.value_of("host").unwrap();
-    let port = m.value_of("port").unwrap().parse::<u16>().unwrap();
+pub fn exec(server_opts: ServerOpts) {
+    let ServerOpts {
+        host,
+        port,
+        irma,
+        secret,
+        public,
+    } = server_opts;
 
-    let public = m.value_of("public").unwrap();
-    let secret = m.value_of("secret").unwrap();
-
-    let irma_server_host = m.value_of("irma").unwrap().to_string();
-
-    let state = AppState {
-        pk: read_pk(public).unwrap(),
-        sk: read_sk(secret).unwrap(),
-        irma_server_host,
+    let kp = MasterKeyPair::<CGWKV> {
+        pk: cgwkv_read_pk(public).unwrap(),
+        sk: cgwkv_read_sk(secret).unwrap(),
     };
 
-    let system = System::new("main");
+    System::new().block_on(async move {
+        let jwt_pk_bytes = reqwest::get(&format!("{irma}/publickey"))
+            .await
+            .expect("could not retrieve JWT public key")
+            .bytes()
+            .await
+            .expect("could not retrieve JWT public key bytes");
 
-    actix_web::HttpServer::new(move || {
-        actix_web::App::new()
-            .wrap(actix_cors::Cors::default())
-            .data(actix_web::web::JsonConfig::default().limit(1024 * 4096))
-            .data(state.clone())
-            .service(
-                actix_web::web::resource("/v1/parameters")
-                    .route(actix_web::web::get().to_async(handlers::parameters)),
-            )
-            .service(
-                actix_web::web::resource("/v1/request")
-                    .route(actix_web::web::post().to_async(handlers::request)),
-            )
-            .service(
-                actix_web::web::resource("/v1/request/{token}/{timestamp}")
-                    .route(actix_web::web::get().to_async(handlers::request_fetch)),
-            )
+        let decoding_key =
+            DecodingKey::from_rsa_pem(&jwt_pk_bytes).expect("could not parse JWT public key");
+
+        actix_web::HttpServer::new(move || {
+            actix_web::App::new()
+                .wrap(
+                    Cors::default()
+                        .allow_any_origin()
+                        .allowed_methods(vec!["GET", "POST"])
+                        .allowed_header(header::CONTENT_TYPE)
+                        .allowed_header(header::AUTHORIZATION)
+                        .allowed_header("X-Postguard-Client-Version")
+                        .max_age(3600),
+                )
+                .app_data(Data::new(
+                    actix_web::web::JsonConfig::default().limit(1024 * 4096),
+                ))
+                .service(
+                    scope("/v2")
+                        .service(
+                            resource("/parameters")
+                                .app_data(Data::new(kp.pk))
+                                .route(web::get().to(handlers::parameters::<CGWKV>)),
+                        )
+                        .service(
+                            resource("/request/start")
+                                .app_data(Data::new(irma.clone()))
+                                .route(web::post().to(handlers::request)),
+                        )
+                        .service(
+                            resource("/request/jwt/{token}")
+                                .app_data(Data::new(irma.clone()))
+                                .route(web::get().to(handlers::request_jwt)),
+                        )
+                        .service(
+                            resource("/request/key/{timestamp}")
+                                .app_data(Data::new(kp.sk))
+                                .app_data(Data::new(decoding_key.clone()))
+                                .route(web::get().to(handlers::request_key::<CGWKV>)),
+                        ),
+                )
+        })
+        .bind(format!("{}:{}", host, port))
+        .unwrap()
+        .shutdown_timeout(1)
+        .run()
+        .await
+        .unwrap()
     })
-    .bind(format!("{}:{}", host, port))
-    .unwrap()
-    .shutdown_timeout(1)
-    .start();
-
-    system.run().unwrap();
 }

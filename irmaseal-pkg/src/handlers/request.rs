@@ -1,38 +1,54 @@
-use actix_web::web::{Data, HttpResponse, Json};
-use futures::future::Future;
-use irmaseal_core::api::{KeyChallenge, KeyRequest};
+use crate::Error;
+use actix_web::{web::Data, web::Json, HttpResponse};
+use irma::*;
+use irmaseal_core::api::KeyRequest;
 
-use irma::client::Client;
-use irma::request::*;
+/// Maximum allowed valitidy (in seconds) of a JWT (1 day).
+const MAX_VALIDITY: u64 = 60 * 60 * 24;
 
-use crate::server::AppState;
+/// Default validity if no validity is specified (5 min).
+const DEFAULT_VALIDITY: u64 = 60 * 5;
 
-pub fn request(
-    state: Data<AppState>,
+pub async fn request(
+    url: Data<String>,
     value: Json<KeyRequest>,
-) -> impl Future<Item = HttpResponse, Error = crate::Error> {
+) -> Result<HttpResponse, crate::Error> {
+    let irma_url = url.get_ref().clone();
     let kr = value.into_inner();
-    let a = kr.attribute;
 
-    let dr = DisclosureRequest {
-        disclose: AttributeConDisCon(vec![AttributeDisCon(vec![AttributeCon(vec![
-            AttributeRequest {
-                atype: a.atype.to_string(),
-                value: a.value.map(|s| s.to_string()),
+    let dr = DisclosureRequestBuilder::new()
+        .add_discon(vec![kr
+            .con
+            .iter()
+            .map(|attr| AttributeRequest::Compound {
+                attr_type: attr.atype.clone(),
+                value: attr.value.clone(),
                 not_null: true,
-            },
-        ])])]),
-        labels: None,
+            })
+            .collect()])
+        .build();
+
+    let validity = match kr.validity {
+        Some(validity) if validity > MAX_VALIDITY => Err(Error::ValidityError),
+        Some(validity) => Ok(validity),
+        None => Ok(DEFAULT_VALIDITY),
+    }?;
+
+    let er = ExtendedIrmaRequest {
+        timeout: None,
+        callback_url: None,
+        validity: Some(validity),
+        request: dr,
     };
 
-    let client = Client::new(state.irma_server_host.clone()).unwrap();
+    let client = IrmaClientBuilder::new(&irma_url)
+        .map_err(|_e| Error::Unexpected)?
+        .build();
 
-    client.request(&dr).then(move |sp| {
-        let sp = sp.or(Err(crate::Error::UpstreamError))?;
+    let session = client
+        .request_extended(&er)
+        .await
+        .or(Err(crate::Error::Unexpected))?;
 
-        let qr = &serde_json::to_string(&sp.session_ptr).or(Err(crate::Error::Unexpected))?;
-        let token: &str = (&sp.token).into();
-
-        Ok(HttpResponse::Ok().json(KeyChallenge { qr, token }))
-    })
+    Ok(HttpResponse::Ok().json(session))
 }

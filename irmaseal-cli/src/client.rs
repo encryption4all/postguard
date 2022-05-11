@@ -1,7 +1,8 @@
+use irmaseal_core::kem::IBKEM;
+use irmaseal_core::{api::*, PublicKey};
 use reqwest::{ClientBuilder, Url};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-
-use irmaseal_core::api::*;
 
 pub struct Client<'a> {
     baseurl: &'a str,
@@ -17,48 +18,67 @@ pub struct OwnedKeyChallenge {
 }
 
 impl<'a> Client<'a> {
-    pub fn new(baseurl: &'a str) -> Result<Client, reqwest::Error> {
-        let client = ClientBuilder::new().build().unwrap();
+    pub fn new(baseurl: &'a str) -> Result<Client, ClientError> {
+        let client = ClientBuilder::new().build()?;
 
         Ok(Client { baseurl, client })
     }
 
     fn create_url(&self, u: &str) -> Url {
-        Url::parse(&self.baseurl).unwrap().join(u).unwrap()
+        Url::parse(self.baseurl).unwrap().join(u).unwrap()
     }
 
-    pub async fn parameters(&self) -> Result<Parameters, ClientError> {
+    pub async fn parameters<K>(&self) -> Result<Parameters<K>, ClientError>
+    where
+        K: IBKEM,
+        PublicKey<K>: DeserializeOwned,
+    {
         self.client
-            .get(self.create_url("v1/parameters"))
+            .get(self.create_url("v2/parameters"))
             .send()
             .await?
             .error_for_status()?
-            .json::<Parameters>()
+            .json::<Parameters<K>>()
             .await
     }
 
-    pub async fn request(&self, kr: &KeyRequest) -> Result<OwnedKeyChallenge, ClientError> {
+    pub async fn request_start(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
         self.client
-            .post(self.create_url("v1/request"))
+            .post(self.create_url("v2/request/start"))
             .json(kr)
             .send()
             .await?
             .error_for_status()?
-            .json::<OwnedKeyChallenge>()
+            .json::<irma::SessionData>()
             .await
     }
 
-    pub async fn result(&self, token: &str, timestamp: u64) -> Result<KeyResponse, ClientError> {
+    pub async fn request_jwt(&self, token: &irma::SessionToken) -> Result<String, ClientError> {
         self.client
-            .get(
-                self.create_url("v1/request/")
-                    .join(&format!("{}/{}", token, timestamp))
-                    .unwrap(),
-            )
+            .get(self.create_url(&format!("v2/request/jwt/{}", token.0)))
             .send()
             .await?
             .error_for_status()?
-            .json::<KeyResponse>()
+            .text()
+            .await
+    }
+
+    pub async fn request_key<K>(
+        &self,
+        timestamp: u64,
+        auth: &str,
+    ) -> Result<KeyResponse<K>, ClientError>
+    where
+        K: IBKEM,
+        KeyResponse<K>: DeserializeOwned,
+    {
+        self.client
+            .get(self.create_url(&format!("v2/request/key/{timestamp}")))
+            .bearer_auth(auth)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<KeyResponse<K>>()
             .await
     }
 }

@@ -1,138 +1,110 @@
-use crate::stream::util::SliceReader;
-use crate::stream::*;
-use crate::*;
-
-use arrayvec::ArrayVec;
+use crate::stream::{seal, Unsealer};
+use crate::test_common::TestSetup;
+use crate::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
+use futures::{executor::block_on, io::AllowStdIo};
 use rand::RngCore;
+use std::io::Cursor;
 
-type BigBuf = ArrayVec<[u8; 65536]>;
+const LENGTHS: &[usize] = &[
+    1,
+    512,
+    SYMMETRIC_CRYPTO_DEFAULT_CHUNK - 3,
+    SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
+    SYMMETRIC_CRYPTO_DEFAULT_CHUNK + 3,
+    3 * SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
+    3 * SYMMETRIC_CRYPTO_DEFAULT_CHUNK + 16,
+    3 * SYMMETRIC_CRYPTO_DEFAULT_CHUNK - 17,
+];
 
-struct DefaultProps {
-    pub i: Identity,
-    pub pk: ibe::kiltz_vahlis_one::PublicKey,
-    pub sk: ibe::kiltz_vahlis_one::SecretKey,
-}
+fn seal_helper(setup: &TestSetup, plain: &[u8]) -> Vec<u8> {
+    let mut rng = rand::thread_rng();
 
-impl Default for DefaultProps {
-    fn default() -> DefaultProps {
-        let mut rng = rand::thread_rng();
-        let i = Identity::new(
-            1566722350,
-            "pbdf.pbdf.email.email",
-            Some("w.geraedts@sarif.nl"),
+    let mut input = AllowStdIo::new(Cursor::new(plain));
+    let mut output = AllowStdIo::new(Vec::new());
+
+    block_on(async {
+        seal(
+            &setup.mpk,
+            &setup.policies,
+            &mut rng,
+            &mut input,
+            &mut output,
         )
+        .await
         .unwrap();
+    });
 
-        let (pk, sk) = ibe::kiltz_vahlis_one::setup(&mut rng);
+    output.into_inner()
+}
 
-        DefaultProps { i, pk, sk }
+fn unseal_helper(setup: &TestSetup, ct: &[u8], recipient_idx: usize) -> Vec<u8> {
+    let mut input = AllowStdIo::new(Cursor::new(ct));
+    let mut output = AllowStdIo::new(Vec::new());
+
+    let ids: Vec<String> = setup.policies.keys().cloned().collect();
+    let id = &ids[recipient_idx];
+    let usk_id = setup.usks.get(id).unwrap();
+
+    block_on(async {
+        let mut unsealer = Unsealer::new(&mut input).await.unwrap();
+
+        // Normally, a user would need to retrieve a usk here via the PKG,
+        // but in this case we own the master key pair.
+        unsealer.unseal(id, usk_id, &mut output).await.unwrap();
+    });
+
+    output.into_inner()
+}
+
+fn seal_and_unseal(setup: &TestSetup, plain: Vec<u8>) {
+    let ct = seal_helper(setup, &plain);
+    let plain2 = unseal_helper(setup, &ct, 0);
+
+    assert_eq!(&plain, &plain2);
+}
+
+fn rand_vec(length: usize) -> Vec<u8> {
+    let mut vec = vec![0u8; length];
+    rand::thread_rng().fill_bytes(&mut vec);
+    vec
+}
+
+#[test]
+fn test_reflection_seal_unsealer() {
+    let setup = TestSetup::default();
+
+    for l in LENGTHS {
+        seal_and_unseal(&setup, rand_vec(*l));
     }
 }
 
-fn seal(props: &DefaultProps, content: &[u8]) -> BigBuf {
-    let mut rng = rand::thread_rng();
-    let DefaultProps { i, pk, sk: _ } = props;
+#[test]
+#[should_panic]
+fn test_corrupt_body() {
+    let setup = TestSetup::default();
 
-    let mut buf = BigBuf::new();
-    {
-        let mut s = Sealer::new(i.clone(), &PublicKey(pk.clone()), &mut rng, &mut buf).unwrap();
-        s.write(&content).unwrap();
-    } // Force Drop of s.
-    buf
-}
+    let plain = rand_vec(100);
+    let mut ct = seal_helper(&setup, &plain);
 
-fn unseal(props: &DefaultProps, buf: &[u8]) -> (BigBuf, bool) {
-    let mut rng = rand::thread_rng();
-    let DefaultProps { i, pk, sk } = props;
+    // Flip a byte that is guaranteed to be in the encrypted payload.
+    let ct_len = ct.len();
+    ct[ct_len - 5] = !ct[ct_len - 5];
 
-    let mut mr = MetadataReader::new();
-    let mut mrr = None;
-
-    let mut written = 0;
-    for b in buf {
-        written += 1;
-        match mr.write(&[*b]).unwrap() {
-            MetadataReaderResult::Hungry => continue,
-            MetadataReaderResult::Saturated {
-                unconsumed,
-                header,
-                metadata,
-            } => {
-                assert_eq!(unconsumed, 0);
-                mrr = Some((header, metadata));
-                break;
-            }
-        }
-    }
-
-    let (header, metadata) = mrr.unwrap();
-
-    let i2 = &metadata.identity;
-    assert_eq!(&i, &i2);
-    let usk = ibe::kiltz_vahlis_one::extract_usk(&pk, &sk, &i2.derive().unwrap(), &mut rng);
-    let usk = &UserSecretKey(usk);
-
-    let bufr = SliceReader::new(&buf[written..]);
-    let mut unsealer = Unsealer::new(&metadata, header, usk, bufr).unwrap();
-    let mut dst = BigBuf::new();
-    unsealer.write_to(&mut dst).unwrap();
-
-    (dst, unsealer.validate())
-}
-
-fn seal_and_unseal(props: &DefaultProps, content: &[u8]) -> (BigBuf, bool) {
-    let buf = seal(props, content);
-    unseal(props, &buf)
-}
-
-fn do_test(props: &DefaultProps, content: &mut [u8]) {
-    rand::thread_rng().fill_bytes(content);
-    let (dst, valid) = seal_and_unseal(props, content);
-
-    assert_eq!(&content.as_ref(), &dst.as_slice());
-    assert!(valid);
+    // This should panic.
+    let _plain2 = unseal_helper(&setup, &ct, 1);
 }
 
 #[test]
-fn reflection_sealer_opener() {
-    let props = DefaultProps::default();
+#[should_panic]
+fn test_corrupt_mac() {
+    let setup = TestSetup::default();
 
-    do_test(&props, &mut [0u8; 0]);
-    do_test(&props, &mut [0u8; 1]);
-    do_test(&props, &mut [0u8; 511]);
-    do_test(&props, &mut [0u8; 512]);
-    do_test(&props, &mut [0u8; 1008]);
-    do_test(&props, &mut [0u8; 1023]);
-    do_test(&props, &mut [0u8; 60000]);
-}
+    let plain = rand_vec(100);
+    let mut ct = seal_helper(&setup, &plain);
 
-#[test]
-fn corrupt_body() {
-    let props = DefaultProps::default();
+    let len = ct.len();
+    ct[len - 5] = !ct[len - 5];
 
-    let mut content = [0u8; 60000];
-    rand::thread_rng().fill_bytes(&mut content);
-
-    let mut buf = seal(&props, &content);
-    buf[1000] += 0x02;
-    let (dst, valid) = unseal(&props, &buf);
-
-    assert_ne!(&content.as_ref(), &dst.as_slice());
-    assert!(!valid);
-}
-
-#[test]
-fn corrupt_mac() {
-    let props = DefaultProps::default();
-
-    let mut content = [0u8; 60000];
-    rand::thread_rng().fill_bytes(&mut content);
-
-    let mut buf = seal(&props, &content);
-    let mutation_point = buf.len() - 5;
-    buf[mutation_point] += 0x02;
-    let (dst, valid) = unseal(&props, &buf);
-
-    assert_eq!(&content.as_ref(), &dst.as_slice());
-    assert!(!valid);
+    // This should panic as well.
+    let _plain2 = unseal_helper(&setup, &ct, 1);
 }

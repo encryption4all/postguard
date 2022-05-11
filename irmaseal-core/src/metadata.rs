@@ -1,132 +1,254 @@
-use crate::{
-    util::{derive_keys, generate_iv, KeySet},
-    *,
-};
-use arrayref::array_ref;
-use arrayvec::ArrayVec;
-use core::convert::TryFrom;
+use crate::artifacts::UserSecretKey;
+use crate::util::generate_iv;
+use crate::*;
+use crate::{Error, HiddenPolicy, IV_SIZE};
+use ibe::kem::cgw_kv::CGWKV;
+use ibe::kem::mr::{MultiRecipient, MultiRecipientCiphertext};
+use ibe::kem::{SharedSecret, IBKEM};
+use ibe::Compress;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::io::Read;
+use std::io::Write;
 
-/// Metadata which contains the version
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+/// This struct containts metadata for _ALL_ recipients.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
-    pub ciphertext: ArrayVec<[u8; CIPHERTEXT_SIZE]>,
-    pub iv: ArrayVec<[u8; IV_SIZE]>,
-    pub identity: Identity,
+    #[serde(rename = "rs")]
+    pub policies: BTreeMap<String, RecipientInfo>,
+
+    /// The initializion vector used for symmetric encryption.
+    pub iv: [u8; IV_SIZE],
+
+    /// The size of the chunks in which to process symmetric encryption.
+    #[serde(rename = "cs")]
+    pub chunk_size: usize,
 }
 
-pub struct MetadataCreateResult {
-    pub header: HeaderBuf,
-    pub metadata: Metadata,
-    pub keys: KeySet,
+/// Contains data specific to one recipient.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecipientInfo {
+    /// The hidden policy associated with this identifier.
+    #[serde(rename = "p")]
+    pub policy: HiddenPolicy,
+
+    /// Ciphertext for this specific recipient.
+    #[serde(with = "BigArray")]
+    pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
+}
+
+impl RecipientInfo {
+    /// Derives a [`ibe::kem::SharedSecret`] from a [`RecipientInfo`].
+    ///
+    /// These bytes can either directly be used for an AEAD, or a key derivation function.
+    pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
+        let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(&self.ct))
+            .ok_or(Error::FormatViolation)?;
+
+        CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)
+    }
 }
 
 impl Metadata {
-    /// Conveniently construct a new Metadata. It is also possible to directly construct this object.
-    ///
-    /// Throws a ConstraintViolation when the type or value strings are too long..
     pub fn new<R: Rng + CryptoRng>(
-        identity: Identity,
-        pk: &PublicKey,
+        pk: &PublicKey<CGWKV>,
+        policies: &BTreeMap<String, Policy>,
         rng: &mut R,
-    ) -> Result<MetadataCreateResult, Error> {
-        let version_buf = VERSION_V1.to_be_bytes();
+    ) -> Result<(Self, SharedSecret), Error> {
+        // Map policies to IBE identities.
+        let ids = policies
+            .values()
+            .map(|p| p.derive::<CGWKV>())
+            .collect::<Result<Vec<<CGWKV as IBKEM>::Id>, _>>()?;
 
-        let derived = identity.derive()?;
-        let (c, k) = ibe::kiltz_vahlis_one::encrypt(&pk.0, &derived, rng);
+        // Generate the shared secret and ciphertexts.
+        let (cts, ss) = CGWKV::multi_encaps(&pk.0, &ids[..], rng);
 
-        let keys = derive_keys(&k);
-        let iv = ArrayVec::try_from(generate_iv(rng)).unwrap();
-        let ciphertext = ArrayVec::try_from(c.to_bytes()).unwrap();
+        // Generate all RecipientInfo's.
+        let recipient_info: BTreeMap<String, RecipientInfo> = policies
+            .iter()
+            .zip(cts.iter())
+            .map(|((rid, policy), ct)| {
+                (
+                    rid.clone(),
+                    RecipientInfo {
+                        policy: policy.to_hidden(),
+                        ct: ct.to_bytes(),
+                    },
+                )
+            })
+            .collect();
 
-        let metadata = Metadata {
-            ciphertext,
-            iv,
-            identity,
-        };
-        let mut header = HeaderBuf::try_from([0; MAX_HEADERBUF_SIZE]).unwrap();
+        let iv = generate_iv(rng);
 
-        let header_slice: &mut [u8] = header.as_mut_slice();
-
-        let prelude_off_start = 0;
-        let prelude_off_end = prelude_off_start + PRELUDE_SIZE;
-        let version_off_start = prelude_off_end;
-        let version_off_end = version_off_start + mem::size_of::<u16>();
-        let meta_len_off_start = version_off_end;
-        let meta_len_off_end = version_off_end + mem::size_of::<u32>();
-
-        let meta_bytes = postcard::to_slice(&metadata, &mut header_slice[PREAMBLE_SIZE..])
-            .or(Err(Error::ConstraintViolation))?;
-
-        let metadata_len = meta_bytes.len();
-
-        let metadata_len_buf = u32::try_from(metadata_len)
-            .or(Err(Error::ConstraintViolation))?
-            .to_be_bytes();
-
-        header_slice[prelude_off_start..prelude_off_end].clone_from_slice(&PRELUDE);
-        header_slice[version_off_start..version_off_end].clone_from_slice(&version_buf);
-        header_slice[meta_len_off_start..meta_len_off_end].clone_from_slice(&metadata_len_buf);
-
-        header.truncate(PREAMBLE_SIZE + metadata_len);
-
-        Ok(MetadataCreateResult {
-            header: header,
-            metadata: metadata,
-            keys: keys,
-        })
+        Ok((
+            Metadata {
+                policies: recipient_info,
+                iv,
+                chunk_size: SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
+            },
+            ss,
+        ))
     }
 
-    pub fn derive_keys(&self, usk: &UserSecretKey) -> Result<KeySet, Error> {
-        let c = crate::util::open_ct(ibe::kiltz_vahlis_one::CipherText::from_bytes(array_ref!(
-            self.ciphertext.as_slice(),
-            0,
-            CIPHERTEXT_SIZE
-        )))
-        .ok_or(Error::FormatViolation)?;
+    /// Writes binary MessagePack format into a [`std::io::Write`].
+    ///
+    /// Internally uses the "named" convention, which preserves field names.
+    /// Fields names are shortened to limit overhead:
+    /// `rs`: map of serialized `RecipientInfo`s with keyed by recipient identifier,
+    ///     `p`: serialized `HiddenPolicy`,
+    ///     `ct`: associated ciphertext with this policy,
+    /// `iv`: 16-byte initialization vector,
+    /// `cs`: chunk size in bytes used in the symmetrical encryption.
+    pub fn msgpack_into<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+        let mut serializer = rmp_serde::encode::Serializer::new(w).with_struct_map();
 
-        let m = ibe::kiltz_vahlis_one::decrypt(&usk.0, &c);
+        self.serialize(&mut serializer)
+            .map_err(|_e| Error::ConstraintViolation)
+    }
 
-        Ok(derive_keys(&m))
+    /// Deserialize the metadata from binary MessagePack format.
+    pub fn msgpack_from<R: Read>(r: R) -> Result<Self, Error> {
+        rmp_serde::decode::from_read(r).map_err(|_| Error::FormatViolation)
+    }
+
+    /// Serializes the metadata to a json string.
+    ///
+    /// Should only be used for small metadata or development purposes,
+    /// or when compactness is not required.
+    pub fn to_json_string(&self) -> Result<String, Error> {
+        serde_json::to_string(&self).or(Err(Error::FormatViolation))
+    }
+
+    /// Deserialize the metadata from a json string.
+    pub fn from_json_string(s: &str) -> Result<Self, Error> {
+        serde_json::from_str(s).map_err(|_| Error::FormatViolation)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_common::TestSetup;
 
     #[test]
-    fn eq_write_read() {
+    fn test_enc_dec_json() {
         let mut rng = rand::thread_rng();
+        let setup = TestSetup::default();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
 
-        let i = Identity::new(
-            1566722350,
-            "pbdf.pbdf.email.email",
-            Some("w.geraedts@sarif.nl"),
-        )
-        .unwrap();
+        let (meta, _ss) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
 
-        let (pk, _) = ibe::kiltz_vahlis_one::setup(&mut rng);
+        let s = meta.to_json_string().unwrap();
 
-        let MetadataCreateResult {
-            metadata: m,
-            header: h,
-            keys: _,
-        } = Metadata::new(i.clone(), &PublicKey(pk.clone()), &mut rng).unwrap();
+        // Decode string, while looking for the first identifier.
+        let decoded = Metadata::from_json_string(&s).unwrap();
 
-        let mut reader = MetadataReader::new();
-        match reader.write(&h.as_slice()).unwrap() {
-            MetadataReaderResult::Hungry => panic!("Hungry"),
-            MetadataReaderResult::Saturated {
-                unconsumed: u,
-                header: h2,
-                metadata: m2,
-            } => {
-                assert_eq!(&h, &h2);
-                assert_eq!(&m, &m2);
-                assert_eq!(u, 0);
-            }
-        }
+        assert_eq!(decoded.policies.len(), 2);
+
+        assert_eq!(
+            &decoded.policies.get(&ids[0]).unwrap().policy,
+            &setup.policies.get(&ids[0]).unwrap().to_hidden()
+        );
+
+        assert_eq!(&decoded.iv, &meta.iv);
+        assert_eq!(&decoded.chunk_size, &meta.chunk_size);
+    }
+
+    #[test]
+    fn test_enc_dec_msgpack() {
+        use std::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::default();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
+
+        let (meta, _ss) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+
+        let mut v = Vec::new();
+        meta.msgpack_into(&mut v).unwrap();
+
+        let mut c = Cursor::new(v);
+        let decoded = Metadata::msgpack_from(&mut c).unwrap();
+
+        assert_eq!(
+            &decoded.policies.get(&ids[0]).unwrap().policy,
+            &setup.policies.get(&ids[0]).unwrap().to_hidden()
+        );
+        assert_eq!(&decoded.iv, &meta.iv);
+        assert_eq!(&decoded.chunk_size, &meta.chunk_size);
+    }
+
+    #[test]
+    fn test_transcode() {
+        // This test encodes to binary and then transcodes into serde_json.
+        // The transcoded data is compared with a direct serialization of the same metadata.
+        use std::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::default();
+
+        let (meta, _ss) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+
+        let mut binary = Vec::new();
+        meta.msgpack_into(&mut binary).unwrap();
+
+        let v1 = serde_json::to_vec(&meta).unwrap();
+        let mut v2 = Vec::new();
+
+        let mut des = rmp_serde::decode::Deserializer::new(&binary[..]);
+        let mut ser = serde_json::Serializer::new(Cursor::new(&mut v2));
+
+        serde_transcode::transcode(&mut des, &mut ser).unwrap();
+
+        assert_eq!(&v1, &v2);
+    }
+
+    #[test]
+    fn test_round() {
+        // This test tests that both encoding methods derive the same keys as the sender.
+        use std::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::default();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
+
+        let test_id = &ids[1];
+        let test_usk = &setup.usks.get(test_id).unwrap();
+
+        let (meta, ss1) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        // Encode to binary via MessagePack.
+        let mut v = Vec::new();
+        meta.msgpack_into(&mut v).unwrap();
+
+        // Encode to JSON string.
+        let s = meta.to_json_string().unwrap();
+
+        let mut c = Cursor::new(v);
+        let decoded1 = Metadata::msgpack_from(&mut c).unwrap();
+        let ss2 = decoded1
+            .policies
+            .get(test_id)
+            .unwrap()
+            .derive_keys(test_usk)
+            .unwrap();
+
+        let decoded2 = Metadata::from_json_string(&s).unwrap();
+        let ss3 = decoded2
+            .policies
+            .get(test_id)
+            .unwrap()
+            .derive_keys(test_usk)
+            .unwrap();
+
+        assert_eq!(&decoded1.iv, &meta.iv);
+        assert_eq!(&decoded1.chunk_size, &meta.chunk_size);
+
+        // Make sure we derive the same keys.
+        assert_eq!(&ss1, &ss2);
+        assert_eq!(&ss1, &ss3);
     }
 }
