@@ -140,3 +140,16 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - run: wasm-pack test --headless --safari ./irmaseal-wasm-bindings
+
+  test-wasm-bindings-firefox:
+    name: Run wasm tests in Mozilla Firefox
+    runs-on: ubuntu-latest
+    env:
+      WASM_BINDGEN_TEST_TIMEOUT: 120
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - run: sudo apt update && sudo apt install firefox
+      - run: wasm-pack test --headless --firefox ./irmaseal-wasm-bindings
