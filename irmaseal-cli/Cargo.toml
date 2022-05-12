@@ -4,7 +4,7 @@ authors = [
   "Wouter Geraedts <git@woutergeraedts.nl>"
 ]
 description = "Commandline interface for IRMAseal"
-edition = "2018"
+edition = "2021"
 license = "MIT"
 name = "irmaseal-cli"
 version = "0.2.0-beta.0"

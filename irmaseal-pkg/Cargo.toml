@@ -3,7 +3,7 @@ authors = [
   "Leon Botros <l.botros@cs.ru.nl>",
   "Wouter Geraedts <git@woutergeraedts.nl>"
 ]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 name = "irmaseal-pkg"
 version = "0.2.0-beta.0"
