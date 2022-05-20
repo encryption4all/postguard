@@ -22,7 +22,7 @@ reqwest = { version = "0.10.4", default-features = false, features = [
 ] }
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "1.0.57" }
-tokio = { version = "0.2.5", features = ["rt-threaded", "time"] }
+tokio = { version = "0.2.5", features = ["rt-threaded", "time", "full"] }
 irma = "0.2.1"
 indicatif = "0.16.2"
 inquire = "0.2.1"
