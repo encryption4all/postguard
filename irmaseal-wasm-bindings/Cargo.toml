@@ -37,6 +37,4 @@ irmaseal-core = { path = "../irmaseal-core", features = [
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Os", "--enable-mutable-globals"]
 
-[profile.release]
-lto = true
-opt-level = "s"
+

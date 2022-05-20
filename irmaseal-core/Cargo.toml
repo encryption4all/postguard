@@ -24,9 +24,11 @@ serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
 futures = { version = "0.3.21", optional = true }
+
 # For normal stream feature
 aead = { version = "0.4.3", features = ["stream", "alloc"], optional = true }
 aes-gcm = { version = "0.9.4", optional = true }
+
 # For wasm_stream feature
 wasm-bindgen = { version = "0.2.78", optional = true }
 js-sys = { version = "0.3.55", optional = true }

@@ -5,3 +5,9 @@ members = [
   "irmaseal-pkg",
   "irmaseal-wasm-bindings"
 ]
+
+[profile.release] 
+lto = true
+
+[profile.release.package.irmaseal-wasm-bindings]
+opt-level = "s"
