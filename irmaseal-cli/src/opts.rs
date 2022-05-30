@@ -32,7 +32,7 @@ pub struct EncOpts {
     pub identity: String,
 
     /// Private key generator (PKG) server URL.
-    #[clap(short, long, default_value = "https://irmacrypt.nl/pkg", value_hint = ValueHint::Url)]
+    #[clap(short, long, default_value = "https://stable.irmaseal-pkg.ihub.ru.nl", value_hint = ValueHint::Url)]
     pub pkg: String,
 }
 
@@ -45,6 +45,6 @@ pub struct DecOpts {
     pub input: String,
 
     /// Private key generator (PKG) server URL.
-    #[clap(short, long, default_value = "https://irmacrypt.nl/pkg", value_hint = ValueHint::Url)]
+    #[clap(short, long, default_value = "https://stable.irmaseal-pkg.ihub.ru.nl", value_hint = ValueHint::Url)]
     pub pkg: String,
 }
