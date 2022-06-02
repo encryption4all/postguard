@@ -1,4 +1,4 @@
-use crate::stream::{seal, Unsealer};
+use crate::stream::rust::{seal, Unsealer};
 use crate::test_common::TestSetup;
 use crate::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
 use futures::{executor::block_on, io::AllowStdIo};

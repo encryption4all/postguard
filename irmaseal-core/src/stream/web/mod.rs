@@ -1,6 +1,12 @@
-pub mod aesgcm;
-pub mod sealer;
-pub mod unsealer;
+mod aesgcm;
+mod sealer;
+mod unsealer;
+
+#[doc(inline)]
+pub use sealer::seal as web_seal;
+
+#[doc(inline)]
+pub use unsealer::Unsealer as WebUnsealer;
 
 use crate::constants::*;
 use crate::Error;

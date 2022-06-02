@@ -10,6 +10,7 @@ use std::convert::TryInto;
 use aead::stream::DecryptorBE32;
 use aes_gcm::{Aes128Gcm, NewAead};
 
+/// An unsealer is used to unseal IRMAseal bytestreams.
 pub struct Unsealer<R> {
     pub version: u16,
     pub meta: Metadata,
@@ -20,6 +21,9 @@ impl<R> Unsealer<R>
 where
     R: AsyncRead + Unpin,
 {
+    /// Create a new [`Unsealer`] that starts reading from an [`AsyncRead`].
+    ///
+    /// Errors if the bytestream is not a legitimate IRMAseal bytestream.
     pub async fn new(mut r: R) -> Result<Self, Error> {
         let mut tmp = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut tmp)
@@ -72,6 +76,7 @@ where
         })
     }
 
+    /// Unseal the remaining data (which is now only payload) into an [`AsyncWrite`].
     pub async fn unseal<W>(
         &mut self,
         ident: &str,

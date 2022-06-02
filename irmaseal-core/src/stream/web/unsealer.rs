@@ -11,6 +11,7 @@ use wasm_bindgen::JsValue;
 
 use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
 
+/// An unsealer is used to decrypt IRMAseal bytestreams.
 pub struct Unsealer<R> {
     pub version: u16,
     pub meta: Metadata,
@@ -22,6 +23,9 @@ impl<R> Unsealer<R>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
 {
+    /// Create a new [`Unsealer`] that starts reading from a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream].
+    ///
+    /// Errors if the bytestream is not a legitimate IRMAseal bytestream.
     pub async fn new(mut r: R) -> Result<Self, JsValue> {
         let preamble_len: u32 = PREAMBLE_SIZE.try_into().unwrap();
         let mut read: u32 = 0;
@@ -104,6 +108,7 @@ where
         })
     }
 
+    /// Unseal the remaining data (which is now only payload) into an [`Sink<Uint8Array, Error = JsValue>`][Sink].
     pub async fn unseal<W>(
         &mut self,
         ident: &str,

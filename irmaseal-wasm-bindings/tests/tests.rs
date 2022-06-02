@@ -1,6 +1,6 @@
 use futures::io::Cursor;
 use irmaseal_core::constants::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
-use irmaseal_core::stream::{seal, Unsealer};
+use irmaseal_core::stream::rust::{seal, Unsealer};
 use irmaseal_wasm_bindings::{js_seal, JsUnsealer};
 use js_sys::Uint8Array;
 use wasm_bindgen::{JsCast, JsValue};

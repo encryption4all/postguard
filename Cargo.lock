@@ -1325,6 +1325,7 @@ dependencies = [
  "cipher",
  "criterion",
  "futures",
+ "getrandom",
  "ibe",
  "irma",
  "js-sys",

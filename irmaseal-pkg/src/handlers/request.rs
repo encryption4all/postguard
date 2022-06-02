@@ -21,7 +21,7 @@ pub async fn request(
             .con
             .iter()
             .map(|attr| AttributeRequest::Compound {
-                attr_type: attr.atype.clone(),
+                attr_type: attr.atype.to_string(),
                 value: attr.value.clone(),
                 not_null: true,
             })

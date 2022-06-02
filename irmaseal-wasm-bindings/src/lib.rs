@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::SS_BYTES;
-use irmaseal_core::stream::{web_seal, WebUnsealer};
+use irmaseal_core::stream::web::{web_seal, WebUnsealer};
 use irmaseal_core::{HiddenPolicy, Policy, PublicKey, UserSecretKey};
 
 use js_sys::Uint8Array;

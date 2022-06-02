@@ -8,7 +8,7 @@ authors = [
 edition = "2021"
 license = "MIT"
 description = "IRMAseal WebAssembly bindings for the browser"
-repository = "https://github.com/encryption4all/irmaseal/tree/0.2.0-beta.0/irmaseal-wasm-bindings"
+repository = "https://github.com/encryption4all/irmaseal/tree/main/irmaseal-wasm-bindings"
 keywords = ["ibe", "encryption", "ecc"]
 
 [lib]

@@ -1,4 +1,5 @@
 use super::Error;
+use core::{fmt, fmt::Display, fmt::Formatter};
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
@@ -7,19 +8,29 @@ use tiny_keccak::{Hasher, Sha3};
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
 
-/// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
+/// An IRMA AttributeType.
+#[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
+pub struct AttributeType {
+    /// The identifier of the IRMA scheme.
+    pub scheme: String,
+    /// The identifier of the IRMA issuer.
+    pub issuer: String,
+    /// The identifier of the IRMA credential type.
+    pub credential: String,
+    /// The identifier of the IRMA attribute type.
+    pub attribute: String,
+}
+
+/// An IRMAseal AttributeRequest, which is a simple case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
-    pub atype: String,
+    pub atype: AttributeType,
     #[serde(rename = "v")]
     pub value: Option<String>,
-    // TODO: not null bool?
 }
 
-/// An IRMAseal policy.
-///
-/// Contains a timestamp and a conjuction of Attribute(Requests).
+/// An IRMAseal policy used to encapsulate a shared secret.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct Policy {
     #[serde(rename = "ts")]
@@ -27,24 +38,15 @@ pub struct Policy {
     pub con: Vec<Attribute>,
 }
 
-/// A hidden IRMAseal policy.
-///
-/// The attribute values of this type are (partly) hidden.
-/// We split this from Attribut by type to ensure no mixups!
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct HiddenAttribute {
-    #[serde(rename = "t")]
-    pub atype: String,
-    #[serde(rename = "v")]
-    pub hidden_value: Option<String>,
-}
-
 /// An IRMAseal hidden policy.
+///
+/// A policy where (part of) the value of the attributes is hidden.
+/// This type is safe for usage in (public) [Metadata][`crate::Metadata`] alongside the ciphertext.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct HiddenPolicy {
     #[serde(rename = "ts")]
     pub timestamp: u64,
-    pub con: Vec<HiddenAttribute>,
+    pub con: Vec<Attribute>,
 }
 
 impl Policy {
@@ -55,16 +57,15 @@ impl Policy {
             con: self
                 .con
                 .iter()
-                .map(|a| HiddenAttribute {
+                .map(|a| Attribute {
                     atype: a.atype.clone(),
-                    hidden_value: Some("".to_string()),
+                    value: Some("".to_string()),
                 })
                 .collect(),
         }
     }
-}
 
-impl Policy {
+    /// Derive an [identity][`IBKEM::Id`] from a [`Policy`].
     pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
@@ -94,7 +95,8 @@ impl Policy {
             let mut f = Sha3::v512();
 
             f.update(&((2 * i + 1) as u64).to_be_bytes());
-            let at_bytes = ar.atype.as_bytes();
+            let at = ar.atype.to_string();
+            let at_bytes = at.as_bytes();
             f.update(&(at_bytes.len() as u64).to_be_bytes());
             f.update(at_bytes);
             f.finalize(&mut tmp);
@@ -129,12 +131,39 @@ impl Policy {
 }
 
 impl Attribute {
-    /// Conveniently construct a new attribute. It is also possible to directly construct this object.
-    pub fn new(atype: &str, value: Option<&str>) -> Self {
-        let atype = atype.to_owned();
+    /// Construct a new attribute request.
+    pub fn new(atype: &str, value: Option<&str>) -> Result<Self, Error> {
+        let atype = AttributeType::try_from(atype)?;
         let value = value.map(|s| s.to_owned());
 
-        Attribute { atype, value }
+        Ok(Attribute { atype, value })
+    }
+}
+
+impl Display for AttributeType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}.{}",
+            self.scheme, self.issuer, self.credential, self.attribute
+        )
+    }
+}
+
+impl TryFrom<&str> for AttributeType {
+    type Error = crate::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let split: Vec<&str> = value.split_terminator(".").collect();
+        match split[..] {
+            [a, b, c, d] => Ok(AttributeType {
+                scheme: a.to_string(),
+                issuer: b.to_string(),
+                credential: c.to_string(),
+                attribute: d.to_string(),
+            }),
+            _ => Err(Error::FormatViolation),
+        }
     }
 }
 
@@ -150,7 +179,6 @@ mod tests {
         let setup = TestSetup::default();
 
         let policies: Vec<Policy> = setup.policies.into_values().collect();
-
         let p1_derived = policies[1].derive::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();

@@ -2,7 +2,7 @@ use crate::*;
 use ibe::kem::IBKEM;
 use rand::{CryptoRng, Rng};
 
-/// Maps schemes to protocol version
+/// Maps schemes to protocol version.
 pub fn version<K: IBKEM>() -> Result<&'static str, Error> {
     match K::IDENTIFIER {
         "kv1" => Ok("v1"),

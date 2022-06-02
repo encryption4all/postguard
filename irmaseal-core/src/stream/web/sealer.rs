@@ -12,6 +12,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use crate::stream::web::{aead_nonce, aesgcm::encrypt, aesgcm::get_key};
 
+/// Seals the contents of a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream] into a [`Sink<Uint8Array, Error = JsValue>`][Sink].
 pub async fn seal<Rng, R, W>(
     pk: &PublicKey<CGWKV>,
     policies: &BTreeMap<String, Policy>,

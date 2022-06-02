@@ -14,9 +14,10 @@ use std::fmt::Debug;
 use std::io::Read;
 use std::io::Write;
 
-/// This struct containts metadata for _ALL_ recipients.
+/// Contains metadata for _ALL_ recipients.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
+    /// Map of recipient identifiers to [`RecipientInfo`]s.
     #[serde(rename = "rs")]
     pub policies: BTreeMap<String, RecipientInfo>,
 
@@ -26,22 +27,30 @@ pub struct Metadata {
     /// The size of the chunks in which to process symmetric encryption.
     #[serde(rename = "cs")]
     pub chunk_size: usize,
+
+    /// The minimum size of the payload (defaults to 0).
+    #[serde(default = "Default::default")]
+    pub min_payload_size: usize,
+
+    /// The maximum size of the payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_payload_size: Option<usize>,
 }
 
 /// Contains data specific to one recipient.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientInfo {
-    /// The hidden policy associated with this identifier.
+    /// The [`HiddenPolicy`] associated with this identifier.
     #[serde(rename = "p")]
     pub policy: HiddenPolicy,
 
-    /// Ciphertext for this specific recipient.
+    /// The serialized ciphertext for this specific recipient.
     #[serde(with = "BigArray")]
     pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
 }
 
 impl RecipientInfo {
-    /// Derives a [`ibe::kem::SharedSecret`] from a [`RecipientInfo`].
+    /// Decapsulates a [`ibe::kem::SharedSecret`] from a [`RecipientInfo`].
     ///
     /// These bytes can either directly be used for an AEAD, or a key derivation function.
     pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
@@ -53,6 +62,7 @@ impl RecipientInfo {
 }
 
 impl Metadata {
+    /// Creates a new [`Metadata`] using the Master Public Key and the policies.
     pub fn new<R: Rng + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &BTreeMap<String, Policy>,
@@ -89,20 +99,29 @@ impl Metadata {
                 policies: recipient_info,
                 iv,
                 chunk_size: SYMMETRIC_CRYPTO_DEFAULT_CHUNK,
+                min_payload_size: usize::default(),
+                max_payload_size: None,
             },
             ss,
         ))
+    }
+
+    /// Includes additional bounds on the size of the payload in the [`Metadata`][`crate::Metadata`].
+    pub fn with_payload_size(mut self, min: usize, max: Option<usize>) -> Self {
+        self.min_payload_size = min;
+        self.max_payload_size = max;
+        self
     }
 
     /// Writes binary MessagePack format into a [`std::io::Write`].
     ///
     /// Internally uses the "named" convention, which preserves field names.
     /// Fields names are shortened to limit overhead:
-    /// `rs`: map of serialized `RecipientInfo`s with keyed by recipient identifier,
-    ///     `p`: serialized `HiddenPolicy`,
-    ///     `ct`: associated ciphertext with this policy,
-    /// `iv`: 16-byte initialization vector,
-    /// `cs`: chunk size in bytes used in the symmetrical encryption.
+    /// * `rs`: map of serialized `RecipientInfo`s with keyed by recipient identifier,
+    ///    * `p`: serialized `HiddenPolicy`,
+    ///    * `ct`: associated ciphertext with this policy,
+    /// * `iv`: 16-byte initialization vector,
+    /// * `cs`: chunk size in bytes used in the symmetrical encryption.
     pub fn msgpack_into<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         let mut serializer = rmp_serde::encode::Serializer::new(w).with_struct_map();
 
@@ -115,7 +134,7 @@ impl Metadata {
         rmp_serde::decode::from_read(r).map_err(|_| Error::FormatViolation)
     }
 
-    /// Serializes the metadata to a json string.
+    /// Serializes the metadata to a JSON string.
     ///
     /// Should only be used for small metadata or development purposes,
     /// or when compactness is not required.
@@ -123,7 +142,7 @@ impl Metadata {
         serde_json::to_string(&self).or(Err(Error::FormatViolation))
     }
 
-    /// Deserialize the metadata from a json string.
+    /// Deserialize the metadata from a JSON string.
     pub fn from_json_string(s: &str) -> Result<Self, Error> {
         serde_json::from_str(s).map_err(|_| Error::FormatViolation)
     }
@@ -138,13 +157,10 @@ mod tests {
     fn test_enc_dec_json() {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::default();
+
         let ids: Vec<String> = setup.policies.keys().cloned().collect();
-
         let (meta, _ss) = Metadata::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
-
         let s = meta.to_json_string().unwrap();
-
-        // Decode string, while looking for the first identifier.
         let decoded = Metadata::from_json_string(&s).unwrap();
 
         assert_eq!(decoded.policies.len(), 2);

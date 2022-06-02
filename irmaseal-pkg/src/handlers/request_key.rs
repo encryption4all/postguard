@@ -35,10 +35,9 @@ fn fetch_policy(timestamp: u64, disclosed: &[Vec<DisclosedAttribute>]) -> Option
         .iter()
         .flatten()
         .map(|a| match a.status {
-            AttributeStatus::Present => Ok(Attribute {
-                atype: a.identifier.clone(),
-                value: a.raw_value.clone(),
-            }),
+            AttributeStatus::Present => {
+                Attribute::new(&a.identifier, a.raw_value.as_deref()).or(Err(Error::Unexpected))
+            }
             _ => Err(Error::Unexpected),
         })
         .collect();

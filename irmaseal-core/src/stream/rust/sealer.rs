@@ -12,6 +12,7 @@ use std::convert::TryFrom;
 use aead::stream::EncryptorBE32;
 use aes_gcm::{Aes128Gcm, NewAead};
 
+/// Seals the contents of an [`AsyncRead`] into an [`AsyncWrite`].
 pub async fn seal<Rng, R, W>(
     pk: &PublicKey<CGWKV>,
     policies: &BTreeMap<String, Policy>,
