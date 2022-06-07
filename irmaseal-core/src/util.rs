@@ -19,8 +19,8 @@ pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     }
 }
 
-pub(crate) fn generate_iv<R: Rng + CryptoRng>(r: &mut R) -> [u8; IV_SIZE] {
-    let mut res = [0u8; IV_SIZE];
+pub(crate) fn generate_iv<R: Rng + CryptoRng>(r: &mut R) -> [u8; DEFAULT_IV_SIZE] {
+    let mut res = [0u8; DEFAULT_IV_SIZE];
     r.fill_bytes(&mut res);
     res
 }

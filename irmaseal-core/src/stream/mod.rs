@@ -8,7 +8,11 @@
 //!   encrypted using the shared secret as symmetric key as described in  the paper [Online
 //!   Authenticated-Encryption and its Nonce-Reuse Misuse-Resistance][1].
 //!
-//! During decryption, each segment is seperately authenticated, this make the data safe for
+//! The header bytestream has the following layout:
+//!
+//! PRELUDE (4 bytes) || VERSION (2 bytes) || METASIZE (4 bytes) || METADATA (dynamic) || PAYLOAD_CT (dynamic)
+//!
+//! During decryption, each segment of the payload is seperately authenticated, this make the data safe for
 //! consumers before the stream has been exhausted.
 //!
 //! This module offers two dedicated implementations, as listed below.

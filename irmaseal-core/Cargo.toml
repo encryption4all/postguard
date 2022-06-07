@@ -9,7 +9,7 @@ authors = [
 edition = "2021"
 license = "MIT"
 keywords = ["ibe", "encryption", "ecc"]
-homepage = "https://github.com/encryption4all/irmaseal/tree/0.2.0-beta.0/irmaseal-core"
+homepage = "https://github.com/encryption4all/irmaseal/tree/main/irmaseal-core"
 categories = ["cryptography"]
 
 [dependencies]
@@ -19,10 +19,14 @@ rand = { version = "0.8.4", default-features = false }
 subtle = "2.3"
 serde = { version = "1.0.126", features = ["derive"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
-rmp-serde = "0.15.5"
-serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
+
+# For messagepack serialization 
+rmp-serde = { version = "0.15.5", optional = true }
+
+# For JSON serialization
+serde_json = { version = "1.0.68", optional = true }
 
 # For both stream features
 futures = { version = "0.3.21", optional = true }
@@ -50,7 +54,9 @@ serde-transcode = "1.1.1"
 criterion = "0.3.5"
 
 [features]
-default = []
+default = ["rmp"]
+rmp = ["rmp-serde"]
+json =  ["serde_json"]
 stream = ["futures", "aead/stream", "aes-gcm"]
 wasm_stream = [
   "getrandom/js",
