@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::metadata::*;
+use crate::header::*;
 use crate::Error;
 use crate::UserSecretKey;
 use futures::{Sink, SinkExt, Stream, StreamExt};
@@ -14,7 +14,9 @@ use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
 /// An unsealer is used to decrypt IRMAseal bytestreams.
 pub struct Unsealer<R> {
     pub version: u16,
-    pub meta: Metadata,
+    pub header: Header,
+    pub size_hint: (usize, Option<usize>),
+    segment_size: usize,
     payload: Vec<u8>,
     r: R,
 }
@@ -31,7 +33,7 @@ where
         let mut read: u32 = 0;
 
         let mut preamble = Vec::new();
-        let mut meta_buf = Vec::new();
+        let mut header_buf = Vec::new();
         let mut payload = Vec::new();
 
         while let Some(Ok(data)) = r.next().await {
@@ -44,7 +46,7 @@ where
                 preamble.extend_from_slice(array.to_vec().as_slice());
             } else {
                 preamble.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
-                meta_buf.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
+                header_buf.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
                 break;
             }
         }
@@ -63,46 +65,61 @@ where
             return Err(JsValue::from(Error::IncorrectVersion));
         }
 
-        let metadata_len = u32::from_be_bytes(
+        let header_len = u32::from_be_bytes(
             preamble[PREAMBLE_SIZE - METADATA_SIZE_SIZE..PREAMBLE_SIZE]
                 .try_into()
                 .map_err(|_e| Error::FormatViolation)?,
         );
 
-        if (metadata_len as usize) > MAX_METADATA_SIZE {
+        if (header_len as usize) > MAX_METADATA_SIZE {
             return Err(JsValue::from(Error::ConstraintViolation));
         }
 
-        if read > preamble_len + metadata_len {
+        if read > preamble_len + header_len {
             // We read into the payload
-            payload.extend_from_slice(&meta_buf[metadata_len as usize..]);
-            meta_buf.truncate(metadata_len as usize);
+            payload.extend_from_slice(&header_buf[header_len as usize..]);
+            header_buf.truncate(header_len as usize);
         } else {
             while let Some(Ok(data)) = r.next().await {
                 let array: Uint8Array = data.dyn_into()?;
                 let len = array.byte_length();
-                let rem = preamble_len + metadata_len - read;
+                let rem = preamble_len + header_len - read;
                 read += len;
 
                 if len < rem {
-                    meta_buf.extend_from_slice(array.to_vec().as_slice());
+                    header_buf.extend_from_slice(array.to_vec().as_slice());
                 } else {
-                    meta_buf.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
+                    header_buf.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
                     payload.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
                     break;
                 }
             }
         }
 
-        let meta = Metadata::msgpack_from(&*meta_buf)?;
+        let header = Header::msgpack_from(&*header_buf)?;
 
-        if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
+        let (_, segment_size, size_hint) = match header {
+            Header {
+                policies: _,
+                mode:
+                    Mode::Streaming {
+                        segment_size,
+                        size_hint,
+                    },
+                algo: Algorithm::Aes128Gcm { iv },
+            } => (iv, segment_size, size_hint),
+            _ => return Err(JsValue::from(Error::NotSupported)),
+        };
+
+        if segment_size > MAX_SYMMETRIC_CHUNK_SIZE {
             return Err(JsValue::from(Error::ConstraintViolation));
         }
 
         Ok(Unsealer {
             version,
-            meta,
+            header,
+            segment_size,
+            size_hint,
             payload,
             r,
         })
@@ -118,16 +135,21 @@ where
     where
         W: Sink<JsValue, Error = JsValue> + Unpin,
     {
-        let rec_info = self.meta.policies.get(ident).unwrap();
+        let rec_info = self.header.policies.get(ident).unwrap();
         let ss = rec_info.derive_keys(usk)?;
         let key = get_key(&ss.0[..KEY_SIZE]).await?;
 
-        let nonce = &self.meta.iv[..NONCE_SIZE];
+        let iv = match self.header.algo {
+            Algorithm::Aes128Gcm { iv } => iv,
+            _ => return Err(JsValue::from(Error::NotSupported)),
+        };
+
+        let nonce = &iv[..STREAM_NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
-        let chunk_size: u32 = (self.meta.chunk_size + TAG_SIZE).try_into().unwrap();
+        let segment_size: u32 = (self.segment_size + TAG_SIZE).try_into().unwrap();
 
-        let buf = Uint8Array::new_with_length(chunk_size);
+        let buf = Uint8Array::new_with_length(segment_size);
         let mut buf_tail = 0;
 
         loop {

@@ -35,9 +35,7 @@ fn fetch_policy(timestamp: u64, disclosed: &[Vec<DisclosedAttribute>]) -> Option
         .iter()
         .flatten()
         .map(|a| match a.status {
-            AttributeStatus::Present => {
-                Attribute::new(&a.identifier, a.raw_value.as_deref()).or(Err(Error::Unexpected))
-            }
+            AttributeStatus::Present => Ok(Attribute::new(&a.identifier, a.raw_value.as_deref())),
             _ => Err(Error::Unexpected),
         })
         .collect();

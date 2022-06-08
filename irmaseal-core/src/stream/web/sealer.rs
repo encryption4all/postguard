@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::metadata::*;
+use crate::header::*;
 use crate::Error;
 use crate::{Policy, PublicKey};
 use futures::{Sink, SinkExt, Stream, StreamExt};
@@ -25,22 +25,35 @@ where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
     W: Sink<JsValue, Error = JsValue> + Unpin,
 {
-    let (meta, ss) = Metadata::new(pk, policies, rng)?;
+    let (header, ss) = Header::new(pk, policies, rng)?;
     let key = get_key(&ss.0[..KEY_SIZE]).await?;
 
-    let nonce = &meta.iv[..NONCE_SIZE];
+    let (iv, segment_size, _) = match header {
+        Header {
+            policies: _,
+            algo: Algorithm::Aes128Gcm { iv },
+            mode:
+                Mode::Streaming {
+                    segment_size,
+                    size_hint,
+                },
+        } => Ok((iv, segment_size, size_hint)),
+        _ => Err(Error::NotSupported),
+    }?;
+
+    let nonce = &iv[..STREAM_NONCE_SIZE];
     let mut counter: u32 = u32::default();
 
     w.feed(Uint8Array::from(&PRELUDE[..]).into()).await?;
     w.feed(Uint8Array::from(&VERSION_V2.to_be_bytes()[..]).into())
         .await?;
 
-    let mut meta_vec = Vec::with_capacity(MAX_METADATA_SIZE);
-    meta.msgpack_into(&mut meta_vec)?;
+    let mut header_vec = Vec::with_capacity(MAX_METADATA_SIZE);
+    header.msgpack_into(&mut header_vec)?;
 
     w.feed(
         Uint8Array::from(
-            &u32::try_from(meta_vec.len())
+            &u32::try_from(header_vec.len())
                 .map_err(|_e| Error::ConstraintViolation)?
                 .to_be_bytes()[..],
         )
@@ -48,11 +61,11 @@ where
     )
     .await?;
 
-    w.feed(Uint8Array::from(&meta_vec[..]).into()).await?;
+    w.feed(Uint8Array::from(&header_vec[..]).into()).await?;
 
-    let chunk_size: u32 = meta.chunk_size.try_into().unwrap();
+    let segment_size: u32 = segment_size.try_into().unwrap();
     let mut buf_tail: u32 = 0;
-    let buf = Uint8Array::new_with_length(chunk_size);
+    let buf = Uint8Array::new_with_length(segment_size);
 
     while let Some(Ok(data)) = r.next().await {
         let mut array: Uint8Array = data.dyn_into()?;

@@ -71,13 +71,16 @@ impl Default for TestSetup {
 
         let p1 = Policy {
             timestamp: 1566722350,
-            con: vec![Attribute::new("pbdf.gemeente.personalData.bsn", Some("123456789")).unwrap()],
+            con: vec![Attribute::new(
+                "pbdf.gemeente.personalData.bsn",
+                Some("123456789"),
+            )],
         };
         let p2 = Policy {
             timestamp: 1566722350,
             con: vec![
-                Attribute::new("pbdf.gemeente.personalData.name", Some("bob")).unwrap(),
-                Attribute::new("pbdf.sidn-pbdf.email.email", Some("bob@example.com")).unwrap(),
+                Attribute::new("pbdf.gemeente.personalData.name", Some("bob")),
+                Attribute::new("pbdf.sidn-pbdf.email.email", Some("bob@example.com")),
             ],
         };
 

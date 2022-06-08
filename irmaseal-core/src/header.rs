@@ -1,7 +1,6 @@
 use crate::artifacts::UserSecretKey;
-use crate::util::generate_iv;
 use crate::*;
-use crate::{Error, HiddenPolicy, DEFAULT_IV_SIZE};
+use crate::{Error, HiddenPolicy};
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::mr::{MultiRecipient, MultiRecipientCiphertext};
 use ibe::kem::{SharedSecret, IBKEM};
@@ -19,7 +18,7 @@ use std::io::Write;
 pub enum Mode {
     /// The payload is a stream, processed in segments.
     Streaming {
-        /// The size in which segments are processed and authenticated..
+        /// The size in which segments are processed and authenticated.
         segment_size: usize,
 
         /// Possible size hint about the payload in the form (min, max), defaults to (0, None).
@@ -45,22 +44,25 @@ impl Default for Mode {
 // We only target 128-bit security because it more closely matches the security target BLS12-381.
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub enum Algorithm {
-    // Good performance with hardware accellration.
+    // Good performance with hardware acceleration.
     Aes128Gcm { iv: [u8; 16] },
     // The algorithms listed below are unsupported, but reserved for future use.
+    // Good performance in software.
     XSalsa20Poly1305 { iv: [u8; 24] },
+    // CAESAR finalist.
     Aes128Ocb { iv: [u8; 12] },
-    Aegis128 { iv: [u8; 16] },
 }
 
-fn default_algo<R: Rng + CryptoRng>(r: &mut R) -> Algorithm {
-    let mut iv = [0u8; 16];
-    r.fill_bytes(&mut iv);
+impl Algorithm {
+    fn new_aes128_gcm<R: Rng + CryptoRng>(r: &mut R) -> Self {
+        let mut iv = [0u8; 16];
+        r.fill_bytes(&mut iv);
 
-    Algorithm::Aes128Gcm { iv }
+        Self::Aes128Gcm { iv }
+    }
 }
 
-/// Header type, contains metadata for _ALL_ recipients.
+/// Header type, contains headerdata for _ALL_ recipients.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Header {
     /// Map of recipient identifiers to [`RecipientHeader`]s.
@@ -133,7 +135,7 @@ impl Header {
         Ok((
             Header {
                 policies: recipient_info,
-                algo: default_algo(rng),
+                algo: Algorithm::new_aes128_gcm(rng),
                 mode: Mode::default(),
             },
             ss,
@@ -162,7 +164,7 @@ impl Header {
     /// * `algo`: [algorithm][`Algorithm`],
     /// * `mode`: [mode][`Mode`],
     /// * `iv`: 32-byte initialization vector.
-    pub fn msgpack_into<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    pub fn msgpack_into<W: Write>(self, w: &mut W) -> Result<(), Error> {
         let mut serializer = rmp_serde::encode::Serializer::new(w)
             .with_struct_map()
             .with_string_variants();
@@ -171,22 +173,20 @@ impl Header {
             .map_err(|_e| Error::ConstraintViolation)
     }
 
-    /// Deserialize the metadata from binary MessagePack format.
+    /// Deserialize the headerdata from binary MessagePack format.
     pub fn msgpack_from<R: Read>(r: R) -> Result<Self, Error> {
         rmp_serde::decode::from_read(r).map_err(|_| Error::FormatViolation)
     }
 
-    /// Serializes the metadata to a JSON string.
+    /// Serializes the headerdata to a JSON string.
     ///
-    /// Should only be used for small metadata or development purposes,
+    /// Should only be used for small headerdata or development purposes,
     /// or when compactness is not required.
-    #[cfg(feature = "json")]
-    pub fn to_json_string(&self) -> Result<String, Error> {
+    pub fn to_json_string(self) -> Result<String, Error> {
         serde_json::to_string(&self).or(Err(Error::FormatViolation))
     }
 
-    /// Deserialize the metadata from a JSON string.
-    #[cfg(feature = "json")]
+    /// Deserialize the headerdata from a JSON string.
     pub fn from_json_string(s: &str) -> Result<Self, Error> {
         serde_json::from_str(s).map_err(|_| Error::FormatViolation)
     }
@@ -203,20 +203,20 @@ mod tests {
         let setup = TestSetup::default();
 
         let ids: Vec<String> = setup.policies.keys().cloned().collect();
-        let (meta, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
-        let s = meta.to_json_string().unwrap();
+        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let header2 = header.clone();
+
+        let s = header.to_json_string().unwrap();
         let decoded = Header::from_json_string(&s).unwrap();
 
         assert_eq!(decoded.policies.len(), 2);
-
         assert_eq!(
             &decoded.policies.get(&ids[0]).unwrap().policy,
             &setup.policies.get(&ids[0]).unwrap().to_hidden()
         );
 
-        //assert_eq!(&decoded.iv, &meta.iv);
-        assert_eq!(&decoded.algo, &meta.algo);
-        assert_eq!(&decoded.mode, &meta.mode);
+        assert_eq!(&decoded.algo, &header2.algo);
+        assert_eq!(&decoded.mode, &header2.mode);
     }
 
     #[test]
@@ -227,45 +227,43 @@ mod tests {
         let setup = TestSetup::default();
         let ids: Vec<String> = setup.policies.keys().cloned().collect();
 
-        let (meta, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let header2 = header.clone();
 
         let mut v = Vec::new();
-        meta.msgpack_into(&mut v).unwrap();
+        header.msgpack_into(&mut v).unwrap();
 
-        let mut c = Cursor::new(v);
-        let decoded = Header::msgpack_from(&mut c).unwrap();
+        let decoded = Header::msgpack_from(Cursor::new(v)).unwrap();
 
+        assert_eq!(decoded.policies.len(), 2);
         assert_eq!(
             &decoded.policies.get(&ids[0]).unwrap().policy,
             &setup.policies.get(&ids[0]).unwrap().to_hidden()
         );
-        //    assert_eq!(&decoded.iv, &meta.iv);
-        assert_eq!(&decoded.algo, &meta.algo);
-        assert_eq!(&decoded.mode, &meta.mode);
+        assert_eq!(&decoded.algo, &header2.algo);
+        assert_eq!(&decoded.mode, &header2.mode);
     }
 
     #[test]
     fn test_transcode() {
         // This test encodes to binary and then transcodes into serde_json.
-        // The transcoded data is compared with a direct serialization of the same metadata.
-        use std::io::Cursor;
-
+        // The transcoded data is compared with a direct serialization of the same header.
         let mut rng = rand::thread_rng();
         let setup = TestSetup::default();
 
         let mut v1 = Vec::new();
 
-        let meta = Header::new(&setup.mpk, &setup.policies, &mut rng)
+        let header = Header::new(&setup.mpk, &setup.policies, &mut rng)
             .unwrap()
             .0
             .with_mode(Mode::InMemory { size: 1024 })
-            .with_algo(default_algo(&mut rng));
+            .with_algo(Algorithm::new_aes128_gcm(&mut rng));
 
-        let meta2 = meta.clone();
+        let header2 = header.clone();
 
-        meta.msgpack_into(&mut v1).unwrap();
+        header.msgpack_into(&mut v1).unwrap();
 
-        let s1 = meta2.to_json_string().unwrap();
+        let s1 = header2.to_json_string().unwrap();
 
         let mut tmp = Vec::new();
 
@@ -292,16 +290,18 @@ mod tests {
         let test_id = &ids[1];
         let test_usk = &setup.usks.get(test_id).unwrap();
 
-        let (meta, ss1) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, ss1) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let header2 = header.clone();
+        let header3 = header.clone();
+
         // Encode to binary via MessagePack.
         let mut v = Vec::new();
-        meta.msgpack_into(&mut v).unwrap();
+        header.msgpack_into(&mut v).unwrap();
 
         // Encode to JSON string.
-        let s = meta.to_json_string().unwrap();
+        let json = header2.to_json_string().unwrap();
 
-        let mut c = Cursor::new(v);
-        let decoded1 = Header::msgpack_from(&mut c).unwrap();
+        let decoded1 = Header::msgpack_from(Cursor::new(v)).unwrap();
         let ss2 = decoded1
             .policies
             .get(test_id)
@@ -309,7 +309,7 @@ mod tests {
             .derive_keys(test_usk)
             .unwrap();
 
-        let decoded2 = Header::from_json_string(&s).unwrap();
+        let decoded2 = Header::from_json_string(&json).unwrap();
         let ss3 = decoded2
             .policies
             .get(test_id)
@@ -317,9 +317,9 @@ mod tests {
             .derive_keys(test_usk)
             .unwrap();
 
-        //   assert_eq!(&decoded1.iv, &meta.iv);
-        assert_eq!(&decoded1.algo, &meta.algo);
-        assert_eq!(&decoded1.mode, &meta.mode);
+        assert_eq!(&decoded1.policies.len(), &header3.policies.len());
+        assert_eq!(&decoded1.algo, &header3.algo);
+        assert_eq!(&decoded1.mode, &header3.mode);
 
         // Make sure we derive the same keys.
         assert_eq!(&ss1, &ss2);

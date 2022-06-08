@@ -72,7 +72,7 @@ pub async fn exec(dec_opts: DecOpts) {
     let mut unsealer = Unsealer::new(&mut async_read).await.unwrap();
     eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
-    let hidden_policies = &unsealer.meta.policies;
+    let hidden_policies = &unsealer.header.policies;
     let options: Vec<_> = hidden_policies.keys().cloned().collect();
     let id = Select::new("What's your recipient identifier?", options)
         .prompt()

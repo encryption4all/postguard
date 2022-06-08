@@ -56,7 +56,7 @@ pub async fn js_seal(
 impl JsUnsealer {
     /// Constructs a new `Unsealer` from a Javascript `ReadableStream`.
     /// The stream forwards up until the payload.
-    /// The decrypting party should then use `Unsealer::get_hidden_policies()`
+    /// The decrypting party should then use `Unsealer::hidden_policies()`
     /// to retrieve a user secret key for using in `unseal()` or `derive_key()`.
     ///
     /// Locks the ReadableStream until this Unsealer is dropped.`
@@ -96,12 +96,12 @@ impl JsUnsealer {
         Ok(())
     }
 
-    /// Returns all hidden policies in the metadata.
+    /// Returns all hidden policies in the header.
     /// The user should use this to retrieve a `UserSecretKey`.
-    pub fn get_hidden_policies(&self) -> JsValue {
+    pub fn hidden_policies(&self) -> JsValue {
         let policies: BTreeMap<String, HiddenPolicy> = self
             .0
-            .meta
+            .header
             .policies
             .iter()
             .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
@@ -110,16 +110,14 @@ impl JsUnsealer {
         JsValue::from_serde(&policies).unwrap()
     }
 
-    /// Returns the chunk size used during symmetric encryption.
-    pub fn get_chunk_size(&self) -> usize {
-        self.0.meta.chunk_size
+    /// Returns the algorithm used during symmetric encryption.
+    pub fn algo(&self) -> JsValue {
+        JsValue::from_serde(&self.0.header.algo).unwrap()
     }
 
-    /// Returns the 16-byte initialization vector used for symmetric encryption.
-    pub fn get_iv(&self) -> Uint8Array {
-        let iv = Uint8Array::new_with_length(self.0.meta.iv.len() as u32);
-        iv.copy_from(&self.0.meta.iv);
-        iv
+    /// Returns the mode used during symmetric encryption.
+    pub fn mode(&self) -> JsValue {
+        JsValue::from_serde(&self.0.header.mode).unwrap()
     }
 
     /// Returns the 32-byte shared secret derived from the unsealer and the usk/mpk.
@@ -127,7 +125,7 @@ impl JsUnsealer {
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
         let ss = self
             .0
-            .meta
+            .header
             .policies
             .get(id)
             .unwrap()

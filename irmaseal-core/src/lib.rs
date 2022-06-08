@@ -1,8 +1,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod artifacts;
+mod header;
 mod identity;
-mod metadata;
 
 #[cfg(test)]
 mod test_common;
@@ -24,8 +24,8 @@ pub use artifacts::*;
 
 #[doc(hidden)]
 pub use constants::*;
+pub use header::*;
 pub use identity::*;
-pub use metadata::*;
 
 /// IRMAseal error enum type.
 #[derive(Debug)]
@@ -36,6 +36,7 @@ pub enum Error {
     FormatViolation,
     KeyError,
     IncorrectTag,
+    NotSupported,
     Kem(ibe::kem::Error),
     StdIO(std::io::Error),
     #[cfg(any(feature = "stream", feature = "wasm_stream"))]
@@ -107,7 +108,7 @@ pub mod constants {
     pub const STREAM_IV_SIZE: usize = 12;
 
     /// Size of the nonce in the "STREAM" encryption construction.
-    pub const NONCE_SIZE: usize = 7;
+    pub const STREAM_NONCE_SIZE: usize = 7;
 
     /// Size of the authentication tag.
     /// The authentication tag is appended to each segment.

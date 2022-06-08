@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::metadata::*;
+use crate::header::*;
 use crate::Error;
 use crate::UserSecretKey;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
@@ -13,7 +13,9 @@ use aes_gcm::{Aes128Gcm, NewAead};
 /// An unsealer is used to unseal IRMAseal bytestreams.
 pub struct Unsealer<R> {
     pub version: u16,
-    pub meta: Metadata,
+    pub header: Header,
+    pub size_hint: (usize, Option<usize>),
+    segment_size: usize,
     r: R,
 }
 
@@ -44,34 +46,49 @@ where
             return Err(Error::IncorrectVersion);
         }
 
-        let metadata_len = u32::from_be_bytes(
+        let header_len = u32::from_be_bytes(
             tmp[PREAMBLE_SIZE - METADATA_SIZE_SIZE..]
                 .try_into()
                 .map_err(|_e| Error::FormatViolation)?,
         ) as usize;
 
-        if metadata_len > MAX_METADATA_SIZE {
+        if header_len > MAX_METADATA_SIZE {
             return Err(Error::ConstraintViolation);
         }
 
-        let mut meta_buf = Vec::with_capacity(metadata_len);
+        let mut header_buf = Vec::with_capacity(header_len);
 
-        // Limit reader to not read past metadata
-        let mut r = r.take(metadata_len as u64);
+        // Limit reader to not read past header
+        let mut r = r.take(header_len as u64);
 
-        r.read_to_end(&mut meta_buf)
+        r.read_to_end(&mut header_buf)
             .map_err(|_e| Error::FormatViolation)
             .await?;
 
-        let meta = Metadata::msgpack_from(&*meta_buf)?;
+        let header = Header::msgpack_from(&*header_buf)?;
 
-        if meta.chunk_size > MAX_SYMMETRIC_CHUNK_SIZE {
+        let (_, segment_size, size_hint) = match header {
+            Header {
+                policies: _,
+                mode:
+                    Mode::Streaming {
+                        segment_size,
+                        size_hint,
+                    },
+                algo: Algorithm::Aes128Gcm { iv },
+            } => (iv, segment_size, size_hint),
+            _ => return Err(Error::NotSupported),
+        };
+
+        if segment_size > MAX_SYMMETRIC_CHUNK_SIZE {
             return Err(Error::ConstraintViolation);
         }
 
         Ok(Unsealer {
             version,
-            meta,
+            header,
+            segment_size,
+            size_hint,
             r: r.into_inner(), // This (new) reader is locked to the payload.
         })
     }
@@ -86,16 +103,21 @@ where
     where
         W: AsyncWrite + Unpin,
     {
-        let rec_info = self.meta.policies.get(ident).unwrap();
+        let rec_info = self.header.policies.get(ident).unwrap();
         let ss = rec_info.derive_keys(usk)?;
-        let aes_key = &ss.0[..KEY_SIZE];
+        let key = &ss.0[..KEY_SIZE];
 
-        let nonce = &self.meta.iv[..NONCE_SIZE];
+        let iv = match self.header.algo {
+            Algorithm::Aes128Gcm { iv } => iv,
+            _ => return Err(Error::NotSupported),
+        };
 
-        let aes_gcm = Aes128Gcm::new_from_slice(aes_key).map_err(|_e| Error::KeyError)?;
-        let mut dec = DecryptorBE32::from_aead(aes_gcm, nonce.into());
+        let aead = Aes128Gcm::new_from_slice(key).map_err(|_e| Error::KeyError)?;
+        let nonce = &iv[..STREAM_NONCE_SIZE];
 
-        let bufsize: usize = self.meta.chunk_size + TAG_SIZE;
+        let mut dec = DecryptorBE32::from_aead(aead, nonce.into());
+
+        let bufsize: usize = self.segment_size + TAG_SIZE;
         let mut buf = vec![0u8; bufsize];
         let mut buf_tail = 0;
 
