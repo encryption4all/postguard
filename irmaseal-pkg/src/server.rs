@@ -1,6 +1,5 @@
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
-use jsonwebtoken::DecodingKey;
 
 use crate::handlers;
 use crate::opts::*;
@@ -12,6 +11,8 @@ use actix_web::{
     web::{resource, scope, Data},
     App, HttpServer,
 };
+
+use crate::middlewares::irma::{IrmaAuth, IrmaAuthType};
 
 #[derive(Clone)]
 pub struct MasterKeyPair<K: IBKEM> {
@@ -34,16 +35,6 @@ pub async fn exec(server_opts: ServerOpts) {
         sk: cgwkv_read_sk(secret).unwrap(),
     };
 
-    let jwt_pk_bytes = reqwest::get(&format!("{irma}/publickey"))
-        .await
-        .expect("could not retrieve JWT public key")
-        .bytes()
-        .await
-        .expect("could not retrieve JWT public key bytes");
-
-    let decoding_key =
-        DecodingKey::from_rsa_pem(&jwt_pk_bytes).expect("could not parse JWT public key");
-
     HttpServer::new(move || {
         App::new()
             .wrap(
@@ -64,19 +55,19 @@ pub async fn exec(server_opts: ServerOpts) {
                             .route(web::get().to(handlers::parameters::<CGWKV>)),
                     )
                     .service(
-                        resource("/request/start")
+                        resource("/irma/request/start")
                             .app_data(Data::new(irma.clone()))
                             .route(web::post().to(handlers::request)),
                     )
                     .service(
-                        resource("/request/jwt/{token}")
+                        resource("/irma/request/jwt/{token}")
                             .app_data(Data::new(irma.clone()))
                             .route(web::get().to(handlers::request_jwt)),
                     )
                     .service(
-                        resource("/request/key/{timestamp}")
+                        resource("/irma/request/key/{timestamp}")
                             .app_data(Data::new(kp.sk))
-                            .app_data(Data::new(decoding_key.clone()))
+                            .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
                             .route(web::get().to(handlers::request_key::<CGWKV>)),
                     ),
             )

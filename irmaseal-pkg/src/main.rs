@@ -1,6 +1,7 @@
 mod error;
 mod generate;
 mod handlers;
+mod middlewares;
 mod opts;
 mod server;
 mod util;

@@ -29,18 +29,10 @@ pub struct KeyRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyResponse<K: IBKEM> {
-    /// The current IRMA session status.
-    pub status: SessionStatus,
-
-    /// The current IRMA session proof status, if there is one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub proof_status: Option<ProofStatus>,
-
-    /// The key will remain `None` until the status is `Done` and the proof is `Valid`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The user secret key.
     #[serde(bound(
         serialize = "UserSecretKey<K>: Serialize",
         deserialize = "UserSecretKey<K>: Deserialize<'de>"
     ))]
-    pub key: Option<UserSecretKey<K>>,
+    pub key: UserSecretKey<K>,
 }

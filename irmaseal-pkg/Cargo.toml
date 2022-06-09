@@ -1,7 +1,7 @@
 [package]
 authors = [
-  "Leon Botros <l.botros@cs.ru.nl>",
-  "Wouter Geraedts <git@woutergeraedts.nl>"
+    "Leon Botros <l.botros@cs.ru.nl>",
+    "Wouter Geraedts <git@woutergeraedts.nl>"
 ]
 edition = "2021"
 license = "MIT"
@@ -9,21 +9,31 @@ name = "irmaseal-pkg"
 version = "0.2.0-beta.0"
 
 [dependencies]
+actix-cors = "0.6.1"
 actix-rt = "2.7.0"
 actix-web = "4.0.1"
-actix-cors = "0.6.1"
 actix-web-httpauth = "0.6.0"
 arrayref = "0.3.5"
-clap = { version = "3.0.10", features = ["derive"] }
-futures = { version = "0.3", features = ["executor"] }
+futures-util = "*"
 irma = "0.2.1"
 paste = "1.0.5"
 rand = "0.8.4"
+reqwest = "0.11.10"
 serde = "*"
 serde_json = "1.0.68"
 subtle = "2.1.1"
-reqwest = "0.11.10"
-jsonwebtoken = { version = "8.0.1", features = ["use_pem"] }
+
+[dependencies.clap]
+features = ["derive"]
+version = "3.0.10"
+
+[dependencies.futures]
+features = ["executor"]
+version = "0.3"
 
 [dependencies.irmaseal-core]
 path = "../irmaseal-core"
+
+[dependencies.jsonwebtoken]
+features = ["use_pem"]
+version = "8.0.1"

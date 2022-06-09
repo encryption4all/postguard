@@ -1198,9 +1198,9 @@ dependencies = [
 
 [[package]]
 name = "ibe"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bfc1f3af60522dbaa78b1dcb97eb712292083d30ab903cc8f18c811aebfb351"
+checksum = "ae176763b1af648ac6329cc673a7028b728919c313ad6d75eb9b932e1dd44fb2"
 dependencies = [
  "arrayref",
  "byteorder",
@@ -1365,6 +1365,7 @@ dependencies = [
  "arrayref",
  "clap 3.0.10",
  "futures",
+ "futures-util",
  "irma",
  "irmaseal-core",
  "jsonwebtoken",
