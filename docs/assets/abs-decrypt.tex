@@ -1,0 +1,25 @@
+\documentclass{article}
+\usepackage{xcolor}
+\usepackage{pagecolor}
+\usepackage[sc]{mathpazo}
+\usepackage{amsthm}
+\usepackage{algorithmic}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[paperheight=50mm,paperwidth=40mm,left=0mm,top=0mm]{geometry}
+\pagestyle{empty}
+\pagecolor{white}
+
+\newcommand{\ct}{\overline{t}}
+
+\begin{document}
+\begin{align*}
+& \text{Given~} R \longleftarrow S: A, h_A \\
+& id, c, iv, \ct = A \\
+& \text{Request~} usk \text{~for~} id \\
+& m = \text{decrypt}(c, usk) \\
+& m_1, m_2 = m \\
+& t = \text{AES}^{-1}(\ct, iv, m_1) \\
+& \text{Check~} h_A = \text{Mac}(A, m_2)
+\end{align*}
+\end{document}

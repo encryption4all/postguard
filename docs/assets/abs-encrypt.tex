@@ -1,0 +1,26 @@
+\documentclass{article}
+\usepackage{xcolor}
+\usepackage{pagecolor}
+\usepackage[sc]{mathpazo}
+\usepackage{amsthm}
+\usepackage{algorithmic}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[paperheight=55mm,paperwidth=70mm,left=0mm,top=0mm]{geometry}
+\pagestyle{empty}
+\pagecolor{white}
+
+\newcommand{\rng}{\chi}
+
+\begin{document}
+\begin{align*}
+& \text{Given~} id, t \text{~(plaintext stream)}, \rng \text{~(RNG)} \\
+\\
+& iv \longleftarrow \rng \\
+& m, c = \text{encrypt}(pk, id, \rng) \\
+& m_1, m_2 = m \\
+& A = id, c, iv, \text{AES}(t, iv, m_1) \\
+\\
+& S \longrightarrow R: A, \text{Mac}(A, m_2)
+\end{align*}
+\end{document}
