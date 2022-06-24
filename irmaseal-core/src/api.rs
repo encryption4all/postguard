@@ -29,10 +29,17 @@ pub struct KeyRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyResponse<K: IBKEM> {
-    /// The user secret key.
+    /// The status of the session.
+    pub status: SessionStatus,
+
+    /// The status of the IRMA proof.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_status: Option<ProofStatus>,
+
+    /// The user secret key (if present).
     #[serde(bound(
         serialize = "UserSecretKey<K>: Serialize",
         deserialize = "UserSecretKey<K>: Deserialize<'de>"
     ))]
-    pub key: UserSecretKey<K>,
+    pub key: Option<UserSecretKey<K>>,
 }
