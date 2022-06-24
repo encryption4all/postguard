@@ -101,17 +101,18 @@ pub async fn exec(dec_opts: DecOpts) {
     eprintln!("Requesting key for {:?}", &keyrequest);
 
     let client = Client::new(&pkg).unwrap();
-    let sd: irma::SessionData = client.request_start(&keyrequest).await.unwrap();
+    let mut sd: irma::SessionData = client.request_start(&keyrequest).await.unwrap();
 
-    // sd.session_ptr.u = format!("https://ihub.ru.nl/irma/1/{}", sd.session_ptr.u);
+    if pkg.contains("ihub.ru.nl") {
+        sd.session_ptr.u = format!("https://ihub.ru.nl/irma/1/{}", sd.session_ptr.u);
+    }
 
     eprintln!("Please scan the following QR-code with IRMA:");
     print_qr(&sd.session_ptr);
 
-    let key_resp: KeyResponse<CGWKV> =
-        wait_on_session::<CGWKV>(&client, &sd, rec_info.policy.timestamp)
-            .await
-            .unwrap();
+    let key_resp: KeyResponse<CGWKV> = wait_on_session(&client, &sd, rec_info.policy.timestamp)
+        .await
+        .unwrap();
 
     let usk = key_resp.key.unwrap();
 
