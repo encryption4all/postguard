@@ -75,16 +75,34 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let srv = self.service.clone();
         let auth = self.auth_data.clone();
-        let timestamp = req.match_info().query("timestamp").parse::<u64>().unwrap();
-
         async move {
+            let timestamp = req
+                .match_info()
+                .query("timestamp")
+                .parse::<u64>()
+                .map_err(|_e| crate::Error::Unexpected)?;
+
             let session_result = match &*auth {
-                Auth::Token { url, token } => IrmaClientBuilder::new(url)
-                    .map_err(|_e| crate::Error::Unexpected)?
-                    .build()
-                    .result(token)
-                    .await
-                    .map_err(|_e| crate::Error::Unexpected)?,
+                Auth::Token { url, token } => {
+                    let res = IrmaClientBuilder::new(url)
+                        .map_err(|_e| crate::Error::Unexpected)?
+                        .build()
+                        .result(token)
+                        .await
+                        .map_err(|_e| crate::Error::Unexpected)?;
+
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+
+                    // It is not allowed to ask for USKs with a timestamp in the future.
+                    if timestamp > now {
+                        Err(crate::Error::ChronologyError)?;
+                    }
+
+                    res
+                }
                 Auth::Jwt(decoding_key) => {
                     let auth = BearerAuth::from_service_request(&req).await?;
                     let jwt = auth.token();
@@ -144,11 +162,7 @@ where
                 ),
                 _ => None,
             }
-            .ok_or(crate::Error::SessionError((
-                session_result.sessiontype,
-                session_result.status,
-                session_result.proof_status,
-            )))?;
+            .ok_or(crate::Error::SessionError)?;
 
             let policy = Policy {
                 timestamp,
@@ -165,23 +179,21 @@ where
             // Invoke the (wrapped) key service.
             let res = srv.call(req).await?;
 
-            Ok(res)
+            // Retrieve the (if present) key from the response extensions.
+            let usk = res
+                .response()
+                .extensions()
+                .get::<UserSecretKey<K>>()
+                .cloned();
 
-            //// Retrieve the (if present) key from the response extensions.
-            //let usk = res
-            //    .response()
-            //    .extensions()
-            //    .get::<UserSecretKey<K>>()
-            //    .cloned();
+            let new_req = res.request().clone();
+            let new_res = HttpResponse::Ok().json(KeyResponse {
+                status: session_result.status,
+                proof_status: session_result.proof_status,
+                key: usk,
+            });
 
-            //let new_req = res.request().clone();
-            //let new_res = HttpResponse::Ok().json(KeyResponse {
-            //    status: session_result.status,
-            //    proof_status: session_result.proof_status,
-            //    key: usk,
-            //});
-
-            //Ok(ServiceResponse::new(new_req, new_res))
+            Ok(ServiceResponse::new(new_req, new_res))
         }
         .boxed_local()
     }
@@ -240,8 +252,6 @@ where
                         .expect("could not retrieve JWT public key bytes");
                     let decoding_key = DecodingKey::from_rsa_pem(&jwt_pk_bytes)
                         .expect("could not parse JWT public key");
-
-                    // TODO: throw InitError instead of unwrapping?
 
                     Auth::Jwt(decoding_key)
                 }

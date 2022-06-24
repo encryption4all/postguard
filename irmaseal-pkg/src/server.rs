@@ -79,3 +79,89 @@ pub async fn exec(server_opts: ServerOpts) {
     .await
     .unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middlewares::irma_noauth::NoAuth;
+    use actix_http::Request;
+    use actix_web::dev::{Service, ServiceResponse};
+    use actix_web::{test, web, App, Error};
+    use irma::{ProofStatus, SessionStatus};
+    use irmaseal_core::api::KeyResponse;
+    use irmaseal_core::api::Parameters;
+    use irmaseal_core::{Attribute, Policy};
+    use rand::thread_rng;
+
+    async fn default_setup() -> (
+        impl Service<Request, Response = ServiceResponse, Error = Error>,
+        <CGWKV as IBKEM>::Pk,
+        <CGWKV as IBKEM>::Sk,
+    ) {
+        let mut rng = thread_rng();
+        let (pk, sk) = CGWKV::setup(&mut rng);
+
+        // Create a simple setup with a pk endpoint and a key service without authentication.
+        let app = test::init_service(
+            App::new().service(
+                scope("/v2")
+                    .service(
+                        resource("/parameters")
+                            .app_data(Data::new(pk))
+                            .route(web::get().to(handlers::parameters::<CGWKV>)),
+                    )
+                    .service(
+                        resource("/key/{timestamp}")
+                            .app_data(Data::new(sk))
+                            .wrap(NoAuth::<CGWKV>::new())
+                            .route(web::get().to(handlers::request_key::<CGWKV>)),
+                    ),
+            ),
+        )
+        .await;
+
+        (app, pk, sk)
+    }
+
+    #[actix_web::test]
+    async fn test_get_parameters() {
+        let (app, pk, _) = default_setup().await;
+
+        let req = test::TestRequest::get().uri("/v2/parameters").to_request();
+        let kr: Parameters<CGWKV> = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(&kr.public_key.0, &pk);
+        assert_eq!(kr.format_version, 0x00);
+    }
+
+    #[actix_web::test]
+    async fn test_get_usk() {
+        let mut rng = thread_rng();
+        let (app, pk, _) = default_setup().await;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let pol = Policy {
+            timestamp: now,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/v2/key/{now}"))
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+
+        let (ct, ss1) = CGWKV::encaps(&pk, &pol.derive::<CGWKV>().unwrap(), &mut rng);
+        let ss2 = CGWKV::decaps(None, &key_response.key.unwrap().0, &ct).unwrap();
+
+        assert_eq!(ss1, ss2);
+    }
+}
