@@ -12,7 +12,7 @@ use actix_web::{
     App, HttpServer,
 };
 
-use crate::middlewares::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
 
 #[derive(Clone)]
 pub struct MasterKeyPair<K: IBKEM> {
@@ -83,7 +83,7 @@ pub async fn exec(server_opts: ServerOpts) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::middlewares::irma_noauth::NoAuth;
+    use crate::middleware::irma_noauth::NoAuth;
     use actix_http::Request;
     use actix_web::dev::{Service, ServiceResponse};
     use actix_web::{test, web, App, Error};
