@@ -189,8 +189,9 @@ where
             let usk = res
                 .response()
                 .extensions()
-                .get::<UserSecretKey<K>>()
-                .cloned();
+                .get::<K::Usk>()
+                .cloned()
+                .map(UserSecretKey);
 
             let new_req = res.request().clone();
             let new_res = HttpResponse::Ok().json(KeyResponse {
