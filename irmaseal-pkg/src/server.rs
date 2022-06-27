@@ -88,10 +88,16 @@ mod tests {
     use actix_web::dev::{Service, ServiceResponse};
     use actix_web::{test, web, App, Error};
     use irma::{ProofStatus, SessionStatus};
-    use irmaseal_core::api::KeyResponse;
-    use irmaseal_core::api::Parameters;
+    use irmaseal_core::api::{KeyResponse, Parameters};
     use irmaseal_core::{Attribute, Policy};
     use rand::thread_rng;
+
+    fn now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
 
     async fn default_setup() -> (
         impl Service<Request, Response = ServiceResponse, Error = Error>,
@@ -136,21 +142,17 @@ mod tests {
 
     #[actix_web::test]
     async fn test_get_usk() {
-        let mut rng = thread_rng();
-        let (app, pk, _) = default_setup().await;
+        let (app, _, _) = default_setup().await;
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let ts = now();
 
         let pol = Policy {
-            timestamp: now,
+            timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
         let req = test::TestRequest::get()
-            .uri(&format!("/v2/key/{now}"))
+            .uri(&format!("/v2/key/{ts}"))
             .set_json(pol.clone())
             .to_request();
 
@@ -158,10 +160,98 @@ mod tests {
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+    }
 
-        let (ct, ss1) = CGWKV::encaps(&pk, &pol.derive::<CGWKV>().unwrap(), &mut rng);
+    #[actix_web::test]
+    async fn test_round() {
+        let mut rng = thread_rng();
+        let (app, _, sk) = default_setup().await;
+
+        let ts = now();
+
+        let pol = Policy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let id = pol.derive::<CGWKV>().unwrap();
+
+        let req_pk = test::TestRequest::get().uri("/v2/parameters").to_request();
+        let ppk: Parameters<CGWKV> = test::call_and_read_body_json(&app, req_pk).await;
+
+        // Encapsulate a shared secret using the MPK from the PKG API.
+        let (ct, ss1) = CGWKV::encaps(&ppk.public_key.0, &id, &mut rng);
+
+        let req_usk = test::TestRequest::get()
+            .uri(&format!("/v2/key/{ts}"))
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+
+        // Make sure a USK retrieved from the PKG API can decapsulate.
         let ss2 = CGWKV::decaps(None, &key_response.key.unwrap().0, &ct).unwrap();
-
         assert_eq!(ss1, ss2);
+
+        // Make sure a key derived from the original MSK can decapsulate as well.
+        let usk2 = CGWKV::extract_usk(None, &sk, &id, &mut rng);
+        let ss3 = CGWKV::decaps(None, &usk2, &ct).unwrap();
+        assert_eq!(ss1, ss3);
+    }
+
+    #[actix_web::test]
+    async fn test_wrong_policy() {
+        let mut rng = thread_rng();
+        let (app, _, _) = default_setup().await;
+
+        let ts = now();
+
+        let pol = Policy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let id = pol.derive::<CGWKV>().unwrap();
+
+        let req_pk = test::TestRequest::get().uri("/v2/parameters").to_request();
+        let ppk: Parameters<CGWKV> = test::call_and_read_body_json(&app, req_pk).await;
+
+        // Encapsulate a shared secret for pol using the MPK from the PKG API.
+        let (ct, ss1) = CGWKV::encaps(&ppk.public_key.0, &id, &mut rng);
+
+        let req_usk = test::TestRequest::get()
+            .uri(&format!("/v2/key/{ts}"))
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+
+        // Make sure a USK retrieved from the PKG API for pol can decapsulate.
+        let ss2 = CGWKV::decaps(None, &key_response.key.unwrap().0, &ct).unwrap();
+        assert_eq!(ss1, ss2);
+
+        // Test that if a USK is retrieved for a different policy, decapsulation will fail.
+        let pol_wrong = Policy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("anothervalue"))],
+        };
+
+        let req_usk_wrong = test::TestRequest::get()
+            .uri(&format!("/v2/key/{ts}"))
+            .set_json(pol_wrong)
+            .to_request();
+
+        let key_response_wrong: KeyResponse<CGWKV> =
+            test::call_and_read_body_json(&app, req_usk_wrong).await;
+
+        // Make sure a USK retrieved for a different policy cannot decapsulate.
+        let ss4 = CGWKV::decaps(None, &key_response_wrong.key.unwrap().0, &ct).unwrap();
+        assert_ne!(ss1, ss4);
     }
 }
