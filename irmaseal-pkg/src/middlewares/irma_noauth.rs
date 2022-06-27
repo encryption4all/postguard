@@ -1,7 +1,7 @@
 /// Caution!
 /// This middleware is for testing purposes only. The middleware performs no authentication and
-/// simply extracts an identity from a IRMA policy contained in the request. The id is passed to
-/// the key service using the request extensions.
+/// simply extracts an identity from a IRMA policy contained in the request. The identity is passed
+/// to the key service using the request extensions.
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     web::Json,

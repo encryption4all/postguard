@@ -44,10 +44,7 @@ struct Claims {
 #[derive(Clone)]
 enum Auth {
     // Check the ongoing session at {irma_url}/session/{token} associated with this token.
-    Token {
-        url: String,
-        token: irma::SessionToken,
-    },
+    Token(String),
 
     // Retrieve JWT decoding key from irma_url and retrieve the session result by checking the JWT in the request.
     Jwt(DecodingKey),
@@ -75,6 +72,7 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let srv = self.service.clone();
         let auth = self.auth_data.clone();
+
         async move {
             let timestamp = req
                 .match_info()
@@ -83,22 +81,30 @@ where
                 .map_err(|_e| crate::Error::Unexpected)?;
 
             let session_result = match &*auth {
-                Auth::Token { url, token } => {
+                Auth::Token(url) => {
+                    let token_str = req.match_info().query("token");
+
+                    if token_str.is_empty() {
+                        return Err(crate::Error::Unexpected.into());
+                    }
+
+                    let token = SessionToken(token_str.to_string());
+
                     let res = IrmaClientBuilder::new(url)
                         .map_err(|_e| crate::Error::Unexpected)?
                         .build()
-                        .result(token)
+                        .result(&token)
                         .await
                         .map_err(|_e| crate::Error::Unexpected)?;
 
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .map_err(|_e| crate::Error::Unexpected)?
                         .as_secs();
 
                     // It is not allowed to ask for USKs with a timestamp in the future.
                     if timestamp > now {
-                        Err(crate::Error::ChronologyError)?;
+                        return Err(crate::Error::ChronologyError.into());
                     }
 
                     res
@@ -120,7 +126,7 @@ where
 
                     // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
                     if timestamp > decoded.claims.exp {
-                        Err(crate::Error::ChronologyError)?;
+                        return Err(crate::Error::ChronologyError.into());
                     }
 
                     SessionResult {
@@ -204,13 +210,18 @@ where
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum IrmaAuthType {
-    Token(irma::SessionToken),
+    /// Authenticate using IRMA session tokens.
+    Token,
+    /// Authenticate using IRMA signed session results (JWTs).
     Jwt,
 }
 
+/// IRMA Authentication option.
 #[derive(Debug, Clone)]
 pub struct IrmaAuth<K> {
+    /// The URL to the IRMA server.
     irma_url: String,
+    /// The authentication method.
     method: IrmaAuthType,
     scheme: PhantomData<K>,
 }
@@ -255,7 +266,7 @@ where
 
                     Auth::Jwt(decoding_key)
                 }
-                IrmaAuthType::Token(token) => Auth::Token { url, token },
+                IrmaAuthType::Token => Auth::Token(url),
             };
 
             Ok(IrmaAuthService {
