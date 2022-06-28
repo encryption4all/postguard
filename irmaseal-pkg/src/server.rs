@@ -4,9 +4,11 @@ use irmaseal_core::kem::IBKEM;
 use crate::handlers;
 use crate::opts::*;
 use crate::util::*;
+
 use actix_cors::Cors;
 use actix_web::{
     http::header,
+    middleware::Logger,
     web,
     web::{resource, scope, Data},
     App, HttpServer,
@@ -35,15 +37,21 @@ pub async fn exec(server_opts: ServerOpts) {
         sk: cgwkv_read_sk(secret).unwrap(),
     };
 
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
     HttpServer::new(move || {
         App::new()
+            .wrap(
+                Logger::new("request=%r, status=%s, client=%{CLIENT_ID}xi, response_time=%D ms")
+                    .custom_request_replace("CLIENT_ID", client_version),
+            )
             .wrap(
                 Cors::default()
                     .allow_any_origin()
                     .allowed_methods(vec!["GET", "POST"])
                     .allowed_header(header::CONTENT_TYPE)
                     .allowed_header(header::AUTHORIZATION)
-                    .allowed_header("X-Postguard-Client-Version")
+                    .allowed_header(PG_CLIENT_HEADER)
                     .max_age(86400),
             )
             .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
