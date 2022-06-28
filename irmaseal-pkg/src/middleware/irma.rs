@@ -167,40 +167,47 @@ where
                         .collect(),
                 ),
                 _ => None,
-            }
-            .ok_or(crate::Error::SessionError)?;
-
-            let policy = Policy {
-                timestamp,
-                con: validated,
             };
 
-            let id = policy
-                .derive::<K>()
-                .map_err(|_e| crate::Error::Unexpected)?;
+            let (key, new_req) = if let Some(val) = validated {
+                let policy = Policy {
+                    timestamp,
+                    con: val,
+                };
 
-            // Pass the derived id to the key service.
-            req.extensions_mut().insert(id);
+                let id = policy
+                    .derive::<K>()
+                    .map_err(|_e| crate::Error::Unexpected)?;
 
-            // Invoke the (wrapped) key service.
-            let res = srv.call(req).await?;
+                // Pass the derived id to the key service.
+                req.extensions_mut().insert(id);
 
-            // Retrieve the (if present) key from the response extensions.
-            let usk = res
-                .response()
-                .extensions()
-                .get::<K::Usk>()
-                .cloned()
-                .map(UserSecretKey);
+                // Invoke the (wrapped) key service.
+                let res = srv.call(req).await?;
 
-            let new_req = res.request().clone();
-            let new_res = HttpResponse::Ok().json(KeyResponse {
-                status: session_result.status,
-                proof_status: session_result.proof_status,
-                key: usk,
-            });
+                // Retrieve the (if present) key from the response extensions.
+                let usk = res
+                    .response()
+                    .extensions()
+                    .get::<K::Usk>()
+                    .cloned()
+                    .map(UserSecretKey::<K>);
 
-            Ok(ServiceResponse::new(new_req, new_res))
+                let new_req = res.request().clone();
+
+                (usk, new_req)
+            } else {
+                (None, req.into_parts().0)
+            };
+
+            Ok(ServiceResponse::new(
+                new_req,
+                HttpResponse::Ok().json(KeyResponse {
+                    status: session_result.status,
+                    proof_status: session_result.proof_status,
+                    key,
+                }),
+            ))
         }
         .boxed_local()
     }

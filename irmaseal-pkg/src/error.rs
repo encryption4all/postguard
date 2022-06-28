@@ -5,7 +5,6 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug)]
 pub enum Error {
     Core(irmaseal_core::Error),
-    SessionError,
     ChronologyError,
     SessionNotFound,
     UpstreamError,
@@ -29,7 +28,6 @@ impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Error::Core(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::SessionError => StatusCode::FORBIDDEN,
             Error::ChronologyError | Error::VersionError => StatusCode::BAD_REQUEST,
             Error::SessionNotFound => StatusCode::NOT_FOUND,
             Error::UpstreamError => StatusCode::SERVICE_UNAVAILABLE,
@@ -47,7 +45,6 @@ impl Display for Error {
             "{}",
             match self {
                 Error::Core(_) => "core",
-                Error::SessionError => "session error",
                 Error::ChronologyError => "chronology error",
                 Error::SessionNotFound => "session not found",
                 Error::UpstreamError => "upstream error",
