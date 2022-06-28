@@ -1199,7 +1199,8 @@ dependencies = [
 [[package]]
 name = "ibe"
 version = "0.2.2"
-source = "git+https://github.com/encryption4all/ibe.git?branch=main#fa0324c011945c82737ac8076d78a8cd64354ec9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a2dc34fd5af0875a49739b1164a11ff2f2b3e6bbc0fca3baf3ecd43faa70acc"
 dependencies = [
  "arrayref",
  "byteorder",
