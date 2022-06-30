@@ -215,6 +215,7 @@ where
 
 // Factory for the IRMA middleware.
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum IrmaAuthType {
     /// Authenticate using IRMA session tokens.
@@ -223,7 +224,7 @@ pub enum IrmaAuthType {
     Jwt,
 }
 
-/// IRMA Authentication option.
+/// IRMA Authentication options.
 #[derive(Debug, Clone)]
 pub struct IrmaAuth<K> {
     /// The URL to the IRMA server.
