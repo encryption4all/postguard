@@ -55,20 +55,23 @@ pub async fn exec(server_opts: ServerOpts) {
                             .route(web::get().to(handlers::parameters::<CGWKV>)),
                     )
                     .service(
-                        resource("/irma/request/start")
-                            .app_data(Data::new(irma.clone()))
-                            .route(web::post().to(handlers::request)),
-                    )
-                    .service(
-                        resource("/irma/request/jwt/{token}")
-                            .app_data(Data::new(irma.clone()))
-                            .route(web::get().to(handlers::request_jwt)),
-                    )
-                    .service(
-                        resource("/irma/request/key/{timestamp}")
-                            .app_data(Data::new(kp.sk))
-                            .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
-                            .route(web::get().to(handlers::request_key::<CGWKV>)),
+                        scope("/irma")
+                            .service(
+                                resource("/start")
+                                    .app_data(Data::new(irma.clone()))
+                                    .route(web::post().to(handlers::request)),
+                            )
+                            .service(
+                                resource("/jwt/{token}")
+                                    .app_data(Data::new(irma.clone()))
+                                    .route(web::get().to(handlers::request_jwt)),
+                            )
+                            .service(
+                                resource("/key/{timestamp}")
+                                    .app_data(Data::new(kp.sk))
+                                    .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .route(web::get().to(handlers::request_key::<CGWKV>)),
+                            ),
                     ),
             )
     })

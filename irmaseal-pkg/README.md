@@ -27,14 +27,14 @@ Example response:
 }
 ```
 
-### `POST /v2/request/start`
-Starts a session to retrieve a USK. The request must include a JSON body
-containing a `KeyRequest`.  As an example, we want to request a key for someone
-named Alice.  Note that since this credential is from the demo scheme, anyone
-can retrieve such a credential.  We also request for the authentication to be
-valid for 1 day, or 86400 seconds, which is also the maximum. By default the 
-authentication is valid for 5 minutes. If the requested validity exceeds the maximum
-a `401` (`BAD REQUEST`) is returned.
+### `POST /v2/irma/request/start`
+Starts a session to retrieve a USK via IRMA. The request must include a JSON
+body containing a `KeyRequest`.  As an example, we want to request a key for
+someone named Alice.  Note that since this credential is from the demo scheme,
+anyone can retrieve such a credential.  We also request for the authentication
+to be valid for 1 day, or 86400 seconds, which is also the maximum. By default
+the authentication is valid for 5 minutes. If the requested validity exceeds
+the maximum a `401` (`BAD REQUEST`) is returned.
 
 ```JSON
 {
@@ -55,18 +55,18 @@ The response looks like a typical IRMA disclosure session package:
 ```
 
 
-### `GET  /v2/request/jwt/{token}`
+### `GET  /v2/irma/jwt/{token}`
 Retrieves a JSON Web Token (JWT) for an ongoing or finished session. Returns a
 JWT using the `text/plain` content type.  The JWT is an IRMA session result
 signed by the IRMA server.  This token can subsequently be used as HTTP
 Authorization Header to retrieve USKs, see below.
 
-### `GET  /v2/request/key/{timestamp}`
+### `GET  /v2/irma/key/{timestamp}`
 Retrieves a User Secret Key (USK) for a timestamp. The request must include a
 HTTP Authorization header `Authorization: Bearer <JWT>`. If the server is
-unable to decode and verify the JWT, a `403` (`UNAUTHORIZED`) is returned. If a
-user requests a key for an invalid timestamp, e.g., one that lies beyond the
-expiry date, a `401` is returned.
+unable to find and decode and verify the JWT, a `401` (`UNAUTHORIZED`) is
+returned. If a user requests a key for an invalid timestamp, e.g., one that
+lies beyond the expiry date, a `401` is returned.
 
 If the JWT is a valid JWT signed by the IRMA server, the result will look as
 follows:
