@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 /// Set of public parameters for the Private Key Generator (PKG).
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(bound(
+    serialize = "PublicKey<K>: Serialize",
+    deserialize = "PublicKey<K>: Deserialize<'de>"
+))]
 pub struct Parameters<K: IBKEM> {
     pub format_version: u8,
-    #[serde(bound(
-        serialize = "PublicKey<K>: Serialize",
-        deserialize = "PublicKey<K>: Deserialize<'de>"
-    ))]
     pub public_key: PublicKey<K>,
 }
 
@@ -28,6 +28,10 @@ pub struct KeyRequest {
 /// The response to the key request.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(bound(
+    serialize = "UserSecretKey<K>: Serialize",
+    deserialize = "UserSecretKey<K>: Deserialize<'de>"
+))]
 pub struct KeyResponse<K: IBKEM> {
     /// The current IRMA session status.
     pub status: SessionStatus,
@@ -38,9 +42,5 @@ pub struct KeyResponse<K: IBKEM> {
 
     /// The key will remain `None` until the status is `Done` and the proof is `Valid`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(bound(
-        serialize = "UserSecretKey<K>: Serialize",
-        deserialize = "UserSecretKey<K>: Deserialize<'de>"
-    ))]
     pub key: Option<UserSecretKey<K>>,
 }

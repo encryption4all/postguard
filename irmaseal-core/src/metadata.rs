@@ -1,14 +1,12 @@
-use crate::artifacts::UserSecretKey;
+use crate::artifacts::{MultiRecipientCiphertext, UserSecretKey};
 use crate::util::generate_iv;
 use crate::*;
 use crate::{Error, HiddenPolicy, IV_SIZE};
 use ibe::kem::cgw_kv::CGWKV;
-use ibe::kem::mkem::{MultiRecipient, MultiRecipientCiphertext};
+use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
-use ibe::Compress;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::Read;
@@ -36,8 +34,7 @@ pub struct RecipientInfo {
     pub policy: HiddenPolicy,
 
     /// Ciphertext for this specific recipient.
-    #[serde(with = "BigArray")]
-    pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
+    pub ct: MultiRecipientCiphertext<CGWKV>,
 }
 
 impl RecipientInfo {
@@ -45,10 +42,7 @@ impl RecipientInfo {
     ///
     /// These bytes can either directly be used for an AEAD, or a key derivation function.
     pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
-        let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(&self.ct))
-            .ok_or(Error::FormatViolation)?;
-
-        CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)
+        CGWKV::multi_decaps(None, &usk.0, &self.ct.0).map_err(Error::Kem)
     }
 }
 
@@ -76,7 +70,7 @@ impl Metadata {
                     rid.clone(),
                     RecipientInfo {
                         policy: policy.to_hidden(),
-                        ct: ct.to_bytes(),
+                        ct: MultiRecipientCiphertext(ct),
                     },
                 )
             })
@@ -112,7 +106,7 @@ impl Metadata {
 
     /// Deserialize the metadata from binary MessagePack format.
     pub fn msgpack_from<R: Read>(r: R) -> Result<Self, Error> {
-        rmp_serde::decode::from_read(r).map_err(|_| Error::FormatViolation)
+        rmp_serde::decode::from_read(r).map_err(|_e| Error::FormatViolation)
     }
 
     /// Serializes the metadata to a json string.
@@ -144,7 +138,6 @@ mod tests {
 
         let s = meta.to_json_string().unwrap();
 
-        // Decode string, while looking for the first identifier.
         let decoded = Metadata::from_json_string(&s).unwrap();
 
         assert_eq!(decoded.policies.len(), 2);

@@ -19,11 +19,12 @@ rand = { version = "0.8.4" }
 subtle = "2.3"
 serde = { version = "1.0.126", features = ["derive"] }
 serde-big-array = { version = "0.3.2", features = ["const-generics"] }
-rmp-serde = "0.15.5"
+rmp-serde = "1.1.0"
 serde_json = "1.0.68"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
 futures = { version = "0.3.21", optional = true }
+serde_bytes = "0.11.6"
 
 # For normal stream feature
 aead = { version = "0.4.3", features = ["stream", "alloc"], optional = true }
