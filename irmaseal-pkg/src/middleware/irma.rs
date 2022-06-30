@@ -43,10 +43,10 @@ struct Claims {
 
 #[derive(Clone)]
 enum Auth {
-    // Check the ongoing session at {irma_url}/session/{token} associated with this token.
+    // Check the ongoing session using a token from the request.
     Token(String),
 
-    // Retrieve JWT decoding key from irma_url and retrieve the session result by checking the JWT in the request.
+    // Check the session by decoding a JWT from the request.
     Jwt(DecodingKey),
 }
 
@@ -215,7 +215,6 @@ where
 
 // Factory for the IRMA middleware.
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum IrmaAuthType {
     /// Authenticate using IRMA session tokens.
