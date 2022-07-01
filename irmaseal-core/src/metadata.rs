@@ -189,13 +189,14 @@ mod tests {
         let mut binary = Vec::new();
         meta.msgpack_into(&mut binary).unwrap();
 
-        let v1 = serde_json::to_vec(&meta).unwrap();
-        let mut v2 = Vec::new();
+        let v1 = serde_json::to_string(&meta).unwrap();
+        let mut v2_bytes = Vec::new();
 
         let mut des = rmp_serde::decode::Deserializer::new(&binary[..]);
-        let mut ser = serde_json::Serializer::new(Cursor::new(&mut v2));
-
+        let mut ser = serde_json::Serializer::new(Cursor::new(&mut v2_bytes));
         serde_transcode::transcode(&mut des, &mut ser).unwrap();
+
+        let v2 = String::from_utf8(v2_bytes).unwrap();
 
         assert_eq!(&v1, &v2);
     }
