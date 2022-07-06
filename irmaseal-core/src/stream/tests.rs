@@ -5,7 +5,7 @@ use futures::{executor::block_on, io::AllowStdIo};
 use rand::RngCore;
 use std::io::Cursor;
 
-const LENGTHS: &[usize] = &[
+const LENGTHS: &[u32] = &[
     1,
     512,
     SYMMETRIC_CRYPTO_DEFAULT_CHUNK - 3,
@@ -74,7 +74,7 @@ fn test_reflection_seal_unsealer() {
     let setup = TestSetup::default();
 
     for l in LENGTHS {
-        seal_and_unseal(&setup, rand_vec(*l));
+        seal_and_unseal(&setup, rand_vec(*l as usize));
     }
 }
 

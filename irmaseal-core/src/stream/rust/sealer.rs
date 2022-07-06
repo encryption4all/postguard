@@ -61,16 +61,16 @@ where
 
     w.write_all(&header_vec[..]).await?;
 
-    let mut buf = vec![0; segment_size];
-    let mut buf_tail = 0;
+    let mut buf = vec![0; segment_size as usize];
+    let mut buf_tail: usize = 0;
 
     buf.reserve(TAG_SIZE);
 
     loop {
-        let read = r.read(&mut buf[buf_tail..segment_size]).await?;
+        let read = r.read(&mut buf[buf_tail..segment_size as usize]).await?;
         buf_tail += read;
 
-        if buf_tail == segment_size {
+        if buf_tail == segment_size as usize {
             buf.truncate(buf_tail);
             enc.encrypt_next_in_place(b"", &mut buf).unwrap();
             w.write_all(&buf[..]).await?;

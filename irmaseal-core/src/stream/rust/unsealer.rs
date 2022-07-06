@@ -14,8 +14,8 @@ use aes_gcm::{Aes128Gcm, NewAead};
 pub struct Unsealer<R> {
     pub version: u16,
     pub header: Header,
-    pub size_hint: (usize, Option<usize>),
-    segment_size: usize,
+    pub size_hint: (u64, Option<u64>),
+    segment_size: u32,
     r: R,
 }
 
@@ -117,7 +117,7 @@ where
 
         let mut dec = DecryptorBE32::from_aead(aead, nonce.into());
 
-        let bufsize: usize = self.segment_size + TAG_SIZE;
+        let bufsize: usize = self.segment_size as usize + TAG_SIZE;
         let mut buf = vec![0u8; bufsize];
         let mut buf_tail = 0;
 

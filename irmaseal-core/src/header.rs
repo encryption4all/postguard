@@ -19,16 +19,16 @@ pub enum Mode {
     /// The payload is a stream, processed in segments.
     Streaming {
         /// The size in which segments are processed and authenticated.
-        segment_size: usize,
+        segment_size: u32,
 
         /// Possible size hint about the payload in the form (min, max), defaults to (0, None).
         ///
         /// Can be used to allocate memory beforehand, saving re-allocations.
-        size_hint: (usize, Option<usize>),
+        size_hint: (u64, Option<u64>),
     },
 
     /// The payload is processed fully in memory, its size is known beforehand.
-    InMemory { size: usize },
+    InMemory { size: u32 },
 }
 
 impl Default for Mode {

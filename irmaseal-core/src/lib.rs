@@ -71,7 +71,7 @@ pub mod constants {
     pub const MAX_METADATA_SIZE: usize = 1024 * 1024 * 4;
 
     /// The maximum size of symmetric segments (4 MiB).
-    pub const MAX_SYMMETRIC_CHUNK_SIZE: usize = 1024 * 1024 * 4;
+    pub const MAX_SYMMETRIC_CHUNK_SIZE: u32 = 1024 * 1024 * 4;
 
     /// The preamble contains the following bytes:
     /// * Prelude: 4 bytes,
@@ -83,7 +83,7 @@ pub mod constants {
     /// Default size of symmetric encryption segments.
     ///
     /// A reasonable default is 1 MiB.
-    pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: usize = 1024 * 1024;
+    pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: u32 = 1024 * 1024;
 
     // Symmetric crypto constants.
     // This library uses AES128 because BLS12-381 is only secure up to around 120 bits.

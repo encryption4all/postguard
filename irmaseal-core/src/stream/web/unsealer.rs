@@ -15,8 +15,8 @@ use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
 pub struct Unsealer<R> {
     pub version: u16,
     pub header: Header,
-    pub size_hint: (usize, Option<usize>),
-    segment_size: usize,
+    pub size_hint: (u64, Option<u64>),
+    segment_size: u32,
     payload: Vec<u8>,
     r: R,
 }
@@ -147,7 +147,7 @@ where
         let nonce = &iv[..STREAM_NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
-        let segment_size: u32 = (self.segment_size + TAG_SIZE).try_into().unwrap();
+        let segment_size: u32 = (self.segment_size as usize + TAG_SIZE).try_into().unwrap();
 
         let buf = Uint8Array::new_with_length(segment_size);
         let mut buf_tail = 0;
