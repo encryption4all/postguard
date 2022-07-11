@@ -1,3 +1,4 @@
+use actix_web::HttpRequest;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 
@@ -6,7 +7,9 @@ use crate::opts::*;
 use crate::util::*;
 
 use actix_cors::Cors;
+use actix_http::header::HeaderValue;
 use actix_web::{
+    dev::Service,
     http::header,
     middleware::Logger,
     web,
@@ -15,6 +18,27 @@ use actix_web::{
 };
 
 use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+
+use lazy_static::lazy_static;
+use prometheus::{register_int_counter_vec, Encoder, IntCounterVec, TextEncoder};
+
+lazy_static! {
+    static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
+        "postguard_clients",
+        "Contains information about PostGuard clients connecting with the PKG.",
+        &["host", "host_version", "client", "client_version"]
+    )
+    .unwrap();
+}
+
+async fn metrics(_req: HttpRequest) -> String {
+    let metric_families = prometheus::gather();
+    let mut buffer = Vec::new();
+    let encoder = TextEncoder::new();
+    encoder.encode(&metric_families, &mut buffer).unwrap();
+
+    String::from_utf8(buffer).unwrap()
+}
 
 #[derive(Clone)]
 pub struct MasterKeyPair<K: IBKEM> {
@@ -54,9 +78,20 @@ pub async fn exec(server_opts: ServerOpts) {
                     .allowed_header(PG_CLIENT_HEADER)
                     .max_age(86400),
             )
-            .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
+            .service(resource("/metrics").route(web::get().to(metrics)))
             .service(
                 scope("/v2")
+                    .wrap_fn(|req, srv| {
+                        if let Some(Ok(header)) =
+                            req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str)
+                        {
+                            if let [a, b, c, d] = header.split(',').collect::<Vec<&str>>()[..] {
+                                POSTGUARD_CLIENTS.with_label_values(&[a, b, c, d]).inc();
+                            }
+                        }
+                        srv.call(req)
+                    })
+                    .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
                     .service(
                         resource("/parameters")
                             .app_data(Data::new(kp.pk))
