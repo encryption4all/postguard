@@ -47,14 +47,13 @@ pub struct MultiRecipientCiphertext<K: IBKEM>(pub MkemCt<K>);
 // For now, the solutions are these deserialize impl macros, creating encoding/decoding buffer for
 // each scheme specifically.
 
-// TODO: not use dynamic allocation, all types have constant size.
-pub fn serialize_bin_or_b64<S, T>(val: &T, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_bin_or_b64<S, T, const N: usize>(val: &T, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
     T: AsRef<[u8]>,
 {
     if serializer.is_human_readable() {
-        let mut enc_buf = vec![0u8; b64len(val.as_ref().len())];
+        let mut enc_buf = [0u8; N];
         let encoded = Base64::encode(val.as_ref(), &mut enc_buf)
             .map_err(|e| serde::ser::Error::custom(format!("base64ct serialization error: {e}")))?;
         serializer.serialize_str(encoded)
@@ -67,7 +66,7 @@ where
     }
 }
 
-pub fn deserialize_bin_or_b64<'de, D: Deserializer<'de>>(
+fn deserialize_bin_or_b64<'de, D: Deserializer<'de>>(
     buf: &mut [u8],
     deserializer: D,
 ) -> Result<(), D::Error> {
@@ -89,8 +88,9 @@ pub fn deserialize_bin_or_b64<'de, D: Deserializer<'de>>(
                     return Err(Error::invalid_length(v.len(), &self));
                 }
 
-                Base64::decode(v, self.0)
-                    .map_err(|_e| serde::de::Error::custom("base64ct decoding error"))?;
+                Base64::decode(v, self.0).map_err(|e| {
+                    serde::de::Error::custom(format!("base64ct decoding error: {e}"))
+                })?;
 
                 Ok(())
             }
@@ -131,10 +131,11 @@ macro_rules! impl_serialize {
     ($type: ty, $inner: ty) => {
         impl Serialize for $type {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serialize_bin_or_b64::<S, <$inner as Compress>::Output>(
-                    &self.0.to_bytes(),
-                    serializer,
-                )
+                serialize_bin_or_b64::<
+                    S,
+                    <$inner as Compress>::Output,
+                    { b64len(<$inner as Compress>::OUTPUT_SIZE) },
+                >(&self.0.to_bytes(), serializer)
             }
         }
 
