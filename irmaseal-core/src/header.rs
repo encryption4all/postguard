@@ -2,12 +2,11 @@ use crate::artifacts::UserSecretKey;
 use crate::*;
 use crate::{Error, HiddenPolicy};
 use ibe::kem::cgw_kv::CGWKV;
-use ibe::kem::mr::{MultiRecipient, MultiRecipientCiphertext};
+use ibe::kem::mkem::{MultiRecipient, MultiRecipientCiphertext};
 use ibe::kem::{SharedSecret, IBKEM};
 use ibe::Compress;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::Read;
@@ -18,7 +17,7 @@ use std::io::Write;
 pub enum Mode {
     /// The payload is a stream, processed in segments.
     Streaming {
-        /// The size in which segments are processed and authenticated.
+        /// The size of segments.
         segment_size: u32,
 
         /// Possible size hint about the payload in the form (min, max), defaults to (0, None).
@@ -40,24 +39,33 @@ impl Default for Mode {
     }
 }
 
-/// Possible symmetric-key encryption algorithms.
+/// An initialization vector.
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+pub struct Iv<const N: usize>(pub(crate) [u8; N]);
+
+impl<const N: usize> Iv<N> {
+    fn random<R: Rng + CryptoRng>(r: &mut R) -> Self {
+        Self(r.gen())
+    }
+}
+
+impl<const N: usize> Serialize for Iv<N> {}
+
+/// Supported symmetric-key encryption algorithms.
 // We only target 128-bit security because it more closely matches the security target BLS12-381.
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub enum Algorithm {
     // Good performance with hardware acceleration.
-    Aes128Gcm { iv: [u8; 16] },
+    Aes128Gcm { iv: Iv<16> },
     // The algorithms listed below are unsupported, but reserved for future use.
     // Good performance in software.
-    XSalsa20Poly1305 { iv: [u8; 24] },
+    XSalsa20Poly1305 { iv: Iv<24> },
     // CAESAR finalist.
-    Aes128Ocb { iv: [u8; 12] },
+    Aes128Ocb { iv: Iv<12> },
 }
 
 impl Algorithm {
     fn new_aes128_gcm<R: Rng + CryptoRng>(r: &mut R) -> Self {
-        let mut iv = [0u8; 16];
-        r.fill_bytes(&mut iv);
-
         Self::Aes128Gcm { iv }
     }
 }
@@ -84,9 +92,8 @@ pub struct RecipientHeader {
     #[serde(rename = "p")]
     pub policy: HiddenPolicy,
 
-    /// The serialized ciphertext for this specific recipient.
-    #[serde(with = "BigArray")]
-    pub ct: [u8; MultiRecipientCiphertext::<CGWKV>::OUTPUT_SIZE],
+    /// Ciphertext for this specific recipient.
+    pub ct: MultiRecipientCiphertext<CGWKV>,
 }
 
 impl RecipientHeader {
@@ -94,10 +101,7 @@ impl RecipientHeader {
     ///
     /// These bytes can either directly be used for an AEAD, or a key derivation function.
     pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
-        let c = crate::util::open_ct(MultiRecipientCiphertext::<CGWKV>::from_bytes(&self.ct))
-            .ok_or(Error::FormatViolation)?;
-
-        CGWKV::multi_decaps(None, &usk.0, &c).map_err(Error::Kem)
+        CGWKV::multi_decaps(None, &usk.0, &self.ct.0).map_err(Error::Kem)
     }
 }
 
@@ -120,7 +124,7 @@ impl Header {
         // Generate all RecipientHeader's.
         let recipient_info: BTreeMap<String, RecipientHeader> = policies
             .iter()
-            .zip(cts.iter())
+            .zip(cts)
             .map(|((rid, policy), ct)| {
                 (
                     rid.clone(),

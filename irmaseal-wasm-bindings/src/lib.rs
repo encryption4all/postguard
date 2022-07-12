@@ -12,7 +12,10 @@ use wasm_streams::readable::IntoStream;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
-extern crate console_error_panic_hook;
+extern crate wee_alloc;
+
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen(js_name = Unsealer)]
 pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
@@ -37,8 +40,6 @@ pub async fn js_seal(
     readable: RawReadableStream,
     writable: RawWritableStream,
 ) -> Result<(), JsValue> {
-    console_error_panic_hook::set_once();
-
     let mut rng = rand::thread_rng();
     let pk: PublicKey<CGWKV> = mpk.into_serde().unwrap();
     let pols: BTreeMap<String, Policy> = policies.into_serde().unwrap();
@@ -86,8 +87,6 @@ impl JsUnsealer {
         usk: JsValue,
         writable: RawWritableStream,
     ) -> Result<(), JsValue> {
-        console_error_panic_hook::set_once();
-
         let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
         let mut write = WritableStream::from_raw(writable).into_sink();
 
