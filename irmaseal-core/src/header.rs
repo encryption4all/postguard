@@ -1,19 +1,21 @@
 use crate::artifacts::UserSecretKey;
 use crate::*;
 use crate::{Error, HiddenPolicy};
+
+use artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64, MultiRecipientCiphertext};
+
 use ibe::kem::cgw_kv::CGWKV;
-use ibe::kem::mkem::{MultiRecipient, MultiRecipientCiphertext};
+use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
-use ibe::Compress;
+
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Write};
 
 /// Possible encryption modes.
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Mode {
     /// The payload is a stream, processed in segments.
     Streaming {
@@ -39,38 +41,60 @@ impl Default for Mode {
     }
 }
 
-/// An initialization vector.
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+/// An initialization vector (IV).
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct Iv<const N: usize>(pub(crate) [u8; N]);
 
 impl<const N: usize> Iv<N> {
     fn random<R: Rng + CryptoRng>(r: &mut R) -> Self {
-        Self(r.gen())
+        let mut buf = [0u8; N];
+        r.fill_bytes(&mut buf);
+        Self(buf)
     }
 }
 
-impl<const N: usize> Serialize for Iv<N> {}
+// The IV is not secret but we do want to have the possibility to encode it as human-readable.
+impl<const N: usize> Serialize for Iv<N> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serialize_bin_or_b64(&self.0, serializer)
+    }
+}
+
+impl<'de, const N: usize> Deserialize<'de> for Iv<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut buf = [0u8; N];
+        deserialize_bin_or_b64(&mut buf, deserializer)?;
+
+        Ok(Self(buf))
+    }
+}
 
 /// Supported symmetric-key encryption algorithms.
 // We only target 128-bit security because it more closely matches the security target BLS12-381.
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Algorithm {
     // Good performance with hardware acceleration.
-    Aes128Gcm { iv: Iv<16> },
+    Aes128Gcm(Iv<16>),
     // The algorithms listed below are unsupported, but reserved for future use.
     // Good performance in software.
-    XSalsa20Poly1305 { iv: Iv<24> },
+    XSalsa20Poly1305(Iv<24>),
     // CAESAR finalist.
-    Aes128Ocb { iv: Iv<12> },
+    Aes128Ocb(Iv<12>),
 }
 
 impl Algorithm {
     fn new_aes128_gcm<R: Rng + CryptoRng>(r: &mut R) -> Self {
-        Self::Aes128Gcm { iv }
+        Self::Aes128Gcm(Iv::random(r))
     }
 }
 
-/// Header type, contains headerdata for _ALL_ recipients.
+/// Header type, contains header for _ALL_ recipients.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Header {
     /// Map of recipient identifiers to [`RecipientHeader`]s.
@@ -130,7 +154,7 @@ impl Header {
                     rid.clone(),
                     RecipientHeader {
                         policy: policy.to_hidden(),
-                        ct: ct.to_bytes(),
+                        ct: MultiRecipientCiphertext(ct),
                     },
                 )
             })
@@ -169,30 +193,27 @@ impl Header {
     /// * `mode`: [mode][`Mode`],
     /// * `iv`: 32-byte initialization vector.
     pub fn msgpack_into<W: Write>(self, w: &mut W) -> Result<(), Error> {
-        let mut serializer = rmp_serde::encode::Serializer::new(w)
-            .with_struct_map()
-            .with_string_variants();
+        let mut serializer = rmp_serde::encode::Serializer::new(w);
 
-        self.serialize(&mut serializer)
-            .map_err(|_e| Error::ConstraintViolation)
+        self.serialize(&mut serializer).map_err(Error::MsgPckSer)
     }
 
-    /// Deserialize the headerdata from binary MessagePack format.
+    /// Deserialize the header from binary MessagePack format.
     pub fn msgpack_from<R: Read>(r: R) -> Result<Self, Error> {
-        rmp_serde::decode::from_read(r).map_err(|_| Error::FormatViolation)
+        rmp_serde::decode::from_read(r).map_err(Error::MsgPckDes)
     }
 
-    /// Serializes the headerdata to a JSON string.
+    /// Serializes the header to a JSON string.
     ///
-    /// Should only be used for small headerdata or development purposes,
+    /// Should only be used for small header or development purposes,
     /// or when compactness is not required.
     pub fn to_json_string(self) -> Result<String, Error> {
-        serde_json::to_string(&self).or(Err(Error::FormatViolation))
+        serde_json::to_string(&self).map_err(Error::Json)
     }
 
-    /// Deserialize the headerdata from a JSON string.
+    /// Deserialize the header from a JSON string.
     pub fn from_json_string(s: &str) -> Result<Self, Error> {
-        serde_json::from_str(s).map_err(|_| Error::FormatViolation)
+        serde_json::from_str(s).map_err(Error::Json)
     }
 }
 
@@ -249,6 +270,8 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    // NOTE: This test panics (for now), but it is a nice to have to support one day.
     fn test_transcode() {
         // This test encodes to binary and then transcodes into serde_json.
         // The transcoded data is compared with a direct serialization of the same header.

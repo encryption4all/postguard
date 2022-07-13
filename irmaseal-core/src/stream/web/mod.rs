@@ -25,18 +25,6 @@ fn aead_nonce(nonce: &[u8], counter: u32, last_block: bool) -> [u8; STREAM_IV_SI
 
 impl From<Error> for JsValue {
     fn from(err: Error) -> Self {
-        match err {
-            Error::NotIRMASEAL => JsError::new("Not IRMASEAL"),
-            Error::IncorrectVersion => JsError::new("Incorrect version"),
-            Error::ConstraintViolation => JsError::new("Constraint violation"),
-            Error::FormatViolation => JsError::new("Format violation"),
-            Error::KeyError => JsError::new("Wrong symmetric key size"),
-            Error::IncorrectTag => JsError::new("Incorrect tag"),
-            Error::NotSupported => JsError::new("Algorithm or mode not supported"),
-            Error::StdIO(x) => JsError::new(&format!("IO error: {x}")),
-            Error::FuturesIO(x) => JsError::new(&format!("IO error: {x}")),
-            Error::Kem(_) => JsError::new("KEM failure"),
-        }
-        .into()
+        JsError::new(&format!("irmaseal-core error: {err}")).into()
     }
 }

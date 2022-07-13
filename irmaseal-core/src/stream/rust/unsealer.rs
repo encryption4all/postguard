@@ -43,7 +43,10 @@ where
         );
 
         if version != VERSION_V2 {
-            return Err(Error::IncorrectVersion);
+            return Err(Error::IncorrectVersion {
+                expected: VERSION_V2,
+                found: version,
+            });
         }
 
         let header_len = u32::from_be_bytes(
@@ -67,17 +70,24 @@ where
 
         let header = Header::msgpack_from(&*header_buf)?;
 
-        let (_, segment_size, size_hint) = match header {
+        let (segment_size, size_hint) = match header {
             Header {
-                policies: _,
                 mode:
                     Mode::Streaming {
                         segment_size,
                         size_hint,
                     },
-                algo: Algorithm::Aes128Gcm { iv },
-            } => (iv, segment_size, size_hint),
-            _ => return Err(Error::NotSupported),
+                ..
+            } => (segment_size, size_hint),
+            _ => return Err(Error::ModeNotSupported(header.mode)),
+        };
+
+        match header {
+            Header {
+                algo: Algorithm::Aes128Gcm(_),
+                ..
+            } => (),
+            _ => return Err(Error::AlgorithmNotSupported(header.algo)),
         };
 
         if segment_size > MAX_SYMMETRIC_CHUNK_SIZE {
@@ -103,17 +113,22 @@ where
     where
         W: AsyncWrite + Unpin,
     {
-        let rec_info = self.header.policies.get(ident).unwrap();
+        let rec_info = self
+            .header
+            .policies
+            .get(ident)
+            .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
+
         let ss = rec_info.derive_keys(usk)?;
         let key = &ss.0[..KEY_SIZE];
 
         let iv = match self.header.algo {
-            Algorithm::Aes128Gcm { iv } => iv,
-            _ => return Err(Error::NotSupported),
+            Algorithm::Aes128Gcm(iv) => iv,
+            _ => return Err(Error::AlgorithmNotSupported(self.header.algo)),
         };
 
         let aead = Aes128Gcm::new_from_slice(key).map_err(|_e| Error::KeyError)?;
-        let nonce = &iv[..STREAM_NONCE_SIZE];
+        let nonce = &iv.0[..STREAM_NONCE_SIZE];
 
         let mut dec = DecryptorBE32::from_aead(aead, nonce.into());
 
@@ -126,14 +141,16 @@ where
             buf_tail += read;
 
             if buf_tail == bufsize {
-                dec.decrypt_next_in_place(b"", &mut buf).unwrap();
+                dec.decrypt_next_in_place(b"", &mut buf)
+                    .map_err(|_e| Error::Symmetric)?;
                 w.write_all(&buf[..]).await?;
 
                 buf_tail = 0;
                 buf.resize(bufsize, 0);
             } else if read == 0 {
                 buf.truncate(buf_tail);
-                dec.decrypt_last_in_place(b"", &mut buf).unwrap();
+                dec.decrypt_last_in_place(b"", &mut buf)
+                    .map_err(|_e| Error::Symmetric)?;
                 w.write_all(&buf[..]).await?;
                 break;
             }

@@ -5,7 +5,6 @@ use crate::UserSecretKey;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
-use std::convert::TryInto;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
@@ -62,7 +61,10 @@ where
         );
 
         if version != VERSION_V2 {
-            return Err(JsValue::from(Error::IncorrectVersion));
+            return Err(JsValue::from(Error::IncorrectVersion {
+                expected: VERSION_V2,
+                found: version,
+            }));
         }
 
         let header_len = u32::from_be_bytes(
@@ -98,17 +100,24 @@ where
 
         let header = Header::msgpack_from(&*header_buf)?;
 
-        let (_, segment_size, size_hint) = match header {
+        let (segment_size, size_hint) = match header {
             Header {
-                policies: _,
                 mode:
                     Mode::Streaming {
                         segment_size,
                         size_hint,
                     },
-                algo: Algorithm::Aes128Gcm { iv },
-            } => (iv, segment_size, size_hint),
-            _ => return Err(JsValue::from(Error::NotSupported)),
+                ..
+            } => (segment_size, size_hint),
+            _ => return Err(Error::ModeNotSupported(header.mode).into()),
+        };
+
+        match header {
+            Header {
+                algo: Algorithm::Aes128Gcm(_),
+                ..
+            } => (),
+            _ => return Err(Error::AlgorithmNotSupported(header.algo).into()),
         };
 
         if segment_size > MAX_SYMMETRIC_CHUNK_SIZE {
@@ -135,16 +144,21 @@ where
     where
         W: Sink<JsValue, Error = JsValue> + Unpin,
     {
-        let rec_info = self.header.policies.get(ident).unwrap();
+        let rec_info = self
+            .header
+            .policies
+            .get(ident)
+            .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
+
         let ss = rec_info.derive_keys(usk)?;
         let key = get_key(&ss.0[..KEY_SIZE]).await?;
 
         let iv = match self.header.algo {
-            Algorithm::Aes128Gcm { iv } => iv,
-            _ => return Err(JsValue::from(Error::NotSupported)),
+            Algorithm::Aes128Gcm(iv) => iv,
+            _ => return Err(Error::AlgorithmNotSupported(self.header.algo).into()),
         };
 
-        let nonce = &iv[..STREAM_NONCE_SIZE];
+        let nonce = &iv.0[..STREAM_NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
         let segment_size: u32 = (self.segment_size as usize + TAG_SIZE).try_into().unwrap();

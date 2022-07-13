@@ -31,16 +31,50 @@ pub use identity::*;
 #[derive(Debug)]
 pub enum Error {
     NotIRMASEAL,
-    IncorrectVersion,
+    IncorrectVersion {
+        expected: u16,
+        found: u16,
+    },
+    Json(serde_json::Error),
+    MsgPckSer(rmp_serde::encode::Error),
+    MsgPckDes(rmp_serde::decode::Error),
+    UnknownIdentifier(String),
+    IncorrectSchemeVersion,
     ConstraintViolation,
     FormatViolation,
+    /// Opaque symmetric encryption error.
+    Symmetric,
+    /// The symmetric key cannot be initialized using the byte slice.
     KeyError,
+    /// The authentication tag verification did not succeed.
     IncorrectTag,
-    NotSupported,
+    /// The symmetric encryption algorithm is not supported.
+    AlgorithmNotSupported(Algorithm),
+    /// The encryption mode is not supported.
+    ModeNotSupported(Mode),
+    /// Opaque key encapsulation error.
     Kem(ibe::kem::Error),
+    /// Synchronous IO error from the standard library.
     StdIO(std::io::Error),
+    /// Asynchronous IO error from the futures crate.
     #[cfg(any(feature = "stream", feature = "wasm_stream"))]
     FuturesIO(futures::io::Error),
+}
+
+// TODO implement these
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotIRMASEAL => {
+                write!(f, "the bytestream does not start with an IRMAseal prelude")
+            }
+            Self::IncorrectVersion { expected, found } => {
+                write!(f, "wrong version, expected: {expected}, found: {found}")
+            }
+            Self::UnknownIdentifier(ident) => write!(f, "identifier unknown: {ident}"),
+            _ => write!(f, "unimplemented"),
+        }
+    }
 }
 
 /// Constants used by IRMAseal.

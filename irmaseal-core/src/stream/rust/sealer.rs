@@ -28,21 +28,24 @@ where
     let (header, ss) = Header::new(pk, policies, rng)?;
     let key = &ss.0[..KEY_SIZE];
 
-    let (iv, segment_size, _) = match header {
+    let segment_size = match header {
         Header {
-            policies: _,
-            algo: Algorithm::Aes128Gcm { iv },
-            mode:
-                Mode::Streaming {
-                    segment_size,
-                    size_hint,
-                },
-        } => (iv, segment_size, size_hint),
-        _ => return Err(Error::NotSupported),
+            mode: Mode::Streaming { segment_size, .. },
+            ..
+        } => segment_size,
+        _ => return Err(Error::ModeNotSupported(header.mode)),
+    };
+
+    let iv = match header {
+        Header {
+            algo: Algorithm::Aes128Gcm(iv),
+            ..
+        } => iv,
+        _ => return Err(Error::AlgorithmNotSupported(header.algo)),
     };
 
     let aead = Aes128Gcm::new_from_slice(key).map_err(|_e| Error::KeyError)?;
-    let nonce = &iv[..STREAM_NONCE_SIZE];
+    let nonce = &iv.0[..STREAM_NONCE_SIZE];
 
     let mut enc = EncryptorBE32::from_aead(aead, nonce.into());
 
@@ -72,12 +75,14 @@ where
 
         if buf_tail == segment_size as usize {
             buf.truncate(buf_tail);
-            enc.encrypt_next_in_place(b"", &mut buf).unwrap();
+            enc.encrypt_next_in_place(b"", &mut buf)
+                .map_err(|_e| Error::Symmetric)?;
             w.write_all(&buf[..]).await?;
             buf_tail = 0;
         } else if read == 0 {
             buf.truncate(buf_tail);
-            enc.encrypt_last_in_place(b"", &mut buf).unwrap();
+            enc.encrypt_last_in_place(b"", &mut buf)
+                .map_err(|_e| Error::Symmetric)?;
             w.write_all(&buf[..]).await?;
             break;
         }
