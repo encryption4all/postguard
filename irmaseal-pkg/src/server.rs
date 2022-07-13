@@ -1,4 +1,3 @@
-use actix_web::HttpRequest;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 
@@ -20,24 +19,15 @@ use actix_web::{
 use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
 
 use lazy_static::lazy_static;
-use prometheus::{register_int_counter_vec, Encoder, IntCounterVec, TextEncoder};
+use prometheus::{register_int_counter_vec, IntCounterVec};
 
 lazy_static! {
-    static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
+    pub(crate) static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
         "postguard_clients",
         "Contains information about PostGuard clients connecting with the PKG.",
         &["host", "host_version", "client", "client_version"]
     )
     .unwrap();
-}
-
-async fn metrics(_req: HttpRequest) -> String {
-    let metric_families = prometheus::gather();
-    let mut buffer = Vec::new();
-    let encoder = TextEncoder::new();
-    encoder.encode(&metric_families, &mut buffer).unwrap();
-
-    String::from_utf8(buffer).unwrap()
 }
 
 #[derive(Clone)]
@@ -78,7 +68,7 @@ pub async fn exec(server_opts: ServerOpts) {
                     .allowed_header(PG_CLIENT_HEADER)
                     .max_age(86400),
             )
-            .service(resource("/metrics").route(web::get().to(metrics)))
+            .service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(
                 scope("/v2")
                     .wrap_fn(|req, srv| {
