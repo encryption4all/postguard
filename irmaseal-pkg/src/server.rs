@@ -25,7 +25,7 @@ lazy_static! {
     pub(crate) static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
         "postguard_clients",
         "Contains information about PostGuard clients connecting with the PKG.",
-        &["host", "host_version", "client", "client_version"]
+        &["path", "host", "host_version", "client", "client_version"]
     )
     .unwrap();
 }
@@ -76,7 +76,9 @@ pub async fn exec(server_opts: ServerOpts) {
                             req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str)
                         {
                             if let [a, b, c, d] = header.split(',').collect::<Vec<&str>>()[..] {
-                                POSTGUARD_CLIENTS.with_label_values(&[a, b, c, d]).inc();
+                                POSTGUARD_CLIENTS
+                                    .with_label_values(&[req.path(), a, b, c, d])
+                                    .inc();
                             }
                         }
                         srv.call(req)
