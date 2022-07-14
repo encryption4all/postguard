@@ -6,9 +6,7 @@ use crate::opts::*;
 use crate::util::*;
 
 use actix_cors::Cors;
-use actix_http::header::HeaderValue;
 use actix_web::{
-    dev::Service,
     http::header,
     middleware::Logger,
     web,
@@ -71,18 +69,7 @@ pub async fn exec(server_opts: ServerOpts) {
             .service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(
                 scope("/v2")
-                    .wrap_fn(|req, srv| {
-                        if let Some(Ok(header)) =
-                            req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str)
-                        {
-                            if let [a, b, c, d] = header.split(',').collect::<Vec<&str>>()[..] {
-                                POSTGUARD_CLIENTS
-                                    .with_label_values(&[req.path(), a, b, c, d])
-                                    .inc();
-                            }
-                        }
-                        srv.call(req)
-                    })
+                    .wrap_fn(collect_metrics)
                     .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
                     .service(
                         resource("/parameters")
