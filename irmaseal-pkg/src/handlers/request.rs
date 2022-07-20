@@ -17,15 +17,18 @@ pub async fn request(
     let kr = value.into_inner();
 
     let dr = DisclosureRequestBuilder::new()
-        .add_discon(vec![kr
-            .con
-            .iter()
-            .map(|attr| AttributeRequest::Compound {
-                attr_type: attr.atype.clone(),
-                value: attr.value.clone(),
-                not_null: true,
-            })
-            .collect()])
+        .add_discons(
+            kr.con
+                .iter()
+                .map(|attr| {
+                    vec![vec![AttributeRequest::Compound {
+                        attr_type: attr.atype.clone(),
+                        value: attr.value.clone(),
+                        not_null: true,
+                    }]]
+                })
+                .collect(),
+        )
         .build();
 
     let validity = match kr.validity {
