@@ -1,4 +1,4 @@
-use crate::*;
+use crate::error::Error;
 use ibe::kem::IBKEM;
 
 /// Maps schemes to protocol version.

@@ -15,7 +15,7 @@ keywords = ["ibe", "encryption", "ecc"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-irmaseal-core = { path = "../irmaseal-core", features = ["wasm_stream"] }
+irmaseal-core = { path = "../irmaseal-core", features = ["web", "web_stream"] }
 wasm-bindgen = { version = "0.2.73", features = ["serde-serialize"] }
 js-sys = "0.3.50"
 web-sys = { version = "0.3.50", features = ["console"] }
@@ -30,8 +30,10 @@ wee_alloc = "0.4.5"
 [dev-dependencies]
 wasm-bindgen-test = "0.3.16"
 irmaseal-core = { path = "../irmaseal-core", features = [
-  "stream",
-  "wasm_stream"
+  "web",
+  "web_stream",
+  "rust",
+  "rust_stream"
 ] }
 
 [package.metadata.wasm-pack.profile.release]

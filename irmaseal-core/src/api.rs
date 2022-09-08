@@ -1,6 +1,7 @@
-//! Structs that define the IRMAseal REST API protocol.
+//! Definitions in the IRMAseal REST API protocol.
 
-use crate::*;
+use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::identity::Attribute;
 use ibe::kem::IBKEM;
 use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,9 @@ use serde::{Deserialize, Serialize};
     deserialize = "PublicKey<K>: Deserialize<'de>"
 ))]
 pub struct Parameters<K: IBKEM> {
+    /// The formatting version of the Master Public Key.
     pub format_version: u8,
+    /// The Master Public Key.
     pub public_key: PublicKey<K>,
 }
 

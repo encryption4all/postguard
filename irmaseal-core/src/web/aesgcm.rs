@@ -1,6 +1,5 @@
-use crate::constants::*;
+use crate::consts::*;
 use js_sys::{Array, Object, Reflect, Uint8Array};
-use std::convert::TryInto;
 use wasm_bindgen::{prelude::*, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{AesGcmParams, Crypto, CryptoKey};

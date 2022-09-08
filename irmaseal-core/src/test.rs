@@ -1,4 +1,5 @@
-use crate::{Attribute, Policy, PublicKey, UserSecretKey};
+use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::identity::{Attribute, Policy};
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
 use std::collections::BTreeMap;
@@ -13,8 +14,8 @@ impl Default for TestSetup {
     fn default() -> Self {
         let mut rng = rand::thread_rng();
 
-        let id1 = String::from("l.botros@cs.ru.nl");
-        let id2 = String::from("leon.botros@gmail.com");
+        let id1 = String::from("j.doe@example.com");
+        let id2 = String::from("john.doe@example.com");
 
         let p1 = Policy {
             timestamp: 1566722350,
@@ -26,8 +27,8 @@ impl Default for TestSetup {
         let p2 = Policy {
             timestamp: 1566722350,
             con: vec![
-                Attribute::new("pbdf.gemeente.personalData.name", Some("leon")),
-                Attribute::new("pbdf.sidn-pbdf.email.email", Some("leon.botros@gmail.com")),
+                Attribute::new("pbdf.gemeente.personalData.name", Some("john")),
+                Attribute::new("pbdf.sidn-pbdf.email.email", Some("john.doe@example.com")),
             ],
         };
 

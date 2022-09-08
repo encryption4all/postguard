@@ -23,14 +23,14 @@ subtle = "2.3"
 tiny-keccak = { version = "2.0.2", features = ["sha3"] }
 base64ct = { version = "1.0.2" }
 
-# For both stream features
+# For both stream features.
 futures = { version = "0.3.21", optional = true }
 
-# For "stream" feature
+# For the Rust Crypto backend.
 aead = { version = "0.4.3", features = ["stream", "alloc"], optional = true }
 aes-gcm = { version = "0.9.4", optional = true }
 
-# For "wasm_stream" feature
+# For the Web Crypto backend ("web" feature).
 getrandom = { version = "0.2", optional = true }
 wasm-bindgen = { version = "0.2.78", optional = true }
 js-sys = { version = "0.3.55", optional = true }
@@ -49,9 +49,10 @@ serde-transcode = "1.1.1"
 criterion = "0.3.5"
 
 [features]
-default = []
-stream = ["futures", "aead/stream", "aes-gcm"]
-wasm_stream = [
+default = ["rust"]
+rust = ["aead", "aes-gcm"]
+rust_stream = ["futures", "aead/stream", "aes-gcm"]
+web = [
   "getrandom/js",
   "wasm-bindgen",
   "js-sys",
@@ -62,6 +63,7 @@ wasm_stream = [
   "web-sys/Crypto",
   "web-sys/CryptoKey",
 ]
+web_stream = []
 
 [[bench]]
 name = "main"

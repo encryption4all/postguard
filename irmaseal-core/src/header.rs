@@ -1,13 +1,13 @@
-use crate::artifacts::UserSecretKey;
-use crate::*;
-use crate::{Error, HiddenPolicy};
+//! IRMAseal encryption header definitions.
 
-use artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64, MultiRecipientCiphertext};
-
+use crate::artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64};
+use crate::artifacts::{MultiRecipientCiphertext, PublicKey, UserSecretKey};
+use crate::consts::*;
+use crate::identity::{HiddenPolicy, Policy};
+use crate::Error;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
-
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -29,7 +29,10 @@ pub enum Mode {
     },
 
     /// The payload is processed fully in memory, its size is known beforehand.
-    InMemory { size: u32 },
+    InMemory {
+        /// The size of the payload.
+        size: u32,
+    },
 }
 
 impl Default for Mode {
@@ -79,11 +82,14 @@ impl<'de, const N: usize> Deserialize<'de> for Iv<N> {
 // We only target 128-bit security because it more closely matches the security target BLS12-381.
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Algorithm {
+    /// AES-128-GCM.
     // Good performance with hardware acceleration.
-    Aes128Gcm(Iv<16>),
+    Aes128Gcm(Iv<12>),
     // The algorithms listed below are unsupported, but reserved for future use.
+    /// XSalsa20Poly1305.
     // Good performance in software.
     XSalsa20Poly1305(Iv<24>),
+    /// AES-128-OCB.
     // CAESAR finalist.
     Aes128Ocb(Iv<12>),
 }
@@ -94,7 +100,7 @@ impl Algorithm {
     }
 }
 
-/// Header type, contains header for _ALL_ recipients.
+/// Header type, contains header for _all_ recipients.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Header {
     /// Map of recipient identifiers to [`RecipientHeader`]s.
@@ -125,7 +131,7 @@ impl RecipientHeader {
     ///
     /// These bytes can either directly be used for an AEAD, or a key derivation function.
     pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
-        CGWKV::multi_decaps(None, &usk.0, &self.ct.0).map_err(Error::Kem)
+        CGWKV::multi_decaps(None, &usk.0, &self.ct.0).map_err(|_e| Error::KEM)
     }
 }
 
@@ -145,7 +151,7 @@ impl Header {
         // Generate the shared secret and ciphertexts.
         let (cts, ss) = CGWKV::multi_encaps(&pk.0, &ids[..], rng);
 
-        // Generate all RecipientHeader's.
+        // Generate all RecipientHeaders.
         let recipient_info: BTreeMap<String, RecipientHeader> = policies
             .iter()
             .zip(cts)
@@ -191,16 +197,17 @@ impl Header {
     ///    * `ct`: associated ciphertext with this policy,
     /// * `algo`: [algorithm][`Algorithm`],
     /// * `mode`: [mode][`Mode`],
-    /// * `iv`: 32-byte initialization vector.
+    /// * `iv`: the initialization vector.
     pub fn msgpack_into<W: Write>(self, w: &mut W) -> Result<(), Error> {
         let mut serializer = rmp_serde::encode::Serializer::new(w);
 
-        self.serialize(&mut serializer).map_err(Error::MsgPckSer)
+        self.serialize(&mut serializer)
+            .map_err(|e| Error::MessagePack(Box::new(e)))
     }
 
     /// Deserialize the header from binary MessagePack format.
     pub fn msgpack_from<R: Read>(r: R) -> Result<Self, Error> {
-        rmp_serde::decode::from_read(r).map_err(Error::MsgPckDes)
+        rmp_serde::decode::from_read(r).map_err(|e| Error::MessagePack(Box::new(e)))
     }
 
     /// Serializes the header to a JSON string.
@@ -215,12 +222,15 @@ impl Header {
     pub fn from_json_string(s: &str) -> Result<Self, Error> {
         serde_json::from_str(s).map_err(Error::Json)
     }
+
+    //pub fn mode_checked(&self, expected: Mode) -> Result<Mode, Error> {}
+    //pub fn algo_checked(&self, expected: Algorithm) -> Result<Algorithm, Error> {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_common::TestSetup;
+    use crate::test::TestSetup;
 
     #[test]
     fn test_enc_dec_json() {

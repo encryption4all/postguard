@@ -1,4 +1,6 @@
-use super::Error;
+//! Identity definitions and utilities.
+
+use crate::error::Error;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
@@ -11,7 +13,10 @@ const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
+    /// Attribute type.
     pub atype: String,
+
+    /// Attribute value.
     #[serde(rename = "v")]
     pub value: Option<String>,
 }
@@ -19,19 +24,25 @@ pub struct Attribute {
 /// An IRMAseal policy used to encapsulate a shared secret.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct Policy {
+    /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
+
+    /// A conjunction of attributes.
     pub con: Vec<Attribute>,
 }
 
 /// An IRMAseal hidden policy.
 ///
 /// A policy where (part of) the value of the attributes is hidden.
-/// This type is safe for usage in (public) [Metadata][`crate::Metadata`] alongside the ciphertext.
+/// This type is safe for usage in (public) [Header][`crate::Header`] alongside the ciphertext.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct HiddenPolicy {
+    /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
+
+    /// A conjunction of attributes, with redacted values.
     pub con: Vec<Attribute>,
 }
 
@@ -127,8 +138,8 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_common::TestSetup;
-    use crate::Policy;
+    use crate::identity::Policy;
+    use crate::test::TestSetup;
     use ibe::kem::cgw_kv::CGWKV;
 
     #[test]

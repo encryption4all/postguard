@@ -1,30 +1,138 @@
-use crate::constants::*;
+//! Streaming mode.
+use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::consts::*;
 use crate::header::*;
+use crate::identity::Policy;
+use crate::web::aesgcm::{decrypt, encrypt, get_key};
 use crate::Error;
-use crate::UserSecretKey;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::JsValue;
+use rand::{CryptoRng, RngCore};
+use std::collections::BTreeMap;
+use wasm_bindgen::{JsCast, JsValue};
 
-use crate::stream::web::{aead_nonce, aesgcm::decrypt, aesgcm::get_key};
+pub use crate::stream::Unsealer as WebUnsealer;
 
-/// An unsealer is used to decrypt IRMAseal bytestreams.
-pub struct Unsealer<R> {
-    pub version: u16,
-    pub header: Header,
-    pub size_hint: (u64, Option<u64>),
-    segment_size: u32,
-    payload: Vec<u8>,
-    r: R,
+// Nonce generation as defined in the STREAM construction.
+fn aead_nonce(nonce: &[u8], counter: u32, last_block: bool) -> [u8; STREAM_IV_SIZE] {
+    let mut iv = [0u8; STREAM_IV_SIZE];
+
+    iv[..STREAM_NONCE_SIZE].copy_from_slice(nonce);
+    iv[STREAM_NONCE_SIZE..STREAM_IV_SIZE - 1].copy_from_slice(&counter.to_be_bytes());
+    iv[STREAM_IV_SIZE - 1] = last_block as u8;
+
+    iv
 }
 
-impl<R> Unsealer<R>
+/// Seals the contents of a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream] into a [`Sink<Uint8Array, Error = JsValue>`][Sink].
+pub async fn seal<Rng, R, W>(
+    pk: &PublicKey<CGWKV>,
+    policies: &BTreeMap<String, Policy>,
+    rng: &mut Rng,
+    mut r: R,
+    mut w: W,
+) -> Result<(), JsValue>
+where
+    Rng: RngCore + CryptoRng,
+    R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
+    W: Sink<JsValue, Error = JsValue> + Unpin,
+{
+    let size_hint = r.size_hint();
+    let new_hint = (size_hint.0 as u64, size_hint.1.map(|x| x as u64));
+    let segment_size = SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
+
+    let (header, ss) = Header::new(pk, policies, rng)?;
+    let header = header.with_mode(Mode::Streaming {
+        segment_size,
+        size_hint: new_hint,
+    });
+
+    let key = get_key(&ss.0[..KEY_SIZE]).await?;
+
+    let iv = match header {
+        Header {
+            algo: Algorithm::Aes128Gcm(iv),
+            ..
+        } => iv,
+        _ => return Err(Error::AlgorithmNotSupported(header.algo).into()),
+    };
+
+    let nonce = &iv.0[..STREAM_NONCE_SIZE];
+    let mut counter: u32 = u32::default();
+
+    w.feed(Uint8Array::from(&PRELUDE[..]).into()).await?;
+    w.feed(Uint8Array::from(&VERSION_V2.to_be_bytes()[..]).into())
+        .await?;
+
+    let mut header_vec = Vec::with_capacity(MAX_HEADER_SIZE);
+    header.msgpack_into(&mut header_vec)?;
+
+    w.feed(
+        Uint8Array::from(
+            &u32::try_from(header_vec.len())
+                .map_err(|_e| Error::ConstraintViolation)?
+                .to_be_bytes()[..],
+        )
+        .into(),
+    )
+    .await?;
+
+    w.feed(Uint8Array::from(&header_vec[..]).into()).await?;
+
+    let mut buf_tail: u32 = 0;
+    let buf = Uint8Array::new_with_length(segment_size);
+
+    while let Some(Ok(data)) = r.next().await {
+        let mut array: Uint8Array = data.dyn_into()?;
+
+        while array.byte_length() != 0 {
+            let len = array.byte_length();
+            let rem = buf.byte_length() - buf_tail;
+
+            if len < rem {
+                buf.set(&array, buf_tail);
+                array = Uint8Array::new_with_length(0);
+                buf_tail += len;
+            } else {
+                buf.set(&array.slice(0, rem), buf_tail);
+                array = array.slice(rem, len);
+
+                let ct = encrypt(
+                    &key,
+                    &aead_nonce(nonce, counter, false),
+                    &Uint8Array::new_with_length(0),
+                    &buf,
+                )
+                .await?;
+
+                w.feed(ct.into()).await?;
+
+                counter = counter.checked_add(1).ok_or(Error::Symmetric)?;
+                buf_tail = 0;
+            }
+        }
+    }
+
+    let final_ct = encrypt(
+        &key,
+        &aead_nonce(nonce, counter, true),
+        &Uint8Array::new_with_length(0),
+        &buf.slice(0, buf_tail),
+    )
+    .await?;
+
+    w.feed(final_ct.into()).await?;
+
+    w.flush().await?;
+    w.close().await
+}
+
+impl<R> WebUnsealer<R>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
 {
-    /// Create a new [`Unsealer`] that starts reading from a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream].
+    /// Create a new [`WebUnsealer`] that starts reading from a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream].
     ///
     /// Errors if the bytestream is not a legitimate IRMAseal bytestream.
     pub async fn new(mut r: R) -> Result<Self, JsValue> {
@@ -68,12 +176,12 @@ where
         }
 
         let header_len = u32::from_be_bytes(
-            preamble[PREAMBLE_SIZE - METADATA_SIZE_SIZE..PREAMBLE_SIZE]
+            preamble[PREAMBLE_SIZE - HEADER_SIZE_SIZE..PREAMBLE_SIZE]
                 .try_into()
                 .map_err(|_e| Error::FormatViolation)?,
         );
 
-        if (header_len as usize) > MAX_METADATA_SIZE {
+        if (header_len as usize) > MAX_HEADER_SIZE {
             return Err(JsValue::from(Error::ConstraintViolation));
         }
 
@@ -127,9 +235,9 @@ where
         Ok(Unsealer {
             version,
             header,
-            segment_size,
-            size_hint,
-            payload,
+            payload: Some(payload),
+            segment_size: Some(segment_size),
+            size_hint: Some(size_hint),
             r,
         })
     }
@@ -161,19 +269,23 @@ where
         let nonce = &iv.0[..STREAM_NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
-        let segment_size: u32 = (self.segment_size as usize + TAG_SIZE).try_into().unwrap();
+        let segment_size: u32 = (self.segment_size.unwrap() as usize + TAG_SIZE)
+            .try_into()
+            .unwrap();
 
         let buf = Uint8Array::new_with_length(segment_size);
         let mut buf_tail = 0;
 
+        let mut payload = self.payload.clone().unwrap();
+
         loop {
             // First exhaust whatever of the payload was already read,
             // then, exhaust the rest of the stream.
-            let mut array: Uint8Array = if !self.payload.is_empty() {
-                let payload_len: u32 = self.payload.len().try_into().unwrap();
+            let mut array: Uint8Array = if !payload.is_empty() {
+                let payload_len: u32 = payload.len().try_into().unwrap();
                 let arr = Uint8Array::new_with_length(payload_len);
-                arr.copy_from(&self.payload[..]);
-                self.payload.clear();
+                arr.copy_from(&payload[..]);
+                payload.clear();
                 arr
             } else if let Some(Ok(data)) = self.r.next().await {
                 data.dyn_into()?
