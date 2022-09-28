@@ -49,13 +49,13 @@ pub struct HiddenPolicy {
 }
 
 impl Attribute {
-    // Replaces last AMOUNT_CHARS_TO_HIDE from value 
+    // Replaces last AMOUNT_CHARS_TO_HIDE from value
     pub fn hintify_value(&self) -> String {
         let value = self.value.as_ref().unwrap();
         let bytes = value.as_bytes();
         let mut hint_string = "".to_string();
         for (i, &item) in bytes.iter().enumerate() {
-            if i+1 > value.len() - AMOUNT_CHARS_TO_HIDE {
+            if i + 1 > value.len() - AMOUNT_CHARS_TO_HIDE {
                 hint_string = format!("{}{}", hint_string, '*');
             } else {
                 hint_string = format!("{}{}", hint_string, item as char);
@@ -75,20 +75,17 @@ impl Policy {
                 .iter()
                 .map(|a| HiddenAttribute {
                     atype: a.atype.clone(),
-                    hidden_value: Some(
-                        match a.atype.as_str() {
-                            "pbdf.sidn-pbdf.mobilenumber.mobilenumber" => a.hintify_value(),
-                            "pbdf.pbdf.surfnet-2.id" => a.hintify_value(),
-                            "pbdf.nuts.agb.agbcode" => a.hintify_value(),
-                            _ => "".to_string()
-                        }),
+                    hidden_value: Some(match a.atype.as_str() {
+                        "pbdf.sidn-pbdf.mobilenumber.mobilenumber" => a.hintify_value(),
+                        "pbdf.pbdf.surfnet-2.id" => a.hintify_value(),
+                        "pbdf.nuts.agb.agbcode" => a.hintify_value(),
+                        _ => "".to_string(),
+                    }),
                 })
                 .collect(),
         }
     }
 }
-
-
 
 impl Policy {
     pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
@@ -167,7 +164,7 @@ impl Attribute {
 #[cfg(test)]
 mod tests {
     use crate::test_common::TestSetup;
-    use crate::{Policy, Attribute};
+    use crate::{Attribute, Policy};
     use ibe::kem::cgw_kv::CGWKV;
 
     #[test]
@@ -192,7 +189,7 @@ mod tests {
     fn test_hints() {
         let attr = Attribute {
             atype: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
-            value: Some("123456789".to_string())
+            value: Some("123456789".to_string()),
         };
         let hinted = attr.hintify_value();
         assert_eq!(hinted, "12345****")
