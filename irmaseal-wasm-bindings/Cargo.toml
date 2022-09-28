@@ -25,7 +25,6 @@ wasm-streams = "0.2.2"
 getrandom = { version = "0.2", features = ["js"] }
 futures = "0.3.17"
 wasm-bindgen-futures = "0.4.28"
-wee_alloc = "0.4.5"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.16"
