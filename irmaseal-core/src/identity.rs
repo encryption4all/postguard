@@ -7,6 +7,11 @@ use tiny_keccak::{Hasher, Sha3};
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
 const AMOUNT_CHARS_TO_HIDE: usize = 4;
+const HINT_TYPES: &[&str] = &[
+    "pbdf.sidn-pbdf.mobilenumber.mobilenumber",
+    "pbdf.pbdf.surfnet-2.id",
+    "pbdf.nuts.agb.agbcode",
+];
 
 /// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
@@ -49,19 +54,20 @@ pub struct HiddenPolicy {
 }
 
 impl Attribute {
-    // Replaces last AMOUNT_CHARS_TO_HIDE from value
-    pub fn hintify_value(&self) -> String {
-        let value = self.value.as_ref().unwrap();
-        let bytes = value.as_bytes();
-        let mut hint_string = "".to_string();
-        for (i, &item) in bytes.iter().enumerate() {
-            if i + 1 > value.len() - AMOUNT_CHARS_TO_HIDE {
-                hint_string = format!("{}{}", hint_string, '*');
+    pub fn hintify_value(&self) -> HiddenAttribute {
+        let hidden_value = self.value.as_ref().map(|v| {
+            if HINT_TYPES.contains(&&self.atype[..]) {
+                let (begin, end) = v.split_at(v.len().saturating_sub(AMOUNT_CHARS_TO_HIDE));
+                format!("{begin}{}", "*".repeat(end.len()))
             } else {
-                hint_string = format!("{}{}", hint_string, item as char);
+                "".to_string()
             }
+        });
+
+        HiddenAttribute {
+            atype: self.atype.clone(),
+            hidden_value,
         }
-        hint_string
     }
 }
 
@@ -70,19 +76,7 @@ impl Policy {
     pub fn to_hidden(&self) -> HiddenPolicy {
         HiddenPolicy {
             timestamp: self.timestamp,
-            con: self
-                .con
-                .iter()
-                .map(|a| HiddenAttribute {
-                    atype: a.atype.clone(),
-                    hidden_value: Some(match a.atype.as_str() {
-                        "pbdf.sidn-pbdf.mobilenumber.mobilenumber" => a.hintify_value(),
-                        "pbdf.pbdf.surfnet-2.id" => a.hintify_value(),
-                        "pbdf.nuts.agb.agbcode" => a.hintify_value(),
-                        _ => "".to_string(),
-                    }),
-                })
-                .collect(),
+            con: self.con.iter().map(Attribute::hintify_value).collect(),
         }
     }
 }
@@ -192,6 +186,13 @@ mod tests {
             value: Some("123456789".to_string()),
         };
         let hinted = attr.hintify_value();
-        assert_eq!(hinted, "12345****")
+        assert_eq!(hinted.hidden_value, Some("12345****".to_string()));
+
+        let attr_short = Attribute {
+            atype: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
+            value: Some("123".to_string()),
+        };
+        let hinted_short = attr_short.hintify_value();
+        assert_eq!(hinted_short.hidden_value, Some("***".to_string()))
     }
 }
