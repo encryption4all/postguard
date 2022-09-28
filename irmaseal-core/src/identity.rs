@@ -193,6 +193,13 @@ mod tests {
             value: Some("123".to_string()),
         };
         let hinted_short = attr_short.hintify_value();
-        assert_eq!(hinted_short.hidden_value, Some("***".to_string()))
+        assert_eq!(hinted_short.hidden_value, Some("***".to_string()));
+
+        let attr_not_whitelisted = Attribute {
+            atype: "pbdf.sidn-pbdf.mobilenumber.test".to_string(),
+            value: Some("123456789".to_string()),
+        };
+        let hinted_empty = attr_not_whitelisted.hintify_value();
+        assert_eq!(hinted_empty.hidden_value, Some("".to_string()));
     }
 }
