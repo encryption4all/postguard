@@ -6,6 +6,12 @@ use tiny_keccak::{Hasher, Sha3};
 
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
+const AMOUNT_CHARS_TO_HIDE: usize = 4;
+const HINT_TYPES: &[&str] = &[
+    "pbdf.sidn-pbdf.mobilenumber.mobilenumber",
+    "pbdf.pbdf.surfnet-2.id",
+    "pbdf.nuts.agb.agbcode",
+];
 
 /// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
@@ -47,19 +53,30 @@ pub struct HiddenPolicy {
     pub con: Vec<HiddenAttribute>,
 }
 
+impl Attribute {
+    pub fn hintify_value(&self) -> HiddenAttribute {
+        let hidden_value = self.value.as_ref().map(|v| {
+            if HINT_TYPES.contains(&&self.atype[..]) {
+                let (begin, end) = v.split_at(v.len().saturating_sub(AMOUNT_CHARS_TO_HIDE));
+                format!("{begin}{}", "*".repeat(end.len()))
+            } else {
+                "".to_string()
+            }
+        });
+
+        HiddenAttribute {
+            atype: self.atype.clone(),
+            hidden_value,
+        }
+    }
+}
+
 impl Policy {
-    /// Completely hides the attribute value.
+    /// Completely hides the attribute value, or provides a hint for certain attribute types
     pub fn to_hidden(&self) -> HiddenPolicy {
         HiddenPolicy {
             timestamp: self.timestamp,
-            con: self
-                .con
-                .iter()
-                .map(|a| HiddenAttribute {
-                    atype: a.atype.clone(),
-                    hidden_value: Some("".to_string()),
-                })
-                .collect(),
+            con: self.con.iter().map(Attribute::hintify_value).collect(),
         }
     }
 }
@@ -141,7 +158,7 @@ impl Attribute {
 #[cfg(test)]
 mod tests {
     use crate::test_common::TestSetup;
-    use crate::Policy;
+    use crate::{Attribute, Policy};
     use ibe::kem::cgw_kv::CGWKV;
 
     #[test]
@@ -160,5 +177,29 @@ mod tests {
         // The timestamp should matter, and therefore map to a different IBE identity.
         reversed.timestamp += 1;
         assert_ne!(&p1_derived, &reversed.derive::<CGWKV>().unwrap());
+    }
+
+    #[test]
+    fn test_hints() {
+        let attr = Attribute {
+            atype: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
+            value: Some("123456789".to_string()),
+        };
+        let hinted = attr.hintify_value();
+        assert_eq!(hinted.hidden_value, Some("12345****".to_string()));
+
+        let attr_short = Attribute {
+            atype: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
+            value: Some("123".to_string()),
+        };
+        let hinted_short = attr_short.hintify_value();
+        assert_eq!(hinted_short.hidden_value, Some("***".to_string()));
+
+        let attr_not_whitelisted = Attribute {
+            atype: "pbdf.sidn-pbdf.mobilenumber.test".to_string(),
+            value: Some("123456789".to_string()),
+        };
+        let hinted_empty = attr_not_whitelisted.hintify_value();
+        assert_eq!(hinted_empty.hidden_value, Some("".to_string()));
     }
 }
