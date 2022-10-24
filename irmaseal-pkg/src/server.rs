@@ -1,5 +1,9 @@
+use std::time::SystemTime;
+
+use actix_web::http::header::EntityTag;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
+use irmaseal_core::{api::Parameters, PublicKey};
 
 use crate::handlers;
 use crate::opts::*;
@@ -20,6 +24,13 @@ pub struct MasterKeyPair<K: IBKEM> {
     pub sk: K::Sk,
 }
 
+#[derive(Clone)]
+pub struct ParametersData {
+    pub pp: String,
+    pub last_modified: SystemTime,
+    pub etag: EntityTag,
+}
+
 #[actix_rt::main]
 pub async fn exec(server_opts: ServerOpts) {
     let ServerOpts {
@@ -31,8 +42,29 @@ pub async fn exec(server_opts: ServerOpts) {
     } = server_opts;
 
     let kp = MasterKeyPair::<CGWKV> {
-        pk: cgwkv_read_pk(public).unwrap(),
-        sk: cgwkv_read_sk(secret).unwrap(),
+        pk: cgwkv_read_pk(&public).expect("cannot read public key"),
+        sk: cgwkv_read_sk(&secret).expect("cannot read secret key"),
+    };
+
+    // Precompute the serialized public parameters.
+    let pp = serde_json::to_string(&Parameters::<CGWKV> {
+        format_version: 0x00,
+        public_key: PublicKey(kp.pk),
+    })
+    .expect("could not serialize public parameters");
+
+    // Also compute cache headers.
+    let last_modified = match std::fs::metadata(&public).map(|m| m.modified()) {
+        Ok(Ok(t)) => t,
+        _ => SystemTime::now(),
+    };
+
+    let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
+
+    let pd = ParametersData {
+        pp,
+        last_modified,
+        etag,
     };
 
     HttpServer::new(move || {
@@ -43,6 +75,7 @@ pub async fn exec(server_opts: ServerOpts) {
                     .allowed_methods(vec!["GET", "POST"])
                     .allowed_header(header::CONTENT_TYPE)
                     .allowed_header(header::AUTHORIZATION)
+                    .allowed_header(header::ETAG)
                     .allowed_header("X-Postguard-Client-Version")
                     .max_age(86400),
             )
@@ -51,8 +84,8 @@ pub async fn exec(server_opts: ServerOpts) {
                 scope("/v2")
                     .service(
                         resource("/parameters")
-                            .app_data(Data::new(kp.pk))
-                            .route(web::get().to(handlers::parameters::<CGWKV>)),
+                            .app_data(Data::new(pd.clone()))
+                            .route(web::get().to(handlers::parameters)),
                     )
                     .service(
                         scope("/{_:(irma|request)}")
@@ -96,7 +129,7 @@ mod tests {
     use rand::thread_rng;
 
     fn now() -> u64 {
-        std::time::SystemTime::now()
+        SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
@@ -110,14 +143,29 @@ mod tests {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
 
+        // Precompute the serialized public parameters.
+        let pp = serde_json::to_string(&Parameters::<CGWKV> {
+            format_version: 0x00,
+            public_key: PublicKey(pk),
+        })
+        .expect("could not serialize public parameters");
+        let last_modified = SystemTime::now();
+        let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
+
+        let pd = ParametersData {
+            pp,
+            last_modified,
+            etag,
+        };
+
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
             App::new().service(
                 scope("/v2")
                     .service(
                         resource("/parameters")
-                            .app_data(Data::new(pk))
-                            .route(web::get().to(handlers::parameters::<CGWKV>)),
+                            .app_data(Data::new(pd))
+                            .route(web::get().to(handlers::parameters)),
                     )
                     .service(
                         resource("/key/{timestamp}")

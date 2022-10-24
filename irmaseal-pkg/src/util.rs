@@ -5,6 +5,16 @@ use irmaseal_core::Error;
 use paste::paste;
 use std::path::Path;
 
+use core::hash::Hasher;
+use twox_hash::XxHash64;
+
+pub(crate) fn xxhash64(x: &[u8]) -> String {
+    let mut h = XxHash64::with_seed(0);
+    h.write(&x);
+    let out = h.finish().to_be_bytes();
+    base64::encode(&out)
+}
+
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {
         Some(x.unwrap())

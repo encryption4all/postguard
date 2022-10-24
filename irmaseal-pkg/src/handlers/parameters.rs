@@ -1,16 +1,21 @@
-use actix_web::{web::Data, HttpResponse};
-use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{api::Parameters, PublicKey};
-use serde::Serialize;
+use actix_web::{
+    http::header::{CacheControl, CacheDirective, ContentType, ETag, LastModified},
+    web::Data,
+    HttpResponse, Responder,
+};
 
-pub async fn parameters<K: IBKEM>(mpk: Data<K::Pk>) -> Result<HttpResponse, crate::Error>
+use crate::server::ParametersData;
+
+pub async fn parameters(pd: Data<ParametersData>) -> impl Responder
 where
-    PublicKey<K>: Serialize,
 {
-    let pars = Parameters::<K> {
-        format_version: 0x00,
-        public_key: PublicKey(mpk.get_ref().clone()),
-    };
-
-    Ok(HttpResponse::Ok().json(pars))
+    HttpResponse::Ok()
+        .insert_header(CacheControl(vec![
+            CacheDirective::Public,
+            CacheDirective::NoCache,
+        ]))
+        .insert_header(ETag(pd.etag.clone()))
+        .insert_header(LastModified(pd.last_modified.into()))
+        .content_type(ContentType::json())
+        .body(pd.pp.clone())
 }
