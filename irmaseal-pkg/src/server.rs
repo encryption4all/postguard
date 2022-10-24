@@ -53,7 +53,7 @@ pub async fn exec(server_opts: ServerOpts) {
                     .allowed_header(header::CONTENT_TYPE)
                     .allowed_header(header::AUTHORIZATION)
                     .allowed_header("X-Postguard-Client-Version")
-                    .max_age(3600),
+                    .max_age(86400),
             )
             .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
             .service(
