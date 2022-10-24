@@ -55,7 +55,7 @@ pub async fn exec(server_opts: ServerOpts) {
                             .route(web::get().to(handlers::parameters::<CGWKV>)),
                     )
                     .service(
-                        scope("/irma")
+                        scope("/{_:(irma|request)}")
                             .service(
                                 resource("/start")
                                     .app_data(Data::new(irma.clone()))
