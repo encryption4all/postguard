@@ -42,7 +42,7 @@ where
 
         async move {
             // Retrieve the policy from the request.
-            let pol = req.extract::<Json<Policy>>().await.unwrap().into_inner();
+            let pol = req.extract::<Json<Policy>>().await?.into_inner();
 
             // Derive an id for this policy.
             let id = pol.derive::<K>().map_err(|_e| crate::Error::Unexpected)?;

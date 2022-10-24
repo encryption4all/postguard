@@ -140,7 +140,7 @@ where
                 }
             };
 
-            // Validate the session result. Filter attributes that were not present.
+            // Validate the session result. Purge attributes that were not present.
             let validated = match session_result {
                 SessionResult {
                     status: SessionStatus::Done,

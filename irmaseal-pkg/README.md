@@ -27,7 +27,7 @@ Example response:
 }
 ```
 
-### `POST /v2/irma/request/start`
+### `POST /v2/irma/start`
 Starts a session to retrieve a USK via IRMA. The request must include a JSON
 body containing a `KeyRequest`.  As an example, we want to request a key for
 someone named Alice.  Note that since this credential is from the demo scheme,
