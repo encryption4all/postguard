@@ -14,7 +14,10 @@ use actix_web::{
     App, HttpServer,
 };
 
-use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::{
+    irma::{IrmaAuth, IrmaAuthType},
+    metrics::collect_metrics,
+};
 
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
