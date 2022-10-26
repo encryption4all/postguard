@@ -1,5 +1,7 @@
+use std::str::FromStr;
 use std::time::SystemTime;
 
+use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
@@ -27,7 +29,7 @@ pub struct MasterKeyPair<K: IBKEM> {
 #[derive(Clone)]
 pub struct ParametersData {
     pub pp: String,
-    pub last_modified: SystemTime,
+    pub last_modified: HttpDate,
     pub etag: EntityTag,
 }
 
@@ -54,10 +56,12 @@ pub async fn exec(server_opts: ServerOpts) {
     .expect("could not serialize public parameters");
 
     // Also compute cache headers.
-    let last_modified = match std::fs::metadata(&public).map(|m| m.modified()) {
+    let modified_raw: HttpDate = match std::fs::metadata(&public).map(|m| m.modified()) {
         Ok(Ok(t)) => t,
         _ => SystemTime::now(),
-    };
+    }
+    .into();
+    let last_modified = HttpDate::from_str(&modified_raw.to_string()).unwrap();
 
     let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
 
