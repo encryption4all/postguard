@@ -3,7 +3,7 @@ use crate::util::generate_iv;
 use crate::*;
 use crate::{Error, HiddenPolicy, IV_SIZE};
 use ibe::kem::cgw_kv::CGWKV;
-use ibe::kem::mr::{MultiRecipient, MultiRecipientCiphertext};
+use ibe::kem::mkem::{MultiRecipient, MultiRecipientCiphertext};
 use ibe::kem::{SharedSecret, IBKEM};
 use ibe::Compress;
 use rand::{CryptoRng, Rng};
@@ -70,7 +70,7 @@ impl Metadata {
         // Generate all RecipientInfo's.
         let recipient_info: BTreeMap<String, RecipientInfo> = policies
             .iter()
-            .zip(cts.iter())
+            .zip(cts)
             .map(|((rid, policy), ct)| {
                 (
                     rid.clone(),

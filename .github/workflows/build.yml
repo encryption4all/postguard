@@ -9,8 +9,11 @@ on:
 name: Continuous integration
 
 jobs:
-  build-core:
-    name: Build core
+  test:
+    name: Test workspace
+    strategy:
+      matrix:
+        workspace: [core, pkg, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -21,56 +24,14 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          args: --manifest-path irmaseal-core/Cargo.toml --all-features
-          command: build
-
-  build-pkg:
-    name: Build pkg
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-pkg/Cargo.toml
-          command: build
-
-  build-cli:
-    name: Build CLI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-cli/Cargo.toml
-          command: build
-
-  test-core:
-    name: Test core
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-core/Cargo.toml --all-features
+          args: --manifest-path irmaseal-${{ matrix.workspace }}/Cargo.toml --all-features
           command: test
 
-  fmt-core:
-    name: Format core
+  format:
+    name: Format workspace
+    strategy:
+      matrix:
+        workspace: [core, pkg, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -82,74 +43,23 @@ jobs:
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
         with:
-          args: --manifest-path irmaseal-core/Cargo.toml --all -- --check
+          args: --manifest-path irmaseal-${{ matrix.workspace }}/Cargo.toml --all -- --check
           command: fmt
 
-  fmt-pkg:
-    name: Format pkg
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-pkg/Cargo.toml --all -- --check
-          command: fmt
-
-  fmt-cli:
-    name: Format CLI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-cli/Cargo.toml --all -- --check
-          command: fmt
-
-  test-wasm-bindings-chrome:
-    name: Run wasm tests in Google Chrome
-    runs-on: ubuntu-latest
+  test-wasm-browsers:
+    name: Run wasm tests in browsers
+    strategy:
+      matrix:
+        browser: [chrome, firefox]
+        os: [ubuntu-latest]
+        include:
+          - browser: safari
+            os: macos-latest
+    runs-on: ${{ matrix.os }} 
     env:
       WASM_BINDGEN_TEST_TIMEOUT: 120
     steps:
       - uses: actions/checkout@v2
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - run: wasm-pack test --headless --chrome ./irmaseal-wasm-bindings
-
-  test-wasm-bindings-safari:
-    name: Run wasm tests in Safari
-    runs-on: macos-latest
-    env:
-      WASM_BINDGEN_TEST_TIMEOUT: 120
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - run: wasm-pack test --headless --safari ./irmaseal-wasm-bindings
-
-  test-wasm-bindings-firefox:
-    name: Run wasm tests in Mozilla Firefox
-    runs-on: ubuntu-latest
-    env:
-      WASM_BINDGEN_TEST_TIMEOUT: 120
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - run: sudo apt update && sudo apt install firefox
-      - run: wasm-pack test --headless --firefox ./irmaseal-wasm-bindings
+      - run: wasm-pack test --headless --${{ matrix.browser }} ./irmaseal-wasm-bindings

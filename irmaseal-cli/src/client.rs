@@ -44,7 +44,7 @@ impl<'a> Client<'a> {
 
     pub async fn request_start(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
         self.client
-            .post(self.create_url("v2/request/start"))
+            .post(self.create_url("v2/irma/start"))
             .json(kr)
             .send()
             .await?
@@ -55,7 +55,7 @@ impl<'a> Client<'a> {
 
     pub async fn request_jwt(&self, token: &irma::SessionToken) -> Result<String, ClientError> {
         self.client
-            .get(self.create_url(&format!("v2/request/jwt/{}", token.0)))
+            .get(self.create_url(&format!("v2/irma/jwt/{}", token.0)))
             .send()
             .await?
             .error_for_status()?
@@ -73,7 +73,7 @@ impl<'a> Client<'a> {
         KeyResponse<K>: DeserializeOwned,
     {
         self.client
-            .get(self.create_url(&format!("v2/request/key/{timestamp}")))
+            .get(self.create_url(&format!("v2/irma/key/{timestamp}")))
             .bearer_auth(auth)
             .send()
             .await?
