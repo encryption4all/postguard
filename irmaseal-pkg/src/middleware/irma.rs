@@ -1,3 +1,5 @@
+//! IRMA authentication and identity extraction middleware.
+
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     Error, HttpMessage, HttpResponse,
@@ -38,8 +40,6 @@ struct Claims {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     disclosed: Vec<Vec<DisclosedAttribute>>,
 }
-
-/// IRMA authentication and id extraction middleware.
 
 #[derive(Clone)]
 enum Auth {
@@ -213,18 +213,23 @@ where
     }
 }
 
-// Factory for the IRMA middleware.
-
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
+/// IRMA authentication type.
 pub enum IrmaAuthType {
     /// Authenticate using IRMA session tokens.
+    ///
+    /// This method will retrieve the session results from the IRMA server using the supplied
+    /// token.
     Token,
     /// Authenticate using IRMA signed session results (JWTs).
+    ///
+    /// This method will try to retrieve the public key to verify JWTs from the URL.
+    /// If no public key can be retrieved, setup of the middleware will panic.
     Jwt,
 }
 
-/// IRMA Authentication options.
+/// IRMA Authentication middleware.
 #[derive(Debug, Clone)]
 pub struct IrmaAuth<K> {
     /// The URL to the IRMA server.
@@ -235,6 +240,9 @@ pub struct IrmaAuth<K> {
 }
 
 impl<K: IBKEM> IrmaAuth<K> {
+    /// Create IRMA authentication middleware used to wrap a key service.
+    ///
+    /// See [`IrmaAuthType`] for the available methods.
     pub fn new(irma_url: String, method: IrmaAuthType) -> Self {
         Self {
             irma_url,
