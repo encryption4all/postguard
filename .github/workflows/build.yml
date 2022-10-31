@@ -10,7 +10,7 @@ name: Continuous integration
 
 jobs:
   test:
-    name: Test workspaces
+    name: Test workspace
     strategy:
       matrix:
         workspace: [core, pkg, cli]
@@ -28,7 +28,7 @@ jobs:
           command: test
 
   format:
-    name: Format workspaces
+    name: Format workspace
     strategy:
       matrix:
         workspace: [core, pkg, cli]
@@ -62,7 +62,4 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - if: ${{ matrix.firefox }}
-        run: sudo apt update && sudo apt install firefox
       - run: wasm-pack test --headless --${{ matrix.browser }} ./irmaseal-wasm-bindings
