@@ -1,17 +1,11 @@
-use std::str::FromStr;
-use std::time::SystemTime;
-
-use actix_http::header::HttpDate;
-use actix_web::http::header::EntityTag;
-use irmaseal_core::kem::cgw_kv::CGWKV;
-use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{api::Parameters, PublicKey};
-
 use crate::handlers;
+use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::metrics::collect_metrics;
 use crate::opts::*;
 use crate::util::*;
-
 use actix_cors::Cors;
+use actix_http::header::HttpDate;
+use actix_web::http::header::EntityTag;
 use actix_web::{
     http::header,
     middleware::Logger,
@@ -19,12 +13,8 @@ use actix_web::{
     web::{resource, scope, Data},
     App, HttpServer,
 };
-
-use crate::middleware::{
-    irma::{IrmaAuth, IrmaAuthType},
-    metrics::collect_metrics,
-};
-
+use irmaseal_core::kem::cgw_kv::CGWKV;
+use irmaseal_core::kem::IBKEM;
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
 
@@ -43,10 +33,16 @@ pub struct MasterKeyPair<K: IBKEM> {
     pub sk: K::Sk,
 }
 
+/// Precomputed parameter data.
 #[derive(Clone)]
 pub struct ParametersData {
+    /// Pre-serialized public parameters (JSON).
     pub pp: String,
+
+    /// Last modified.
     pub last_modified: HttpDate,
+
+    /// Etag.
     pub etag: EntityTag,
 }
 
@@ -65,28 +61,7 @@ pub async fn exec(server_opts: ServerOpts) {
         sk: cgwkv_read_sk(&secret).expect("cannot read secret key"),
     };
 
-    // Precompute the serialized public parameters.
-    let pp = serde_json::to_string(&Parameters::<CGWKV> {
-        format_version: 0x00,
-        public_key: PublicKey(kp.pk),
-    })
-    .expect("could not serialize public parameters");
-
-    // Also compute cache headers.
-    let modified_raw: HttpDate = match std::fs::metadata(&public).map(|m| m.modified()) {
-        Ok(Ok(t)) => t,
-        _ => SystemTime::now(),
-    }
-    .into();
-    let last_modified = HttpDate::from_str(&modified_raw.to_string()).unwrap();
-
-    let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
-
-    let pd = ParametersData {
-        pp,
-        last_modified,
-        etag,
-    };
+    let pd = ParametersData::new(&kp.pk, Some(&public));
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
@@ -161,6 +136,7 @@ pub(crate) mod tests {
     use irmaseal_core::api::{KeyResponse, Parameters};
     use irmaseal_core::{Attribute, Policy};
     use rand::thread_rng;
+    use std::time::SystemTime;
 
     pub(crate) fn now() -> u64 {
         SystemTime::now()
@@ -177,20 +153,7 @@ pub(crate) mod tests {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
 
-        // Precompute the serialized public parameters.
-        let pp = serde_json::to_string(&Parameters::<CGWKV> {
-            format_version: 0x00,
-            public_key: PublicKey(pk),
-        })
-        .expect("could not serialize public parameters");
-        let last_modified = SystemTime::now();
-        let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
-
-        let pd = ParametersData {
-            pp,
-            last_modified,
-            etag,
-        };
+        let pd = ParametersData::new(&pk, None);
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
@@ -221,9 +184,16 @@ pub(crate) mod tests {
     async fn test_get_parameters() {
         let (app, pk, _) = default_setup().await;
 
-        let req = test::TestRequest::get().uri("/v2/parameters").to_request();
-        let kr: Parameters<CGWKV> = test::call_and_read_body_json(&app, req).await;
+        let resp = test::TestRequest::get()
+            .uri("/v2/parameters")
+            .send_request(&app)
+            .await;
 
+        assert!(resp.headers().contains_key("last-modified"));
+        assert!(resp.headers().contains_key("cache-control"));
+        assert!(resp.headers().contains_key("etag"));
+
+        let kr: Parameters<CGWKV> = test::read_body_json(resp).await;
         assert_eq!(&kr.public_key.0, &pk);
         assert_eq!(kr.format_version, 0x00);
     }
