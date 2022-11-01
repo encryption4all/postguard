@@ -11,6 +11,7 @@ pub enum Error {
     VersionError,
     DecodingError,
     ValidityError,
+    Prometheus(prometheus::Error),
     Unexpected,
 }
 
@@ -27,7 +28,7 @@ impl ResponseError for Error {
 
     fn status_code(&self) -> StatusCode {
         match self {
-            Error::Core(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::Core(_) | Error::Prometheus(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ChronologyError | Error::VersionError => StatusCode::BAD_REQUEST,
             Error::SessionNotFound => StatusCode::NOT_FOUND,
             Error::UpstreamError => StatusCode::SERVICE_UNAVAILABLE,
@@ -39,20 +40,17 @@ impl ResponseError for Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> ::std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Error::Core(_) => "core",
-                Error::ChronologyError => "chronology error",
-                Error::SessionNotFound => "session not found",
-                Error::UpstreamError => "upstream error",
-                Error::VersionError => "no such protocol version",
-                Error::DecodingError => "JWT decoding error",
-                Error::ValidityError => "validity exceeds maximum validity",
-                Error::Unexpected => "unexpected",
-            }
-        )
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            Error::Core(_) => write!(f, "core"),
+            Error::ChronologyError => write!(f, "chronology error"),
+            Error::SessionNotFound => write!(f, "session not found"),
+            Error::UpstreamError => write!(f, "upstream error"),
+            Error::VersionError => write!(f, "no such protocol version"),
+            Error::DecodingError => write!(f, "JWT decoding error"),
+            Error::ValidityError => write!(f, "validity exceeds maximum validity"),
+            Error::Prometheus(e) => write!(f, "prometheus error: {e}"),
+            Error::Unexpected => write!(f, "unexpected"),
+        }
     }
 }

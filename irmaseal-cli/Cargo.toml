@@ -26,3 +26,4 @@ tokio = { version = "0.2.5", features = ["rt-threaded", "time", "full"] }
 irma = "0.2.1"
 indicatif = "0.16.2"
 inquire = "0.2.1"
+lazy_static = "1.4.0"

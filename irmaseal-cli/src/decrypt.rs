@@ -1,4 +1,4 @@
-use crate::client::Client;
+use crate::client::{Client, ClientError};
 use crate::opts::DecOpts;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -31,26 +31,26 @@ async fn wait_on_session<K: IBKEM>(
     client: &Client<'_>,
     sp: &irma::SessionData,
     timestamp: u64,
-) -> Option<KeyResponse<K>>
+) -> Result<KeyResponse<K>, ClientError>
 where
     KeyResponse<K>: DeserializeOwned,
 {
     for _ in 0..120 {
-        let jwt: String = client.request_jwt(&sp.token).await.ok()?;
-        let kr: KeyResponse<K> = client.request_key(timestamp, &jwt).await.ok()?;
+        let jwt: String = client.request_jwt(&sp.token).await?;
+        let kr: KeyResponse<K> = client.request_key(timestamp, &jwt).await?;
 
         match kr {
             kr @ KeyResponse::<K> {
                 status: irma::SessionStatus::Done,
                 ..
-            } => return Some(kr),
+            } => return Ok(kr),
             _ => {
                 delay_for(Duration::new(0, 500_000_000)).await;
             }
         };
     }
 
-    None
+    Err(ClientError::Timeout)
 }
 
 pub async fn exec(dec_opts: DecOpts) {

@@ -1,15 +1,42 @@
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::{api::*, PublicKey};
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+use lazy_static::lazy_static;
+
+const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+lazy_static! {
+    static ref HEADER_VAL: String = format!("unknown,unknown,cli,{PKG_VERSION}");
+    static ref HEADERS: HeaderMap = {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Postguard-Client-Version",
+            HeaderValue::from_static(&HEADER_VAL),
+        );
+        headers
+    };
+}
 
 pub struct Client<'a> {
     baseurl: &'a str,
     client: reqwest::Client,
 }
 
-pub type ClientError = reqwest::Error;
+#[derive(Debug)]
+pub enum ClientError {
+    Timeout,
+    Reqwest(reqwest::Error),
+}
+
+impl From<reqwest::Error> for ClientError {
+    fn from(e: reqwest::Error) -> Self {
+        ClientError::Reqwest(e)
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OwnedKeyChallenge {
@@ -20,7 +47,6 @@ pub struct OwnedKeyChallenge {
 impl<'a> Client<'a> {
     pub fn new(baseurl: &'a str) -> Result<Client, ClientError> {
         let client = ClientBuilder::new().build()?;
-
         Ok(Client { baseurl, client })
     }
 
@@ -33,34 +59,40 @@ impl<'a> Client<'a> {
         K: IBKEM,
         PublicKey<K>: DeserializeOwned,
     {
-        self.client
+        Ok(self
+            .client
             .get(self.create_url("v2/parameters"))
+            .headers(HEADERS.clone())
             .send()
             .await?
             .error_for_status()?
             .json::<Parameters<K>>()
-            .await
+            .await?)
     }
 
     pub async fn request_start(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
-        self.client
+        Ok(self
+            .client
             .post(self.create_url("v2/irma/start"))
+            .headers(HEADERS.clone())
             .json(kr)
             .send()
             .await?
             .error_for_status()?
             .json::<irma::SessionData>()
-            .await
+            .await?)
     }
 
     pub async fn request_jwt(&self, token: &irma::SessionToken) -> Result<String, ClientError> {
-        self.client
+        Ok(self
+            .client
             .get(self.create_url(&format!("v2/irma/jwt/{}", token.0)))
+            .headers(HEADERS.clone())
             .send()
             .await?
             .error_for_status()?
             .text()
-            .await
+            .await?)
     }
 
     pub async fn request_key<K>(
@@ -72,13 +104,15 @@ impl<'a> Client<'a> {
         K: IBKEM,
         KeyResponse<K>: DeserializeOwned,
     {
-        self.client
+        Ok(self
+            .client
             .get(self.create_url(&format!("v2/irma/key/{timestamp}")))
             .bearer_auth(auth)
+            .headers(HEADERS.clone())
             .send()
             .await?
             .error_for_status()?
             .json::<KeyResponse<K>>()
-            .await
+            .await?)
     }
 }

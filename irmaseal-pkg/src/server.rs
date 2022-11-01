@@ -4,15 +4,32 @@ use irmaseal_core::kem::IBKEM;
 use crate::handlers;
 use crate::opts::*;
 use crate::util::*;
+
 use actix_cors::Cors;
 use actix_web::{
     http::header,
+    middleware::Logger,
     web,
     web::{resource, scope, Data},
     App, HttpServer,
 };
 
-use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::{
+    irma::{IrmaAuth, IrmaAuthType},
+    metrics::collect_metrics,
+};
+
+use lazy_static::lazy_static;
+use prometheus::{register_int_counter_vec, IntCounterVec};
+
+lazy_static! {
+    pub(crate) static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
+        "postguard_clients",
+        "Contains information about PostGuard clients connecting with the PKG.",
+        &["path", "host", "host_version", "client", "client_version"]
+    )
+    .unwrap();
+}
 
 #[derive(Clone)]
 pub struct MasterKeyPair<K: IBKEM> {
@@ -35,20 +52,33 @@ pub async fn exec(server_opts: ServerOpts) {
         sk: cgwkv_read_sk(secret).unwrap(),
     };
 
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
     HttpServer::new(move || {
         App::new()
+            .wrap(
+                Logger::new(
+                    "request=%{PATH}xi, status=%s, client=%{CLIENT_ID}xi, response_time=%D ms",
+                )
+                .custom_request_replace("CLIENT_ID", client_version)
+                .custom_request_replace("PATH", |req| {
+                    req.match_pattern().unwrap_or("-".to_string())
+                }),
+            )
             .wrap(
                 Cors::default()
                     .allow_any_origin()
                     .allowed_methods(vec!["GET", "POST"])
                     .allowed_header(header::CONTENT_TYPE)
                     .allowed_header(header::AUTHORIZATION)
-                    .allowed_header("X-Postguard-Client-Version")
+                    .allowed_header(PG_CLIENT_HEADER)
                     .max_age(86400),
             )
-            .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
+            .service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(
                 scope("/v2")
+                    .wrap_fn(collect_metrics)
+                    .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
                     .service(
                         resource("/parameters")
                             .app_data(Data::new(kp.pk))
@@ -84,7 +114,7 @@ pub async fn exec(server_opts: ServerOpts) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::middleware::irma_noauth::NoAuth;
     use actix_http::Request;
@@ -95,14 +125,14 @@ mod tests {
     use irmaseal_core::{Attribute, Policy};
     use rand::thread_rng;
 
-    fn now() -> u64 {
+    pub(crate) fn now() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
     }
 
-    async fn default_setup() -> (
+    pub(crate) async fn default_setup() -> (
         impl Service<Request, Response = ServiceResponse, Error = Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
@@ -112,20 +142,23 @@ mod tests {
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
-            App::new().service(
-                scope("/v2")
-                    .service(
-                        resource("/parameters")
-                            .app_data(Data::new(pk))
-                            .route(web::get().to(handlers::parameters::<CGWKV>)),
-                    )
-                    .service(
-                        resource("/key/{timestamp}")
-                            .app_data(Data::new(sk))
-                            .wrap(NoAuth::<CGWKV>::new())
-                            .route(web::get().to(handlers::request_key::<CGWKV>)),
-                    ),
-            ),
+            App::new()
+                .service(resource("/metrics").route(web::get().to(handlers::metrics)))
+                .service(
+                    scope("/v2")
+                        .wrap_fn(collect_metrics)
+                        .service(
+                            resource("/parameters")
+                                .app_data(Data::new(pk))
+                                .route(web::get().to(handlers::parameters::<CGWKV>)),
+                        )
+                        .service(
+                            resource("/key/{timestamp}")
+                                .app_data(Data::new(sk))
+                                .wrap(NoAuth::<CGWKV>::new())
+                                .route(web::get().to(handlers::request_key::<CGWKV>)),
+                        ),
+                ),
         )
         .await;
 

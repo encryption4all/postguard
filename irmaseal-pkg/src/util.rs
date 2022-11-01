@@ -1,9 +1,23 @@
-use arrayref::array_ref;
 use irmaseal_core::kem::{cgw_kv::CGWKV, IBKEM};
 use irmaseal_core::Compress;
 use irmaseal_core::Error;
+
+use arrayref::array_ref;
 use paste::paste;
 use std::path::Path;
+
+use actix_http::header::HeaderValue;
+use actix_web::dev::ServiceRequest;
+
+pub(crate) const PG_CLIENT_HEADER: &str = "X-POSTGUARD-CLIENT-VERSION";
+
+pub(crate) fn client_version(req: &ServiceRequest) -> String {
+    if let Some(Ok(x)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
+        x.to_string()
+    } else {
+        String::from("unknown")
+    }
+}
 
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {
