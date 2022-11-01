@@ -9,7 +9,7 @@ use std::path::Path;
 use actix_http::header::HeaderValue;
 use actix_web::dev::ServiceRequest;
 
-pub(crate) const PG_CLIENT_HEADER: &str = "X-Postguard-Client-Version";
+pub(crate) const PG_CLIENT_HEADER: &str = "X-POSTGUARD-CLIENT-VERSION";
 
 pub(crate) fn client_version(req: &ServiceRequest) -> String {
     if let Some(Ok(x)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {

@@ -57,8 +57,9 @@ pub async fn exec(server_opts: ServerOpts) {
     HttpServer::new(move || {
         App::new()
             .wrap(
-                Logger::new("request=%r, status=%s, client=%{CLIENT_ID}xi, response_time=%D ms")
-                    .custom_request_replace("CLIENT_ID", client_version),
+                Logger::new("request=%{PATH}xi, status=%s, client=%{CLIENT_ID}xi, response_time=%D ms")
+                    .custom_request_replace("CLIENT_ID", client_version)
+                    .custom_request_replace("PATH", |req| { req.match_pattern().unwrap_or(req.path().to_string()) } ),
             )
             .wrap(
                 Cors::default()
@@ -78,6 +79,7 @@ pub async fn exec(server_opts: ServerOpts) {
                         resource("/parameters")
                             .app_data(Data::new(kp.pk))
                             .route(web::get().to(handlers::parameters::<CGWKV>)),
+                        
                     )
                     .service(
                         scope("/{_:(irma|request)}")
@@ -109,7 +111,7 @@ pub async fn exec(server_opts: ServerOpts) {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::middleware::irma_noauth::NoAuth;
     use actix_http::Request;
@@ -120,14 +122,14 @@ mod tests {
     use irmaseal_core::{Attribute, Policy};
     use rand::thread_rng;
 
-    fn now() -> u64 {
+    pub fn now() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
     }
 
-    async fn default_setup() -> (
+    pub async fn default_setup() -> (
         impl Service<Request, Response = ServiceResponse, Error = Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
@@ -137,8 +139,11 @@ mod tests {
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
-            App::new().service(
+            App::new()
+            .service(resource("/metrics").route(web::get().to(handlers::metrics)))
+            .service(
                 scope("/v2")
+                    .wrap_fn(collect_metrics) 
                     .service(
                         resource("/parameters")
                             .app_data(Data::new(pk))
