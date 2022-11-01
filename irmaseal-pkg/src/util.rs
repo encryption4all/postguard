@@ -43,6 +43,10 @@ pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
 
 impl ParametersData {
     /// Precompute the public parameters, including cache headers.
+    ///
+    /// # Panics
+    ///
+    /// This function panics when the parameters could not be serialized.
     pub(crate) fn new<K>(pk: &K::Pk, path: Option<&str>) -> ParametersData
     where
         K: IBKEM,
