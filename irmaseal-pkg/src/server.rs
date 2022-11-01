@@ -57,8 +57,8 @@ pub async fn exec(server_opts: ServerOpts) {
     } = server_opts;
 
     let kp = MasterKeyPair::<CGWKV> {
-        pk: cgwkv_read_pk(&public).expect("cannot read public key"),
-        sk: cgwkv_read_sk(&secret).expect("cannot read secret key"),
+        pk: cgwkv_read_pk(&public).expect("cannot read public key from disk"),
+        sk: cgwkv_read_sk(&secret).expect("cannot read secret key from disk"),
     };
 
     let pd = ParametersData::new(&kp.pk, Some(&public));

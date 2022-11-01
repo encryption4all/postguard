@@ -46,7 +46,7 @@ impl ParametersData {
     ///
     /// # Panics
     ///
-    /// This function panics when the parameters could not be serialized.
+    /// This function panics when the parameters serialization fails.
     pub(crate) fn new<K>(pk: &K::Pk, path: Option<&str>) -> ParametersData
     where
         K: IBKEM,
@@ -60,7 +60,6 @@ impl ParametersData {
         .expect("could not serialize public parameters");
 
         // Also compute cache headers.
-
         let modified_raw: HttpDate = if let Some(p) = path {
             match std::fs::metadata(p).map(|m| m.modified()) {
                 Ok(Ok(t)) => t,
@@ -72,7 +71,6 @@ impl ParametersData {
         .into();
 
         let last_modified = HttpDate::from_str(&modified_raw.to_string()).unwrap();
-
         let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
 
         ParametersData {
