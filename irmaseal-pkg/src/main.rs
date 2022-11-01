@@ -11,11 +11,13 @@ pub use crate::error::*;
 use crate::opts::{Opts, Subcommand};
 use clap::Parser;
 
-fn main() {
+fn main() -> Result<(), PKGError> {
     let opts = Opts::parse();
 
     match opts.subcmd {
-        Subcommand::Gen(o) => crate::generate::exec(&o),
-        Subcommand::Server(o) => crate::server::exec(o),
+        Subcommand::Gen(o) => crate::generate::exec(&o)?,
+        Subcommand::Server(o) => crate::server::exec(o)?,
     }
+
+    Ok(())
 }

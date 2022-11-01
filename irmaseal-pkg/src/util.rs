@@ -1,4 +1,5 @@
 use crate::server::ParametersData;
+use crate::PKGError;
 use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
 use arrayref::array_ref;
@@ -31,7 +32,7 @@ pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
 
 impl ParametersData {
     /// Precompute the public parameters, including cache headers.
-    pub(crate) fn new<K>(pk: &K::Pk, path: Option<&str>) -> ParametersData
+    pub(crate) fn new<K>(pk: &K::Pk, path: Option<&str>) -> Result<ParametersData, PKGError>
     where
         K: IBKEM,
         Parameters<K>: Serialize,
@@ -41,7 +42,7 @@ impl ParametersData {
             format_version: 0x00,
             public_key: PublicKey::<K>(*pk),
         })
-        .expect("could not serialize public parameters");
+        .map_err(|e| PKGError::Setup(format!("could not serialize public key: {e}")))?;
 
         // Also compute cache headers.
 
@@ -59,11 +60,11 @@ impl ParametersData {
 
         let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
 
-        ParametersData {
+        Ok(ParametersData {
             pp,
             last_modified,
             etag,
-        }
+        })
     }
 }
 

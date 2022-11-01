@@ -2,6 +2,9 @@ use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use serde_json::json;
 use std::fmt::{Display, Formatter};
 
+/// Errors that the PKG API can reply with.
+///
+/// These can be turned into an [`HttpResponse`].
 #[derive(Debug)]
 pub enum Error {
     Core(irmaseal_core::Error),
@@ -12,6 +15,34 @@ pub enum Error {
     DecodingError,
     ValidityError,
     Unexpected,
+}
+
+/// Errors that can occur during setup/running of the PKG.
+pub enum PKGError {
+    /// Error during setup, e.g., precomputations.
+    Setup(String),
+
+    /// IO error.
+    StdIO(std::io::Error),
+
+    /// Invalid version specifier.
+    InvalidVersion(String),
+}
+
+impl From<std::io::Error> for PKGError {
+    fn from(e: std::io::Error) -> Self {
+        PKGError::StdIO(e)
+    }
+}
+
+impl std::fmt::Debug for PKGError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PKGError::Setup(s) => write!(f, "error during PKG setup: {s}"),
+            PKGError::StdIO(e) => write!(f, "IO error: {e}"),
+            PKGError::InvalidVersion(v) => write!(f, "wrong version specifier: {v}"),
+        }
+    }
 }
 
 /// Show the error as an HTTP response for Actix-web.

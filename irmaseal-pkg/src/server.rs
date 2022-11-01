@@ -1,7 +1,7 @@
-use crate::handlers;
 use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
 use crate::opts::*;
 use crate::util::*;
+use crate::{handlers, PKGError};
 use actix_cors::Cors;
 use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
@@ -34,7 +34,7 @@ pub struct ParametersData {
 }
 
 #[actix_rt::main]
-pub async fn exec(server_opts: ServerOpts) {
+pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     let ServerOpts {
         host,
         port,
@@ -48,7 +48,7 @@ pub async fn exec(server_opts: ServerOpts) {
         sk: cgwkv_read_sk(&secret).expect("cannot read secret key"),
     };
 
-    let pd = ParametersData::new(&kp.pk, Some(&public));
+    let pd = ParametersData::new(&kp.pk, Some(&public))?;
 
     HttpServer::new(move || {
         App::new()
@@ -91,12 +91,12 @@ pub async fn exec(server_opts: ServerOpts) {
                     ),
             )
     })
-    .bind(format!("{}:{}", host, port))
-    .unwrap()
+    .bind(format!("{}:{}", host, port))?
     .shutdown_timeout(1)
     .run()
-    .await
-    .unwrap()
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -127,7 +127,7 @@ mod tests {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
 
-        let pd = ParametersData::new(&pk, None);
+        let pd = ParametersData::new(&pk, None).unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
