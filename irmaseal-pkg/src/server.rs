@@ -13,8 +13,11 @@ use actix_web::{
     web::{resource, scope, Data},
     App, HttpServer,
 };
+use irmaseal_core::api::Parameters;
+use irmaseal_core::ibs::gg;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
+use irmaseal_core::PublicKey;
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
 
@@ -34,7 +37,7 @@ pub struct MasterKeyPair<K: IBKEM> {
 }
 
 /// Precomputed parameter data.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ParametersData {
     /// Pre-serialized public parameters (JSON).
     pub pp: String,
@@ -52,16 +55,30 @@ pub async fn exec(server_opts: ServerOpts) {
         host,
         port,
         irma,
-        secret,
-        public,
+        ibe_secret,
+        ibe_public,
+        ibs_secret,
+        ibs_public,
     } = server_opts;
 
-    let kp = MasterKeyPair::<CGWKV> {
-        pk: cgwkv_read_pk(&public).expect("cannot read public key from disk"),
-        sk: cgwkv_read_sk(&secret).expect("cannot read secret key from disk"),
+    let ibe_kp = MasterKeyPair::<CGWKV> {
+        pk: cgwkv_read_pk(&ibe_public).expect("cannot read public key from disk"),
+        sk: cgwkv_read_sk(&ibe_secret).expect("cannot read secret key from disk"),
     };
 
-    let pd = ParametersData::new(&kp.pk, Some(&public));
+    let ibe_pd = ParametersData::new(
+        &Parameters::<CGWKV> {
+            format_version: 0x00,
+            public_key: PublicKey::<CGWKV>(ibe_kp.pk),
+        },
+        Some(&ibe_public),
+    );
+
+    let ibs_pk: gg::PublicKey =
+        rmp_serde::from_slice(&std::fs::read(&ibs_public).unwrap()).unwrap();
+    let ibs_pd = ParametersData::new(&ibs_pk, Some(&ibs_public));
+
+    dbg!(&ibs_pd);
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
@@ -93,7 +110,7 @@ pub async fn exec(server_opts: ServerOpts) {
                     .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
                     .service(
                         resource("/parameters")
-                            .app_data(Data::new(pd.clone()))
+                            .app_data(Data::new(ibe_pd.clone()))
                             .route(web::get().to(handlers::parameters)),
                     )
                     .service(
@@ -110,7 +127,21 @@ pub async fn exec(server_opts: ServerOpts) {
                             )
                             .service(
                                 resource("/key/{timestamp}")
-                                    .app_data(Data::new(kp.sk))
+                                    .app_data(Data::new(ibe_kp.sk))
+                                    .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .route(web::get().to(handlers::request_key::<CGWKV>)),
+                            ),
+                    )
+                    .service(
+                        scope("/sign")
+                            .service(
+                                resource("/parameters")
+                                    .app_data(Data::new(ibs_pd.clone()))
+                                    .route(web::get().to(handlers::parameters)),
+                            )
+                            .service(
+                                resource("/key/{timestamp}")
+                                    .app_data(Data::new(ibe_sk.sk))
                                     .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::get().to(handlers::request_key::<CGWKV>)),
                             ),
@@ -122,7 +153,7 @@ pub async fn exec(server_opts: ServerOpts) {
     .shutdown_timeout(1)
     .run()
     .await
-    .unwrap()
+    .unwrap();
 }
 
 #[cfg(test)]

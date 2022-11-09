@@ -17,6 +17,7 @@ pub use identity::*;
 pub use metadata::*;
 
 pub use ibe::{kem, Compress};
+pub use ibs;
 
 #[derive(Debug)]
 pub enum Error {

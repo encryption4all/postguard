@@ -8,7 +8,7 @@ pub async fn request_key<K: IBKEM + 'static>(
     msk: Data<K::Sk>,
 ) -> Result<HttpResponse, crate::Error> {
     let sk = msk.get_ref();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand2::thread_rng();
 
     let id = req
         .extensions()

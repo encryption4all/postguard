@@ -8,7 +8,6 @@ use core::hash::Hasher;
 use irmaseal_core::kem::{cgw_kv::CGWKV, IBKEM};
 use irmaseal_core::Compress;
 use irmaseal_core::Error;
-use irmaseal_core::{api::Parameters, PublicKey};
 use paste::paste;
 use serde::Serialize;
 use std::path::Path;
@@ -30,7 +29,8 @@ pub(crate) fn xxhash64(x: &[u8]) -> String {
     let mut h = XxHash64::with_seed(0);
     h.write(x);
     let out = h.finish().to_be_bytes();
-    base64::encode(&out)
+
+    base64::encode(out)
 }
 
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
@@ -47,17 +47,9 @@ impl ParametersData {
     /// # Panics
     ///
     /// This function panics when the parameters serialization fails.
-    pub(crate) fn new<K>(pk: &K::Pk, path: Option<&str>) -> ParametersData
-    where
-        K: IBKEM,
-        Parameters<K>: Serialize,
-    {
+    pub(crate) fn new<T: Serialize>(t: &T, path: Option<&str>) -> ParametersData {
         // Precompute the serialized public parameters.
-        let pp = serde_json::to_string(&Parameters::<K> {
-            format_version: 0x00,
-            public_key: PublicKey::<K>(*pk),
-        })
-        .expect("could not serialize public parameters");
+        let pp = serde_json::to_string(t).expect("could not serialize public parameters");
 
         // Also compute cache headers.
         let modified_raw: HttpDate = if let Some(p) = path {
@@ -112,3 +104,12 @@ macro_rules! read_keypair {
 }
 
 read_keypair!(CGWKV);
+
+use irmaseal_core::ibs::gg;
+
+pub fn ibs_gg_read(path: impl AsRef<Path>) -> Result<gg::PublicKey, Error> {
+    let bytes = std::fs::read(path).unwrap();
+    let pk: gg::PublicKey = rmp_serde::from_slice(&bytes).unwrap();
+
+    Ok(pk)
+}
