@@ -3085,11 +3085,11 @@ dependencies = [
 
 [[package]]
 name = "wasm-streams"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "076e644811919817f3d28f9344a7d359d8a45cc72a7187c7ace7281d081a74ad"
+checksum = "b4609d447824375f43e1ffbc051b50ad8f4b3ae8219680c94452ea05eb240ac7"
 dependencies = [
- "futures",
+ "futures-util",
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
