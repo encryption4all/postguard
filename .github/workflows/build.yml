@@ -62,4 +62,7 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - if: ${{ matrix.firefox }}
+        run: sudo apt update && sudo apt install firefox
       - run: wasm-pack test --headless --${{ matrix.browser }} ./irmaseal-wasm-bindings
