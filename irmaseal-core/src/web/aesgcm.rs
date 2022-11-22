@@ -10,6 +10,7 @@ const MODE: &str = "AES-GCM";
 // we have to import crypto using a custom binding.
 #[wasm_bindgen]
 extern "C" {
+    #[allow(unsafe_code)]
     #[wasm_bindgen(js_namespace = crypto, js_name = valueOf)]
     fn get_crypto() -> Crypto;
 }

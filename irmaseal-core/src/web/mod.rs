@@ -1,7 +1,7 @@
-//! Implementations backed by [Web Crypto](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API).
+//! Implementation for the web, backed by [Web Crypto](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API).
 
-#[cfg(all(not(target_arch = "wasm32-unknown-unknown"), not(docsrs)))]
-compile_error!("feature \"web\" can only be used for wasm targets");
+//#[cfg(all(not(target_arch = "wasm32-unknown-unknown"), not(docsrs)))]
+//compile_error!("feature \"web\" can only be used for wasm targets");
 
 mod aesgcm;
 
@@ -10,11 +10,11 @@ pub mod stream;
 
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::consts::*;
+use crate::error::Error;
 use crate::header::{Algorithm, Header, Mode};
 use crate::identity::Policy;
 use crate::web::aesgcm::encrypt;
 use crate::web::aesgcm::{decrypt, get_key};
-use crate::Error;
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Error as JsError;
 use js_sys::Uint8Array;
@@ -27,7 +27,7 @@ pub use crate::SealedPacket;
 
 impl From<Error> for JsValue {
     fn from(err: Error) -> Self {
-        JsError::new(err.into()).into()
+        JsError::new(&err.to_string()).into()
     }
 }
 
@@ -93,7 +93,7 @@ impl SealedPacket<Uint8Array> {
             &key,
             &iv.0[..],
             &Uint8Array::new_with_length(0),
-            &self.payload,
+            &self.ciphertext,
         )
         .await
     }

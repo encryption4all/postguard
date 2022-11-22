@@ -1,10 +1,13 @@
 //! Streaming mode.
+
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::consts::*;
+use crate::error::Error;
 use crate::header::*;
 use crate::identity::Policy;
+use crate::util::preamble_checked;
 use crate::web::aesgcm::{decrypt, encrypt, get_key};
-use crate::Error;
+use crate::{SealConfig, Sealer, UnsealConfig, Unsealer};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
@@ -12,7 +15,13 @@ use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 use wasm_bindgen::{JsCast, JsValue};
 
-pub use crate::stream::Unsealer as WebUnsealer;
+struct UnsealerConfig {
+    size_hint: (u64, Option<u64>),
+    segment_size: u32,
+    payload: Vec<u8>,
+}
+
+impl UnsealConfig for UnsealerConfig {}
 
 // Nonce generation as defined in the STREAM construction.
 fn aead_nonce(nonce: &[u8], counter: u32, last_block: bool) -> [u8; STREAM_IV_SIZE] {
@@ -128,11 +137,11 @@ where
     w.close().await
 }
 
-impl<R> WebUnsealer<R>
+impl<R> Unsealer<R, UnsealerConfig>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
 {
-    /// Create a new [`WebUnsealer`] that starts reading from a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream].
+    /// Create a new [`Unsealer`] that starts reading from a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream].
     ///
     /// Errors if the bytestream is not a legitimate IRMAseal bytestream.
     pub async fn new(mut r: R) -> Result<Self, JsValue> {
@@ -158,32 +167,12 @@ where
             }
         }
 
-        if read < preamble_len || preamble[..PRELUDE_SIZE] != PRELUDE {
+        if read < preamble_len {
             return Err(JsValue::from(Error::NotIRMASEAL));
         }
 
-        let version = u16::from_be_bytes(
-            preamble[PRELUDE_SIZE..PRELUDE_SIZE + VERSION_SIZE]
-                .try_into()
-                .map_err(|_e| Error::FormatViolation)?,
-        );
-
-        if version != VERSION_V2 {
-            return Err(JsValue::from(Error::IncorrectVersion {
-                expected: VERSION_V2,
-                found: version,
-            }));
-        }
-
-        let header_len = u32::from_be_bytes(
-            preamble[PREAMBLE_SIZE - HEADER_SIZE_SIZE..PREAMBLE_SIZE]
-                .try_into()
-                .map_err(|_e| Error::FormatViolation)?,
-        );
-
-        if (header_len as usize) > MAX_HEADER_SIZE {
-            return Err(JsValue::from(Error::ConstraintViolation));
-        }
+        let (version, header_len) = preamble_checked(&preamble[..PREAMBLE_SIZE])?;
+        let header_len = u32::try_from(header_len).unwrap();
 
         if read > preamble_len + header_len {
             // We read into the payload
@@ -235,9 +224,11 @@ where
         Ok(Unsealer {
             version,
             header,
-            payload: Some(payload),
-            segment_size: Some(segment_size),
-            size_hint: Some(size_hint),
+            config: UnsealerConfig {
+                payload,
+                segment_size,
+                size_hint,
+            },
             r,
         })
     }
@@ -269,14 +260,14 @@ where
         let nonce = &iv.0[..STREAM_NONCE_SIZE];
         let mut counter: u32 = u32::default();
 
-        let segment_size: u32 = (self.segment_size.unwrap() as usize + TAG_SIZE)
+        let segment_size: u32 = (self.config.segment_size as usize + TAG_SIZE)
             .try_into()
             .unwrap();
 
         let buf = Uint8Array::new_with_length(segment_size);
         let mut buf_tail = 0;
 
-        let mut payload = self.payload.clone().unwrap();
+        let mut payload = self.config.payload.clone();
 
         loop {
             // First exhaust whatever of the payload was already read,

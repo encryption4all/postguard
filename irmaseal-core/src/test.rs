@@ -4,6 +4,7 @@ use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
 use std::collections::BTreeMap;
 
+#[derive(Debug)]
 pub struct TestSetup {
     pub mpk: PublicKey<CGWKV>,
     pub policies: BTreeMap<String, Policy>,

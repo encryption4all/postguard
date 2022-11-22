@@ -1,24 +1,23 @@
-//! Implementations backed by [Rust Crypto](https://github.com/RustCrypto).
+//! Implementation for Rust, backed by [Rust Crypto](https://github.com/RustCrypto).
 
 use crate::artifacts::UserSecretKey;
+use crate::error::Error;
 use crate::header::{Algorithm, Header, Mode};
 use crate::identity::Policy;
-use crate::Error;
+use crate::util::preamble_checked;
 use crate::{consts::*, PublicKey};
+
 use aead::Aead;
 use aes_gcm::{Aes128Gcm, NewAead, Nonce};
-use alloc::collections::BTreeMap;
 use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
+use std::collections::BTreeMap;
 
 #[doc(inline)]
 pub use crate::SealedPacket;
 
 #[cfg(feature = "rust_stream")]
 pub mod stream;
-
-#[cfg(all(test, feature = "rust_stream"))]
-mod tests;
 
 impl From<std::io::Error> for crate::error::Error {
     fn from(e: std::io::Error) -> Self {
@@ -64,7 +63,7 @@ impl SealedPacket<Vec<u8>> {
         serde_json::to_string(&self).map_err(Error::Json)
     }
 
-    /// Serialize to short binary format.
+    /// Serialize to binary (MessagePack) format.
     pub fn to_bin(self) -> Result<Vec<u8>, Error> {
         let header_buf =
             rmp_serde::to_vec(&self.header).map_err(|e| Error::MessagePack(Box::new(e)))?;
@@ -84,42 +83,15 @@ impl SealedPacket<Vec<u8>> {
         serde_json::from_str(s).map_err(Error::Json)
     }
 
-    /// Deserialize from short binary format.
+    /// Deserialize from binary (MessagePack) format.
     pub fn from_bin(b: impl AsRef<[u8]>) -> Result<Self, Error> {
         let b = b.as_ref();
 
-        // check_prelude(&[u8])
-        if b[..PRELUDE_SIZE] != PRELUDE {
-            return Err(Error::NotIRMASEAL);
-        }
-
-        let version = u16::from_be_bytes(
-            b[PRELUDE_SIZE..PRELUDE_SIZE + VERSION_SIZE]
-                .try_into()
-                .map_err(|_e| Error::FormatViolation(String::from("version")))?,
-        );
-
-        if version != VERSION_V2 {
-            return Err(Error::IncorrectVersion {
-                expected: VERSION_V2,
-                found: version,
-            });
-        }
-
-        let header_len = u32::from_be_bytes(
-            b[PREAMBLE_SIZE - HEADER_SIZE_SIZE..PREAMBLE_SIZE]
-                .try_into()
-                .map_err(|_e| Error::FormatViolation(String::from("header length")))?,
-        ) as usize;
-
-        if header_len > MAX_HEADER_SIZE {
-            return Err(Error::ConstraintViolation);
-        }
-        //
+        let (version, header_len) = preamble_checked(&b[..PREAMBLE_SIZE])?;
 
         let len = b.len();
         let header_bytes = &b[PREAMBLE_SIZE..PREAMBLE_SIZE + header_len];
-        let header = Header::msgpack_from(&*header_bytes)?;
+        let header = Header::msgpack_from(header_bytes)?;
 
         let payload_len = match header.mode {
             Mode::InMemory { size } => size,
@@ -136,7 +108,7 @@ impl SealedPacket<Vec<u8>> {
         })
     }
 
-    /// Unseals a [`SealedPacket`] into a Vec.
+    /// Unseals a [`SealedPacket`] into a [`Vec`].
     pub fn unseal(self, ident: &str, usk: &UserSecretKey<CGWKV>) -> Result<Vec<u8>, Error> {
         let rec_info = self
             .header

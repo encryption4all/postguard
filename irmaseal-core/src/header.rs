@@ -3,12 +3,12 @@
 use crate::artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64};
 use crate::artifacts::{MultiRecipientCiphertext, PublicKey, UserSecretKey};
 use crate::consts::*;
+use crate::error::Error;
 use crate::identity::{HiddenPolicy, Policy};
-use crate::Error;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
-use rand::{CryptoRng, Rng};
+use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -49,7 +49,7 @@ impl Default for Mode {
 pub struct Iv<const N: usize>(pub(crate) [u8; N]);
 
 impl<const N: usize> Iv<N> {
-    fn random<R: Rng + CryptoRng>(r: &mut R) -> Self {
+    fn random<R: RngCore + CryptoRng>(r: &mut R) -> Self {
         let mut buf = [0u8; N];
         r.fill_bytes(&mut buf);
         Self(buf)
@@ -95,7 +95,7 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
-    fn new_aes128_gcm<R: Rng + CryptoRng>(r: &mut R) -> Self {
+    fn new_aes128_gcm<R: RngCore + CryptoRng>(r: &mut R) -> Self {
         Self::Aes128Gcm(Iv::random(r))
     }
 }
@@ -137,7 +137,7 @@ impl RecipientHeader {
 
 impl Header {
     /// Creates a new [`Header`] using the Master Public Key and the policies.
-    pub fn new<R: Rng + CryptoRng>(
+    pub fn new<R: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &BTreeMap<String, Policy>,
         rng: &mut R,

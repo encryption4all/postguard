@@ -7,7 +7,7 @@ use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
 
 /// The public parameters of the Private Key Generator (PKG).
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(bound(
     serialize = "PublicKey<K>: Serialize",
@@ -21,7 +21,7 @@ pub struct Parameters<K: IBKEM> {
 }
 
 /// A user secret key request for a specific identity.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct KeyRequest {
     /// Conjunction of [`Attribute`]s for which a user requests a user secret key.
     pub con: Vec<Attribute>,
@@ -31,7 +31,7 @@ pub struct KeyRequest {
 }
 
 /// The key response from the Private Key Generator (PKG).
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(bound(
     serialize = "UserSecretKey<K>: Serialize",

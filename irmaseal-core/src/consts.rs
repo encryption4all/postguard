@@ -1,4 +1,4 @@
-//! Constants used in the IRMAseal encryption standard.
+//! Constants used in the IRMAseal encryption protocol.
 
 /// Version 0 (legacy).
 ///
@@ -49,12 +49,6 @@ pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: u32 = 64 * 1024;
 
 /// Size of the symmetric key.
 pub const KEY_SIZE: usize = 16;
-
-/// Default size of the generated initialization vector (IV).
-///
-/// We always generate 32 bytes of initialization vector.
-/// This should be enough for most use cases.
-pub const DEFAULT_IV_SIZE: usize = 32;
 
 // The STREAM construction needs only 12 bytes:
 // A 7-byte nonce, a 4-byte counter (u32) and an all-zero or all-one byte,
