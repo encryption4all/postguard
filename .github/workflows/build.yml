@@ -16,16 +16,9 @@ jobs:
         workspace: [core, pkg, cli]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-${{ matrix.workspace }}/Cargo.toml --all-features
-          command: test
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path irmaseal-${{ matrix.workspace }}/Cargo.toml --all-features
 
   format:
     name: Format workspace
@@ -34,17 +27,9 @@ jobs:
         workspace: [core, pkg, cli]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          args: --manifest-path irmaseal-${{ matrix.workspace }}/Cargo.toml --all -- --check
-          command: fmt
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --manifest-path irmaseal-${{ matrix.workspace }}/Cargo.toml --all -- --check
 
   test-wasm-browsers:
     name: Run wasm tests in browsers
@@ -63,6 +48,6 @@ jobs:
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - if: ${{ matrix.firefox }}
+      - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
-      - run: wasm-pack test --headless --${{ matrix.browser }} ./irmaseal-wasm-bindings
+      - run: wasm-pack test --release --headless --${{ matrix.browser }} ./irmaseal-wasm-bindings
