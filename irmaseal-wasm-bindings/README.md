@@ -5,8 +5,7 @@ the IRMAseal rust library from javascript. This library has been designed to
 run in a browser via a bundler.
 
 The `ReadableStream` and `WritableStream` Web APIs are required. Most notably,
-`WritableStream` is (at the time of writing) not supported on Firefox, Internet
-Explorer and Firefox for Android, see
+`WritableStream` is not supported on Firefox until version 100, see
 [WritableStream](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream).
 
 If not available, please consider using a polyfill, see
@@ -66,11 +65,14 @@ const hidden = unsealer.get_hidden_policies();
 //  },
 // }
 
-// Guess the values of each of attribute right (note: we do no include the timestamp here).
+// The disclosed values have to match with the values used for encryption.
+// Note that we do not include a timestamp here.
+// Since the personalData credential is singleton, we just ask the value and decryption will
+// fail in the next step if it is not "John".
 const keyRequest = {
   con: [
     { t: "pbdf.sidn-pbdf.email.email", v: "john.doe@xample.com" },
-    { t: "pbdf.gemeente.personalData.fullname", v: "John" },
+    { t: "pbdf.gemeente.personalData.fullname" },
   ],
 };
 
