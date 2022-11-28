@@ -4,13 +4,13 @@ use crate::artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64};
 use crate::artifacts::{MultiRecipientCiphertext, PublicKey, UserSecretKey};
 use crate::consts::*;
 use crate::error::Error;
-use crate::identity::{HiddenPolicy, Policy};
+use crate::identity::{HiddenRecipientPolicy, Policy, RecipientPolicy};
+use alloc::collections::BTreeMap;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::{Read, Write};
 
@@ -46,7 +46,7 @@ impl Default for Mode {
 
 /// An initialization vector (IV).
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub struct Iv<const N: usize>(pub(crate) [u8; N]);
+pub struct Iv<const N: usize>(pub [u8; N]);
 
 impl<const N: usize> Iv<N> {
     fn random<R: RngCore + CryptoRng>(r: &mut R) -> Self {
@@ -85,13 +85,13 @@ pub enum Algorithm {
     /// AES-128-GCM.
     // Good performance with hardware acceleration.
     Aes128Gcm(Iv<12>),
-    // The algorithms listed below are unsupported, but reserved for future use.
-    /// XSalsa20Poly1305.
-    // Good performance in software.
-    XSalsa20Poly1305(Iv<24>),
-    /// AES-128-OCB.
-    // CAESAR finalist.
-    Aes128Ocb(Iv<12>),
+    //    // The algorithms listed below are unsupported, but reserved for future use.
+    //    /// XSalsa20Poly1305.
+    //    // Good performance in software.
+    //    XSalsa20Poly1305(Iv<24>),
+    //    /// AES-128-OCB.
+    //    // CAESAR finalist.
+    //    Aes128Ocb(Iv<12>),
 }
 
 impl Algorithm {
@@ -120,7 +120,7 @@ pub struct Header {
 pub struct RecipientHeader {
     /// The [`HiddenPolicy`] associated with this identifier.
     #[serde(rename = "p")]
-    pub policy: HiddenPolicy,
+    pub policy: HiddenRecipientPolicy,
 
     /// Ciphertext for this specific recipient.
     pub ct: MultiRecipientCiphertext<CGWKV>,
@@ -130,22 +130,23 @@ impl RecipientHeader {
     /// Decapsulates a [`ibe::kem::SharedSecret`] from a [`RecipientHeader`].
     ///
     /// These bytes can either directly be used for an AEAD, or a key derivation function.
-    pub fn derive_keys(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
+    pub fn decaps(&self, usk: &UserSecretKey<CGWKV>) -> Result<SharedSecret, Error> {
         CGWKV::multi_decaps(None, &usk.0, &self.ct.0).map_err(|_e| Error::KEM)
     }
 }
 
+// TODO: maybe switch to a builder API.
 impl Header {
     /// Creates a new [`Header`] using the Master Public Key and the policies.
     pub fn new<R: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
-        policies: &BTreeMap<String, Policy>,
+        policies: &Policy,
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
-        // Map policies to IBE identities.
+        // Map each RecipientPolicy to an IBE identity.
         let ids = policies
             .values()
-            .map(|p| p.derive::<CGWKV>())
+            .map(RecipientPolicy::derive::<CGWKV>)
             .collect::<Result<Vec<<CGWKV as IBKEM>::Id>, _>>()?;
 
         // Generate the shared secret and ciphertexts.
@@ -198,7 +199,7 @@ impl Header {
     /// * `algo`: [algorithm][`Algorithm`],
     /// * `mode`: [mode][`Mode`],
     /// * `iv`: the initialization vector.
-    pub fn msgpack_into<W: Write>(self, w: &mut W) -> Result<(), Error> {
+    pub fn into_bytes<W: Write>(self, w: &mut W) -> Result<(), Error> {
         let mut serializer = rmp_serde::encode::Serializer::new(w);
 
         self.serialize(&mut serializer)
@@ -206,7 +207,7 @@ impl Header {
     }
 
     /// Deserialize the header from binary MessagePack format.
-    pub fn msgpack_from<R: Read>(r: R) -> Result<Self, Error> {
+    pub fn from_bytes<R: Read>(r: R) -> Result<Self, Error> {
         rmp_serde::decode::from_read(r).map_err(|e| Error::MessagePack(Box::new(e)))
     }
 
@@ -214,17 +215,17 @@ impl Header {
     ///
     /// Should only be used for small header or development purposes,
     /// or when compactness is not required.
-    pub fn to_json_string(self) -> Result<String, Error> {
+    pub fn to_json(self) -> Result<String, Error> {
         serde_json::to_string(&self).map_err(Error::Json)
     }
 
     /// Deserialize the header from a JSON string.
-    pub fn from_json_string(s: &str) -> Result<Self, Error> {
+    pub fn from_json(s: &str) -> Result<Self, Error> {
         serde_json::from_str(s).map_err(Error::Json)
     }
 
-    //pub fn mode_checked(&self, expected: Mode) -> Result<Mode, Error> {}
-    //pub fn algo_checked(&self, expected: Algorithm) -> Result<Algorithm, Error> {}
+    //TODO: pub fn mode_checked(&self, expected: Mode) -> Result<Mode, Error> {}
+    //TODO: pub fn algo_checked(&self, expected: Algorithm) -> Result<Algorithm, Error> {}
 }
 
 #[cfg(test)]
@@ -237,17 +238,17 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::default();
 
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
-        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let ids: Vec<String> = setup.policy.keys().cloned().collect();
+        let (header, _ss) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
 
-        let s = header.to_json_string().unwrap();
-        let decoded = Header::from_json_string(&s).unwrap();
+        let s = header.to_json().unwrap();
+        let decoded = Header::from_json(&s).unwrap();
 
         assert_eq!(decoded.policies.len(), 2);
         assert_eq!(
             &decoded.policies.get(&ids[0]).unwrap().policy,
-            &setup.policies.get(&ids[0]).unwrap().to_hidden()
+            &setup.policy.get(&ids[0]).unwrap().to_hidden()
         );
 
         assert_eq!(&decoded.algo, &header2.algo);
@@ -255,25 +256,25 @@ mod tests {
     }
 
     #[test]
-    fn test_enc_dec_msgpack() {
+    fn test_enc_dec_binary() {
         use std::io::Cursor;
 
         let mut rng = rand::thread_rng();
         let setup = TestSetup::default();
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
+        let ids: Vec<String> = setup.policy.keys().cloned().collect();
 
-        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, _ss) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
 
         let mut v = Vec::new();
-        header.msgpack_into(&mut v).unwrap();
+        header.into_bytes(&mut v).unwrap();
 
-        let decoded = Header::msgpack_from(Cursor::new(v)).unwrap();
+        let decoded = Header::from_bytes(Cursor::new(v)).unwrap();
 
         assert_eq!(decoded.policies.len(), 2);
         assert_eq!(
             &decoded.policies.get(&ids[0]).unwrap().policy,
-            &setup.policies.get(&ids[0]).unwrap().to_hidden()
+            &setup.policy.get(&ids[0]).unwrap().to_hidden()
         );
         assert_eq!(&decoded.algo, &header2.algo);
         assert_eq!(&decoded.mode, &header2.mode);
@@ -290,7 +291,7 @@ mod tests {
 
         let mut v1 = Vec::new();
 
-        let header = Header::new(&setup.mpk, &setup.policies, &mut rng)
+        let header = Header::new(&setup.mpk, &setup.policy, &mut rng)
             .unwrap()
             .0
             .with_mode(Mode::InMemory { size: 1024 })
@@ -298,9 +299,9 @@ mod tests {
 
         let header2 = header.clone();
 
-        header.msgpack_into(&mut v1).unwrap();
+        header.into_bytes(&mut v1).unwrap();
 
-        let s1 = header2.to_json_string().unwrap();
+        let s1 = header2.to_json().unwrap();
 
         let mut tmp = Vec::new();
 
@@ -322,36 +323,36 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let setup = TestSetup::default();
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
+        let ids: Vec<String> = setup.policy.keys().cloned().collect();
 
         let test_id = &ids[1];
         let test_usk = &setup.usks.get(test_id).unwrap();
 
-        let (header, ss1) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, ss1) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
         let header3 = header.clone();
 
         // Encode to binary via MessagePack.
         let mut v = Vec::new();
-        header.msgpack_into(&mut v).unwrap();
+        header.into_bytes(&mut v).unwrap();
 
         // Encode to JSON string.
-        let json = header2.to_json_string().unwrap();
+        let json = header2.to_json().unwrap();
 
-        let decoded1 = Header::msgpack_from(Cursor::new(v)).unwrap();
+        let decoded1 = Header::from_bytes(Cursor::new(v)).unwrap();
         let ss2 = decoded1
             .policies
             .get(test_id)
             .unwrap()
-            .derive_keys(test_usk)
+            .decaps(test_usk)
             .unwrap();
 
-        let decoded2 = Header::from_json_string(&json).unwrap();
+        let decoded2 = Header::from_json(&json).unwrap();
         let ss3 = decoded2
             .policies
             .get(test_id)
             .unwrap()
-            .derive_keys(test_usk)
+            .decaps(test_usk)
             .unwrap();
 
         assert_eq!(&decoded1.policies.len(), &header3.policies.len());

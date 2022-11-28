@@ -4,10 +4,14 @@ use crate::error::Error;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tiny_keccak::{Hasher, Sha3};
 
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
+
+/// The complete encryption policy for all recipients.
+pub type Policy = BTreeMap<String, RecipientPolicy>;
 
 /// An IRMAseal AttributeRequest, which is a simple case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
@@ -21,9 +25,9 @@ pub struct Attribute {
     pub value: Option<String>,
 }
 
-/// An IRMAseal policy used to encapsulate a shared secret.
+/// An IRMAseal policy used to encapsulate a shared secret for one recipient.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct Policy {
+pub struct RecipientPolicy {
     /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
@@ -37,7 +41,7 @@ pub struct Policy {
 /// A policy where (part of) the value of the attributes is hidden.
 /// This type is safe for usage in (public) [Header][`crate::Header`] alongside the ciphertext.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct HiddenPolicy {
+pub struct HiddenRecipientPolicy {
     /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
@@ -46,10 +50,10 @@ pub struct HiddenPolicy {
     pub con: Vec<Attribute>,
 }
 
-impl Policy {
+impl RecipientPolicy {
     /// Completely hides the attribute value.
-    pub fn to_hidden(&self) -> HiddenPolicy {
-        HiddenPolicy {
+    pub fn to_hidden(&self) -> HiddenRecipientPolicy {
+        HiddenRecipientPolicy {
             timestamp: self.timestamp,
             con: self
                 .con
@@ -138,7 +142,7 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::identity::Policy;
+    use crate::identity::RecipientPolicy;
     use crate::test::TestSetup;
     use ibe::kem::cgw_kv::CGWKV;
 
@@ -147,7 +151,7 @@ mod tests {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::default();
 
-        let policies: Vec<Policy> = setup.policies.into_values().collect();
+        let policies: Vec<RecipientPolicy> = setup.policy.into_values().collect();
         let p1_derived = policies[1].derive::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();

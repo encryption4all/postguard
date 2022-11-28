@@ -52,7 +52,7 @@
 //! [wasm-streams](https://docs.rs/wasm-streams/latest/wasm_streams/index.html) crate.
 //!
 //! This module is only available on the `target_arch = "wasm32-unknown-unknown"` and the output
-//! _should_ be used in browser environments.
+//! _should_ be used in browser environments. This also greatly reduces the bundle size.
 //!
 //! This module can largely be simplified when [the AEAD crate][`aead`] will support async, see
 //! [the relevant issue](https://github.com/RustCrypto/traits/issues/304).
@@ -76,9 +76,8 @@
 //! The encryption policy can be initialized as follows:
 //!
 //! ```
-//! use std::collections::BTreeMap;
 //! use std::time::SystemTime;
-//! use irmaseal_core::identity::{Attribute, Policy};
+//! use irmaseal_core::identity::{Attribute, Policy, RecipientPolicy};
 //!
 //! let timestamp = SystemTime::now()
 //!     .duration_since(SystemTime::UNIX_EPOCH)
@@ -88,7 +87,7 @@
 //! let id1 = String::from("j.doe@example.com");
 //! let id2 = String::from("john.doe@example.com");
 //!
-//! let p1 = Policy {
+//! let p1 = RecipientPolicy {
 //!     timestamp,
 //!     con: vec![Attribute::new(
 //!         "pbdf.gemeente.personalData.bsn",
@@ -96,7 +95,7 @@
 //!     )],
 //! };
 //!
-//! let p2 = Policy {
+//! let p2 = RecipientPolicy {
 //!     timestamp,
 //!     con: vec![
 //!         Attribute::new("pbdf.gemeente.personalData.name", Some("john")),
@@ -104,7 +103,7 @@
 //!     ],
 //! };
 //!
-//! let policies = BTreeMap::<String, Policy>::from([(id1, p1), (id2, p2)]);
+//! let policies = Policy::from([(id1, p1), (id2, p2)]);
 //! ```
 //!
 //! This will specify two recipients who can decrypt, in this case identified by their e-mail
@@ -114,11 +113,11 @@
 //!
 //! ### Seal a slice using the Rust Crypto backend.
 //!
-//! ```
+//! ```ignore
 //! use irmaseal_core::error::Error;
 //! use irmaseal_core::header::{Header};
 //! use irmaseal_core::artifacts::{PublicKey, UserSecretKey};
-//! use irmaseal_core::SealedPacket;
+//! use irmaseal_core::{Sealer, SealedPacket};
 //! use irmaseal_core::test::TestSetup;
 //!
 //! # fn main() -> Result<(), Error> {
@@ -127,29 +126,33 @@
 //!
 //! // Encryption & serialization.
 //! let input = b"SECRET DATA";
-//! let packet = SealedPacket::<Vec<u8>>::new(&setup.mpk, &setup.policies, &mut rng, &input)?;
-//! let out_bin = packet.to_bin()?;
+//! let packet =
+//!     Sealer::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
+//! let out_bin = packet.into_bytes()?;
 //!
 //! println!("out: {:?}", &out_bin);
 //!
 //! // Deserialization & decryption.
-//! let packet2 = SealedPacket::<Vec<u8>>::from_bin(&out_bin)?;
+//! let packet2 = SealedPacket::<Vec<u8>>::from_bytes(&out_bin)?;
 //! let id = "john.doe@example.com";
 //! let usk = &setup.usks[id];
-//! let original = packet2.unseal(&id, usk)?;
+//! let original = packet2.unseal(id, usk)?;
 //!
 //! assert_eq!(&input.to_vec(), &original);
+//!
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! ### Seal a stream using the Rust Crypto backend.
 //!
+//! TODO: make this example
+//!
 //! ### Using the Web Crypto backend.
 //!
 //! See [`irmaseal-wasm-bindings`](../../irmaseal-wasm-bindings/tests/tests.rs).
 
-//#![deny(missing_debug_implementations, rust_2018_idioms, missing_docs)]
+#![deny(missing_debug_implementations, rust_2018_idioms, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod api;
@@ -183,6 +186,8 @@ pub use consts::*;
 use crate::header::Header;
 use serde::{Deserialize, Serialize};
 
+extern crate alloc;
+
 /// An IRMAseal encrypted packet.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SealedPacket<R> {
@@ -198,8 +203,8 @@ pub struct SealedPacket<R> {
 
 /// A [`Sealer`] is used to create an IRMAseal bytestream.
 #[derive(Debug)]
-pub struct Sealer<W, C: SealConfig> {
-    w: W,
+pub struct Sealer<C: SealConfig> {
+    header: Header, // TODO: Save space by switching to HeaderBuilder?
     config: C,
 }
 
@@ -230,7 +235,4 @@ pub trait UnsealConfig {}
 /// Configuration for a Sealer.
 pub trait SealConfig {}
 
-//#[cfg(any(feature = "rust_stream", feature = "web_stream"))]
-//pub(crate) mod stream {
-//    use crate::header::Header;
-//}
+// TODO: maybe lock the Config traits: https://internals.rust-lang.org/t/sealed-traits/16797

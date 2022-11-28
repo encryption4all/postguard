@@ -50,12 +50,12 @@ pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: u32 = 64 * 1024;
 /// Size of the symmetric key.
 pub const KEY_SIZE: usize = 16;
 
+/// Size of the IV.
+pub const IV_SIZE: usize = 12;
+
 // The STREAM construction needs only 12 bytes:
 // A 7-byte nonce, a 4-byte counter (u32) and an all-zero or all-one byte,
 // depending on if the segment is the final segment.
-
-/// Size of the IV used in the "STREAM" encryption construction.
-pub const STREAM_IV_SIZE: usize = 12;
 
 /// Size of the nonce in the "STREAM" encryption construction.
 pub const STREAM_NONCE_SIZE: usize = 7;

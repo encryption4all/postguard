@@ -15,11 +15,12 @@ use crate::header::{Algorithm, Header, Mode};
 use crate::identity::Policy;
 use crate::web::aesgcm::encrypt;
 use crate::web::aesgcm::{decrypt, get_key};
+use crate::{SealConfig, Sealer};
+
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Error as JsError;
 use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
-use std::collections::BTreeMap;
 use wasm_bindgen::JsValue;
 
 #[doc(inline)]
@@ -31,43 +32,64 @@ impl From<Error> for JsValue {
     }
 }
 
-impl SealedPacket<Uint8Array> {
-    /// Seals the contents of a `Uint8Array` into a [`SealedPacket`].
-    /// See [`SealedPacket`] for serialization methods.
-    pub async fn new<R: RngCore + CryptoRng>(
-        pk: &PublicKey<CGWKV>,
-        policies: &BTreeMap<String, Policy>,
+struct SealerConfig {
+    key: [u8; KEY_SIZE],
+    nonce: [u8; IV_SIZE],
+}
+
+impl SealConfig for SealerConfig {}
+
+impl Sealer<SealerConfig> {
+    /// Create a new [`Sealer`].
+    pub fn new<R: RngCore + CryptoRng>(
+        mpk: &PublicKey<CGWKV>,
+        policies: &Policy,
         rng: &mut R,
-        input: impl AsRef<Uint8Array>,
-    ) -> Result<Self, JsValue> {
-        let (header, ss) = Header::new(pk, policies, rng)?;
-        let header = header.with_mode(Mode::InMemory {
-            size: input.as_ref().length(),
-        });
+    ) -> Result<Self, Error> {
+        let (header, ss) = Header::new(mpk, policies, rng)?;
+        let Algorithm::Aes128Gcm(iv) = header.algo;
 
-        let iv = match header {
-            Header {
-                algo: Algorithm::Aes128Gcm(iv),
-                ..
-            } => iv,
-            _ => return Err(Error::AlgorithmNotSupported(header.algo).into()),
-        };
+        let mut key = [0u8; KEY_SIZE];
+        let mut nonce = [0u8; 12];
+        key.copy_from_slice(&ss.0[..KEY_SIZE]);
+        nonce.copy_from_slice(&iv.0[..12]);
 
-        let key = get_key(&ss.0[..KEY_SIZE]).await?;
-        let ciphertext =
-            encrypt(&key, &iv.0, &Uint8Array::new_with_length(0), input.as_ref()).await?;
-
-        Ok(SealedPacket {
-            version: VERSION_V2,
+        Ok(Self {
             header,
-            ciphertext,
+            config: SealerConfig { key, nonce },
         })
     }
 
-    // to_json
-    // to_bin
-    // from_json
-    // from_bin
+    /// Seals the payload.
+    ///
+    /// See [`SealedPacket`] for serialization methods.
+    pub async fn seal(mut self, input: &Uint8Array) -> Result<SealedPacket<Uint8Array>, JsValue> {
+        self.header = self.header.with_mode(Mode::InMemory {
+            size: input.byte_length(),
+        });
+
+        let key = get_key(&self.config.key).await?;
+        let ciphertext = encrypt(
+            &key,
+            &self.config.nonce,
+            &Uint8Array::new_with_length(0),
+            input,
+        )
+        .await?;
+
+        Ok(SealedPacket {
+            version: VERSION_V2,
+            header: self.header,
+            ciphertext,
+        })
+    }
+}
+
+impl SealedPacket<Uint8Array> {
+    // TODO: into_bytes
+    // TODO: from_bytes
+    // TODO: into_json
+    // TODO: from_json
 
     /// Unseals a [`SealedPacket`] into an [`Uint8Array`].
     pub async fn unseal(
@@ -81,13 +103,10 @@ impl SealedPacket<Uint8Array> {
             .get(ident)
             .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
 
-        let ss = rec_info.derive_keys(usk)?;
+        let ss = rec_info.decaps(usk)?;
         let key = get_key(&ss.0[..KEY_SIZE]).await?;
 
-        let iv = match self.header.algo {
-            Algorithm::Aes128Gcm(iv) => iv,
-            _ => return Err(Error::AlgorithmNotSupported(self.header.algo).into()),
-        };
+        let Algorithm::Aes128Gcm(iv) = self.header.algo;
 
         decrypt(
             &key,

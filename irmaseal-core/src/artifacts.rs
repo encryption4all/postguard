@@ -172,7 +172,7 @@ mod tests {
     fn default_setup<K>() -> (K::Pk, K::Sk, K::Ct, K::Usk, MkemCt<K>)
     where
         K: IBKEM,
-        K: MultiRecipient<K>,
+        K: MultiRecipient,
     {
         let mut rng = rand::thread_rng();
         let (mpk, msk) = K::setup(&mut rng);

@@ -39,3 +39,29 @@ pub(crate) fn preamble_checked(preamble: &[u8]) -> Result<(u16, usize), Error> {
 
     Ok((version, header_len))
 }
+
+#[cfg(any(feature = "rust_stream", feature = "web_stream"))]
+pub(crate) mod stream {
+    use super::*;
+    use crate::header::{Header, Mode};
+
+    pub(crate) fn mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), Error> {
+        let (segment_size, size_hint) = match h {
+            Header {
+                mode:
+                    Mode::Streaming {
+                        segment_size,
+                        size_hint,
+                    },
+                ..
+            } => (segment_size, size_hint),
+            _ => return Err(Error::ModeNotSupported(h.mode)),
+        };
+
+        if *segment_size > MAX_SYMMETRIC_CHUNK_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
+
+        Ok((*segment_size, size_hint.clone()))
+    }
+}
