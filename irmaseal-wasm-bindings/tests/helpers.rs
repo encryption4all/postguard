@@ -1,6 +1,7 @@
+use irmaseal_core::artifacts::{PublicKey, UserSecretKey};
+use irmaseal_core::identity::{Attribute, Policy, RecipientPolicy};
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{Attribute, Policy, PublicKey, UserSecretKey};
 use rand::RngCore;
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
@@ -58,7 +59,7 @@ pub fn rand_vec(length: usize) -> Vec<u8> {
 
 pub struct TestSetup {
     pub mpk: PublicKey<CGWKV>,
-    pub policies: BTreeMap<String, Policy>,
+    pub policies: Policy,
     pub usks: BTreeMap<String, UserSecretKey<CGWKV>>,
 }
 
@@ -69,14 +70,14 @@ impl Default for TestSetup {
         let id1 = String::from("alice@example.com");
         let id2 = String::from("bob@example.com");
 
-        let p1 = Policy {
+        let p1 = RecipientPolicy {
             timestamp: 1566722350,
             con: vec![Attribute::new(
                 "pbdf.gemeente.personalData.bsn",
                 Some("123456789"),
             )],
         };
-        let p2 = Policy {
+        let p2 = RecipientPolicy {
             timestamp: 1566722350,
             con: vec![
                 Attribute::new("pbdf.gemeente.personalData.name", Some("bob")),
@@ -84,7 +85,7 @@ impl Default for TestSetup {
             ],
         };
 
-        let policies = BTreeMap::<String, Policy>::from([(id1, p1), (id2, p2)]);
+        let policies = Policy::from([(id1, p1), (id2, p2)]);
 
         let (tmpk, msk) = CGWKV::setup(&mut rng);
         let mpk = PublicKey::<CGWKV>(tmpk);

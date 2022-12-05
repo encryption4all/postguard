@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
+use irmaseal_core::artifacts::{PublicKey, UserSecretKey};
+use irmaseal_core::identity::{HiddenRecipientPolicy, Policy};
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::SS_BYTES;
-use irmaseal_core::stream::web::{web_seal, WebUnsealer};
-use irmaseal_core::{HiddenPolicy, Policy, PublicKey, UserSecretKey};
+use irmaseal_core::web::stream::{StreamSealerConfig, StreamUnsealerConfig};
+use irmaseal_core::{Sealer, Unsealer};
 
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
@@ -12,13 +14,8 @@ use wasm_streams::readable::IntoStream;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
-extern crate wee_alloc;
-
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 #[wasm_bindgen(js_name = Unsealer)]
-pub struct JsUnsealer(WebUnsealer<IntoStream<'static>>);
+pub struct JsUnsealer(Unsealer<IntoStream<'static>, StreamUnsealerConfig>);
 
 /// Seals the contents of a `ReadableStream` into a `WritableStream` using
 /// the given master public key and policies.
@@ -41,14 +38,16 @@ pub async fn js_seal(
     writable: RawWritableStream,
 ) -> Result<(), JsValue> {
     let mut rng = rand::thread_rng();
-    let pk: PublicKey<CGWKV> = mpk.into_serde().unwrap();
-    let pols: BTreeMap<String, Policy> = policies.into_serde().unwrap();
+    let mpk: PublicKey<CGWKV> = serde_wasm_bindgen::from_value(mpk)?;
+    let pol: Policy = serde_wasm_bindgen::from_value(policies)?;
 
     let read = ReadableStream::from_raw(readable);
     let mut stream = read.into_stream();
     let mut sink = WritableStream::from_raw(writable).into_sink();
 
-    web_seal(&pk, &pols, &mut rng, &mut stream, &mut sink).await?;
+    Sealer::<StreamSealerConfig>::new(&mpk, &pol, &mut rng)?
+        .seal(&mut stream, &mut sink)
+        .await?;
 
     Ok(())
 }
@@ -63,7 +62,7 @@ impl JsUnsealer {
     /// Locks the ReadableStream until this Unsealer is dropped.`
     pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
         let read = ReadableStream::from_raw(readable).into_stream();
-        let unsealer = WebUnsealer::new(read).await?;
+        let unsealer = Unsealer::<_, StreamUnsealerConfig>::new(read).await?;
 
         Ok(Self(unsealer))
     }
@@ -87,7 +86,7 @@ impl JsUnsealer {
         usk: JsValue,
         writable: RawWritableStream,
     ) -> Result<(), JsValue> {
-        let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
+        let usk: UserSecretKey<CGWKV> = serde_wasm_bindgen::from_value(usk)?;
         let mut write = WritableStream::from_raw(writable).into_sink();
 
         self.0.unseal(&recipient_id, &usk, &mut write).await?;
@@ -97,8 +96,8 @@ impl JsUnsealer {
 
     /// Returns all hidden policies in the header.
     /// The user should use this to retrieve a `UserSecretKey`.
-    pub fn hidden_policies(&self) -> JsValue {
-        let policies: BTreeMap<String, HiddenPolicy> = self
+    pub fn hidden_policies(&self) -> Result<JsValue, JsValue> {
+        let policies: BTreeMap<String, HiddenRecipientPolicy> = self
             .0
             .header
             .policies
@@ -106,34 +105,39 @@ impl JsUnsealer {
             .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
             .collect();
 
-        JsValue::from_serde(&policies).unwrap()
+        let pol = serde_wasm_bindgen::to_value(&policies)?;
+
+        Ok(pol)
     }
 
     /// Returns the algorithm used during symmetric encryption.
-    pub fn algo(&self) -> JsValue {
-        JsValue::from_serde(&self.0.header.algo).unwrap()
+    pub fn algo(&self) -> Result<JsValue, JsValue> {
+        let algo = serde_wasm_bindgen::to_value(&self.0.header.algo)?;
+
+        Ok(algo)
     }
 
     /// Returns the mode used during symmetric encryption.
-    pub fn mode(&self) -> JsValue {
-        JsValue::from_serde(&self.0.header.mode).unwrap()
+    pub fn mode(&self) -> Result<JsValue, JsValue> {
+        let mode = serde_wasm_bindgen::to_value(&self.0.header.mode)?;
+
+        Ok(mode)
     }
 
     /// Returns the 32-byte shared secret derived from the unsealer and the usk/mpk.
-    pub fn derive_key(&self, id: &str, usk: &JsValue) -> Uint8Array {
-        let usk: UserSecretKey<CGWKV> = usk.into_serde().unwrap();
+    pub fn derive_key(&self, id: &str, usk: JsValue) -> Result<Uint8Array, JsValue> {
+        let usk: UserSecretKey<CGWKV> = serde_wasm_bindgen::from_value(usk)?;
         let ss = self
             .0
             .header
             .policies
             .get(id)
-            .unwrap()
-            .derive_keys(&usk)
-            .unwrap();
+            .ok_or_else(|| JsValue::from(JsError::new(&format!("unknown identifier: {}", id))))?
+            .decaps(&usk)?;
 
         let ss_js = Uint8Array::new_with_length(SS_BYTES as u32);
         ss_js.copy_from(&ss.0);
 
-        ss_js
+        Ok(ss_js)
     }
 }
