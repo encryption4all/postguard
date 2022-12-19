@@ -15,28 +15,29 @@ categories = ["cryptography"]
 [dependencies]
 irma = "0.2.1"
 ibe = { version = "0.2.3", features = ["cgwkv", "mkem"] }
-rand = { version = "0.8.4", default-features = false }
-serde = { version = "1.0.126", features = ["derive"] }
-rmp-serde = "1.1.0"
-serde_json = "1.0.68"
+rand = { version = "0.8", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+rmp-serde = "1.1"
+serde_json = "1.0"
 subtle = "2.3"
-tiny-keccak = { version = "2.0.2", features = ["sha3"] }
-base64ct = { version = "1.0.2" }
+tiny-keccak = { version = "2.0", features = ["sha3"] }
+base64ct = { version = "1.5" }
 
 # For both stream features.
-futures = { version = "0.3.21", optional = true }
+futures = { version = "0.3", optional = true }
 
 # For the Rust Crypto backend.
-aead = { version = "0.4.3", features = ["stream", "alloc"], optional = true }
-aes-gcm = { version = "0.9.4", optional = true }
+aead = { version = "0.5", features = ["stream", "alloc"], optional = true }
+aes-gcm = { version = "0.10", optional = true }
 
 # For the Web Crypto backend ("web" feature).
 getrandom = { version = "0.2", optional = true }
-wasm-bindgen = { version = "0.2.78", optional = true }
-js-sys = { version = "0.3.55", optional = true }
-cipher = { version = "0.3.0", optional = true }
-wasm-bindgen-futures = { version = "0.4.28", optional = true }
-web-sys = { version = "0.3.55", features = [
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+cipher = { version = "0.3", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+serde-wasm-bindgen = { version = "0.4", optional = true }
+web-sys = { version = "0.3", features = [
   "SubtleCrypto",
   "AesGcmParams",
   "Crypto",
@@ -45,7 +46,8 @@ web-sys = { version = "0.3.55", features = [
 
 [dev-dependencies]
 serde-transcode = "1.1.1"
-criterion = "0.3.5"
+criterion = "0.4"
+rand = "0.8.5"
 
 [features]
 default = ["rust"]
@@ -67,7 +69,7 @@ web_stream = []
 [[bench]]
 name = "main"
 harness = false
-required-features = ["stream"]
+required-features = ["rust", "rust_stream"]
 
 [package.metadata.docs.rs]
 all-features = true

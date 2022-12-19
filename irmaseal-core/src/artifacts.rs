@@ -1,4 +1,4 @@
-//! Artifacts of the IRMAseal encryption standard.
+//! Artifacts of the IRMAseal protocol.
 //!
 //! This module implements constant-time serde serialization and deserialization for artifacts.
 //!

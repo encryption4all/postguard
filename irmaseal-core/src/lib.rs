@@ -28,11 +28,6 @@
 //!
 //! This library offers two symmetric cryptography providers, as listed below.
 //!
-//! ## Symmetric crypto backends
-//!
-//! This library supports two symmetric encryption backends, depending on the compilation target
-//! and selected features.
-//!
 //! ### Rust Crypto
 //!
 //! This module utilizes the symmetric primitives provided by [`Rust
@@ -113,12 +108,12 @@
 //!
 //! ### Seal a slice using the Rust Crypto backend.
 //!
-//! ```ignore
-//! use irmaseal_core::error::Error;
-//! use irmaseal_core::header::{Header};
+//! ```
 //! use irmaseal_core::artifacts::{PublicKey, UserSecretKey};
-//! use irmaseal_core::{Sealer, SealedPacket};
+//! use irmaseal_core::error::Error;
+//! use irmaseal_core::rust::{SealerMemoryConfig as SealConfig, UnsealerMemoryConfig as UnsealConfig};
 //! use irmaseal_core::test::TestSetup;
+//! use irmaseal_core::{SealedPacket, Sealer, Unsealer};
 //!
 //! # fn main() -> Result<(), Error> {
 //! let mut rng = rand::thread_rng();
@@ -126,17 +121,20 @@
 //!
 //! // Encryption & serialization.
 //! let input = b"SECRET DATA";
+//!
+//! // Specifying the configuration is only required when there
+//! // are multiple options in scope.
 //! let packet =
-//!     Sealer::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
+//!     Sealer::<SealConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
 //! let out_bin = packet.into_bytes()?;
 //!
 //! println!("out: {:?}", &out_bin);
 //!
 //! // Deserialization & decryption.
-//! let packet2 = SealedPacket::<Vec<u8>>::from_bytes(&out_bin)?;
+//! let packet2 = SealedPacket::from_bytes(&out_bin)?;
 //! let id = "john.doe@example.com";
 //! let usk = &setup.usks[id];
-//! let original = packet2.unseal(id, usk)?;
+//! let original = Unsealer::<_, UnsealConfig>::new(packet2).unseal(id, usk)?;
 //!
 //! assert_eq!(&input.to_vec(), &original);
 //!
@@ -163,9 +161,6 @@ pub mod header;
 pub mod identity;
 mod util;
 
-#[doc(hidden)]
-pub mod test;
-
 #[cfg(feature = "rust")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rust")))]
 pub mod rust;
@@ -174,65 +169,137 @@ pub mod rust;
 #[cfg_attr(docsrs, doc(cfg(feature = "web")))]
 pub mod web;
 
-#[doc(inline)]
-pub use artifacts::{PublicKey, UserSecretKey};
-
 #[doc(hidden)]
 pub use ibe::{kem, Compress};
 
 #[doc(hidden)]
 pub use consts::*;
 
-use crate::header::Header;
+#[doc(hidden)]
+pub mod test;
+
+use crate::error::Error;
+use crate::header::{Header, Mode};
+use crate::util::*;
 use serde::{Deserialize, Serialize};
 
 extern crate alloc;
 
-/// An IRMAseal encrypted packet.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SealedPacket<R> {
-    /// The version of the header.
-    pub version: u16,
-
-    /// The header of the IRMAseal packet.
-    pub header: Header,
-
-    /// The ciphertext (encrypted plaintext).
-    pub ciphertext: R,
-}
-
-/// A [`Sealer`] is used to create an IRMAseal bytestream.
+/// A Sealer is like a builder used to encrypt and optionally sign data using IRMAseal.
 #[derive(Debug)]
-pub struct Sealer<C: SealConfig> {
-    header: Header, // TODO: Save space by switching to HeaderBuilder?
+pub struct Sealer<C: SealerConfig> {
+    // The prebuilt header.
+    // TODO: Maybe replace this with a HeaderBuilder?
+    header: Header,
+
+    // The implementation-specific configuration.
     config: C,
 }
 
-/// An [`Unsealer`] is used to decrypt IRMAseal bytestreams.
+/// An Unsealer is used to decrypt and verify data using IRMAseal.
 ///
 /// Unsealing is a two-step process:
 ///
-/// 1. First the header is read. This yields information about the recipients.
-/// Using this information the user can retrieve a user secret key.
+/// 1. First the header is read. This yields information for whom the message is encrypted. Using
+///    this information the user can retrieve a user secret key.
 ///
 /// 2. Then, the user has input the user secret key and the recipient for which decryption should
-/// take place.
+///    take place.
 #[derive(Debug)]
-pub struct Unsealer<R, C: UnsealConfig> {
+pub struct Unsealer<R, C: UnsealerConfig> {
     /// The version found before the raw header.
     pub version: u16,
 
     /// The parsed header.
     pub header: Header,
 
+    // The type of the input.
     r: R,
+
+    // The implementation-specific configuration.
     config: C,
 }
 
-/// Configuration for an Unsealer.
-pub trait UnsealConfig {}
+/// Sealer configuration.
+///
+/// This trait is sealed, you cannot implement it yourself.
+pub trait SealerConfig: sealed::SealerConfig {}
 
-/// Configuration for a Sealer.
-pub trait SealConfig {}
+/// Unsealer configuration.
+///
+/// This trait is sealed, you cannot implement it yourself.
+pub trait UnsealerConfig: sealed::UnsealerConfig {}
 
-// TODO: maybe lock the Config traits: https://internals.rust-lang.org/t/sealed-traits/16797
+pub(crate) mod sealed {
+    pub trait UnsealerConfig {}
+    pub trait SealerConfig {}
+}
+
+/// An IRMAseal encrypted packet.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SealedPacket {
+    /// The version of the header.
+    pub version: u16,
+
+    /// The header of the IRMAseal packet.
+    pub header: Header,
+
+    /// The symmetric ciphertext.
+    pub ciphertext: Vec<u8>,
+}
+
+impl SealedPacket {
+    /// Serialize to a JSON string.
+    pub fn into_json(self) -> Result<String, Error> {
+        serde_json::to_string(&self).map_err(Error::Json)
+    }
+
+    /// Deserialize from a JSON string.
+    pub fn from_json(s: &str) -> Result<Self, Error> {
+        serde_json::from_str(s).map_err(Error::Json)
+    }
+
+    /// Serialize to binary format.
+    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
+        let mut header_buf = Vec::new();
+        self.header.into_bytes(&mut header_buf)?;
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&PRELUDE);
+        out.extend_from_slice(&self.version.to_be_bytes());
+        out.extend_from_slice(
+            &u32::try_from(header_buf.len())
+                .map_err(|_| Error::ConstraintViolation)?
+                .to_be_bytes(),
+        );
+        out.extend_from_slice(&header_buf);
+        out.extend_from_slice(&self.ciphertext);
+
+        Ok(out)
+    }
+
+    /// Deserialize from binary format.
+    pub fn from_bytes(b: impl AsRef<[u8]>) -> Result<Self, Error> {
+        let b = b.as_ref();
+
+        let (version, header_len) = preamble_checked(&b[..PREAMBLE_SIZE])?;
+
+        let len = b.len();
+        let header_bytes = &b[PREAMBLE_SIZE..PREAMBLE_SIZE + header_len];
+        let header = Header::from_bytes(header_bytes)?;
+
+        let payload_len = match header.mode {
+            Mode::InMemory { size } => size,
+            _ => return Err(Error::ModeNotSupported(header.mode)),
+        };
+
+        let ct_len = payload_len as usize + TAG_SIZE;
+        let ciphertext = b[len - ct_len..].to_vec();
+
+        Ok(SealedPacket {
+            version,
+            header,
+            ciphertext,
+        })
+    }
+}

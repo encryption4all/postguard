@@ -6,31 +6,38 @@ use crate::error::Error;
 use crate::header::*;
 use crate::identity::Policy;
 use crate::util::{stream, *};
+use crate::{Sealer, SealerConfig, Unsealer, UnsealerConfig};
 
-use crate::{SealConfig, Sealer, UnsealConfig, Unsealer};
 use aead::stream::{DecryptorBE32, EncryptorBE32};
-use aes_gcm::{Aes128Gcm, NewAead};
+use aead::KeyInit;
+use aes_gcm::Aes128Gcm;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
 
-struct UnsealerConfig {
-    segment_size: u32,
-}
-
-struct SealerConfig {
+/// Configures an [`Sealer`] to process a payload stream.
+#[derive(Debug)]
+pub struct StreamSealerConfig {
     segment_size: u32,
     key: [u8; KEY_SIZE],
     nonce: [u8; STREAM_NONCE_SIZE],
 }
 
-impl SealConfig for SealerConfig {}
-impl UnsealConfig for UnsealerConfig {}
+/// Configures an [`Unsealer`] to process a payload stream.
+#[derive(Debug)]
+pub struct StreamUnsealerConfig {
+    segment_size: u32,
+}
 
-impl Sealer<SealerConfig> {
-    /// Construct a new [`Sealer`].
-    pub async fn new<Rng: RngCore + CryptoRng>(
+impl SealerConfig for StreamSealerConfig {}
+impl UnsealerConfig for StreamUnsealerConfig {}
+impl crate::sealed::SealerConfig for StreamSealerConfig {}
+impl crate::sealed::UnsealerConfig for StreamUnsealerConfig {}
+
+impl Sealer<StreamSealerConfig> {
+    /// Construct a new [`Sealer`] that can process payloads streamingly.
+    pub fn new<Rng: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &Policy,
         rng: &mut Rng,
@@ -48,7 +55,7 @@ impl Sealer<SealerConfig> {
 
         Ok(Sealer {
             header,
-            config: SealerConfig {
+            config: StreamSealerConfig {
                 segment_size,
                 key,
                 nonce,
@@ -56,7 +63,9 @@ impl Sealer<SealerConfig> {
         })
     }
 
-    /// Add a size hint.
+    /// Add a size hint (optionally).
+    ///
+    /// This can help the receiver save some reallocations.
     pub fn with_size_hint(mut self, size_hint: (u64, Option<u64>)) -> Self {
         self.header.mode = Mode::Streaming {
             segment_size: self.config.segment_size,
@@ -122,7 +131,7 @@ impl Sealer<SealerConfig> {
     }
 }
 
-impl<R> Unsealer<R, UnsealerConfig>
+impl<R> Unsealer<R, StreamUnsealerConfig>
 where
     R: AsyncRead + Unpin,
 {
@@ -153,7 +162,7 @@ where
         Ok(Unsealer {
             version,
             header,
-            config: UnsealerConfig { segment_size },
+            config: StreamUnsealerConfig { segment_size },
             r: r.into_inner(), // This (new) reader is locked to the payload.
         })
     }
@@ -236,8 +245,7 @@ mod tests {
         let mut output = AllowStdIo::new(Vec::new());
 
         block_on(async {
-            Sealer::<SealerConfig>::new(&setup.mpk, &setup.policy, &mut rng)
-                .await
+            Sealer::<StreamSealerConfig>::new(&setup.mpk, &setup.policy, &mut rng)
                 .unwrap()
                 .seal(&mut input, &mut output)
                 .await
@@ -256,7 +264,7 @@ mod tests {
         let usk_id = setup.usks.get(id).unwrap();
 
         block_on(async {
-            let mut unsealer = Unsealer::<_, UnsealerConfig>::new(&mut input)
+            let mut unsealer = Unsealer::<_, StreamUnsealerConfig>::new(&mut input)
                 .await
                 .unwrap();
 
@@ -308,7 +316,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_corrupt_mac() {
+    fn test_corrupt_tag() {
         let setup = TestSetup::default();
 
         let plain = rand_vec(100);

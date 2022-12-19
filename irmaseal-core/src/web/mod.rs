@@ -9,13 +9,13 @@ mod aesgcm;
 pub mod stream;
 
 use crate::artifacts::{PublicKey, UserSecretKey};
-use crate::consts::*;
 use crate::error::Error;
 use crate::header::{Algorithm, Header, Mode};
 use crate::identity::Policy;
 use crate::web::aesgcm::encrypt;
 use crate::web::aesgcm::{decrypt, get_key};
-use crate::{SealConfig, Sealer};
+use crate::{consts::*, Unsealer, UnsealerConfig};
+use crate::{Sealer, SealerConfig};
 
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Error as JsError;
@@ -32,14 +32,24 @@ impl From<Error> for JsValue {
     }
 }
 
-struct SealerConfig {
+/// In-memory configuration for a [`Sealer`].
+#[derive(Debug)]
+pub struct SealerMemoryConfig {
     key: [u8; KEY_SIZE],
     nonce: [u8; IV_SIZE],
 }
 
-impl SealConfig for SealerConfig {}
+/// In-memory configuration for an [`Unsealer`].
+#[derive(Debug)]
+pub struct UnsealerMemoryConfig {}
 
-impl Sealer<SealerConfig> {
+impl SealerConfig for SealerMemoryConfig {}
+impl crate::sealed::SealerConfig for SealerMemoryConfig {}
+
+impl UnsealerConfig for UnsealerMemoryConfig {}
+impl crate::sealed::UnsealerConfig for UnsealerMemoryConfig {}
+
+impl Sealer<SealerMemoryConfig> {
     /// Create a new [`Sealer`].
     pub fn new<R: RngCore + CryptoRng>(
         mpk: &PublicKey<CGWKV>,
@@ -56,14 +66,14 @@ impl Sealer<SealerConfig> {
 
         Ok(Self {
             header,
-            config: SealerConfig { key, nonce },
+            config: SealerMemoryConfig { key, nonce },
         })
     }
 
     /// Seals the payload.
     ///
     /// See [`SealedPacket`] for serialization methods.
-    pub async fn seal(mut self, input: &Uint8Array) -> Result<SealedPacket<Uint8Array>, JsValue> {
+    pub async fn seal(mut self, input: &Uint8Array) -> Result<SealedPacket, JsValue> {
         self.header = self.header.with_mode(Mode::InMemory {
             size: input.byte_length(),
         });
@@ -75,7 +85,8 @@ impl Sealer<SealerConfig> {
             &Uint8Array::new_with_length(0),
             input,
         )
-        .await?;
+        .await?
+        .to_vec();
 
         Ok(SealedPacket {
             version: VERSION_V2,
@@ -85,13 +96,8 @@ impl Sealer<SealerConfig> {
     }
 }
 
-impl SealedPacket<Uint8Array> {
-    // TODO: into_bytes
-    // TODO: from_bytes
-    // TODO: into_json
-    // TODO: from_json
-
-    /// Unseals a [`SealedPacket`] into an [`Uint8Array`].
+impl Unsealer<SealedPacket, UnsealerMemoryConfig> {
+    /// Blabla
     pub async fn unseal(
         self,
         ident: &str,
@@ -108,12 +114,15 @@ impl SealedPacket<Uint8Array> {
 
         let Algorithm::Aes128Gcm(iv) = self.header.algo;
 
-        decrypt(
-            &key,
-            &iv.0[..],
-            &Uint8Array::new_with_length(0),
-            &self.ciphertext,
-        )
-        .await
+        let ct = Uint8Array::new_with_length(
+            self.r
+                .ciphertext
+                .len()
+                .try_into()
+                .map_err(|_| Error::ConstraintViolation)?,
+        );
+        ct.copy_from(&self.r.ciphertext);
+
+        decrypt(&key, &iv.0[..], &Uint8Array::new_with_length(0), &ct).await
     }
 }

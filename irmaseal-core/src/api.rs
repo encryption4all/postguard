@@ -1,4 +1,4 @@
-//! Definitions in the IRMAseal REST API protocol.
+//! Definitions of the IRMAseal protocol REST API.
 
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::identity::Attribute;

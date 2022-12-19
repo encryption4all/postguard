@@ -7,7 +7,7 @@ use crate::header::*;
 use crate::identity::Policy;
 use crate::util::{preamble_checked, stream};
 use crate::web::aesgcm::{decrypt, encrypt, get_key};
-use crate::{SealConfig, Sealer, UnsealConfig, Unsealer};
+use crate::{Sealer, SealerConfig, Unsealer, UnsealerConfig};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
@@ -15,24 +15,29 @@ use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use wasm_bindgen::{JsCast, JsValue};
 
-struct UnsealerConfig {
-    segment_size: u32,
-    payload: Vec<u8>,
-}
-
-impl UnsealConfig for UnsealerConfig {}
-
-struct SealerConfig {
+/// Configures an [`Sealer`] to process a payload stream.
+#[derive(Debug)]
+pub struct StreamSealerConfig {
     segment_size: u32,
     key: [u8; KEY_SIZE],
     nonce: [u8; STREAM_NONCE_SIZE],
 }
 
-impl SealConfig for SealerConfig {}
+/// Configures an [`Unsealer`] to process a payload stream.
+#[derive(Debug)]
+pub struct StreamUnsealerConfig {
+    segment_size: u32,
+    payload: Vec<u8>,
+}
 
-impl Sealer<SealerConfig> {
-    /// New
-    pub async fn new<Rng: RngCore + CryptoRng>(
+impl SealerConfig for StreamSealerConfig {}
+impl UnsealerConfig for StreamUnsealerConfig {}
+impl crate::sealed::SealerConfig for StreamSealerConfig {}
+impl crate::sealed::UnsealerConfig for StreamUnsealerConfig {}
+
+impl Sealer<StreamSealerConfig> {
+    /// Construct a new [`Sealer`] that can process payloads streamingly.
+    pub fn new<Rng: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &Policy,
         rng: &mut Rng,
@@ -50,7 +55,7 @@ impl Sealer<SealerConfig> {
 
         Ok(Sealer {
             header,
-            config: SealerConfig {
+            config: StreamSealerConfig {
                 segment_size,
                 key,
                 nonce,
@@ -58,7 +63,12 @@ impl Sealer<SealerConfig> {
         })
     }
 
-    /// Seal
+    /// Seals payload data from a [`Stream`] of [`JsValue`] to a Sink of [`JsValue`].
+    ///
+    /// # Errors
+    ///
+    /// Make sure the [`JsValue`]s *can* dynamically be cast to [`Uint8Array`],
+    /// otherwise this operation *will* error.
     pub async fn seal<R, W>(mut self, mut r: R, mut w: W) -> Result<(), JsValue>
     where
         R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
@@ -154,13 +164,16 @@ fn aead_nonce(nonce: &[u8], counter: u32, last_block: bool) -> [u8; IV_SIZE] {
     iv
 }
 
-impl<R> Unsealer<R, UnsealerConfig>
+impl<R> Unsealer<R, StreamUnsealerConfig>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
 {
     /// Create a new [`Unsealer`] that starts reading from a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream].
     ///
+    /// # Errors
+    ///
     /// Errors if the bytestream is not a legitimate IRMAseal bytestream.
+    /// Also errors if the items (of type [`JsValue`]) cannot be cast into [`Uint8Array`].
     pub async fn new(mut r: R) -> Result<Self, JsValue> {
         let preamble_len: u32 = PREAMBLE_SIZE
             .try_into()
@@ -220,7 +233,7 @@ where
         Ok(Unsealer {
             version,
             header,
-            config: UnsealerConfig {
+            config: StreamUnsealerConfig {
                 payload,
                 segment_size,
             },
@@ -317,173 +330,3 @@ where
         w.close().await
     }
 }
-
-///// Seals the contents of a [`Stream<Item = Result<Uint8Array, JsValue>>`][Stream] into a [`Sink<Uint8Array, Error = JsValue>`][Sink].
-//pub async fn seal<Rng, R, W>(
-//    pk: &PublicKey<CGWKV>,
-//    policies: &Policy,
-//    rng: &mut Rng,
-//    mut r: R,
-//    mut w: W,
-//) -> Result<(), JsValue>
-//where
-//    Rng: RngCore + CryptoRng,
-//    R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
-//    W: Sink<JsValue, Error = JsValue> + Unpin,
-//{
-//    let size_hint = r.size_hint();
-//    let new_hint = (size_hint.0 as u64, size_hint.1.map(|x| x as u64));
-//    let segment_size = SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
-//
-//    let (header, ss) = Header::new(pk, policies, rng)?;
-//    let header = header.with_mode(Mode::Streaming {
-//        segment_size,
-//        size_hint: new_hint,
-//    });
-//
-//    let key = get_key(&ss.0[..KEY_SIZE]).await?;
-//
-//    let iv = match header {
-//        Header {
-//            algo: Algorithm::Aes128Gcm(iv),
-//            ..
-//        } => iv,
-//        _ => return Err(Error::AlgorithmNotSupported(header.algo).into()),
-//    };
-//
-//    let nonce = &iv.0[..STREAM_NONCE_SIZE];
-//    let mut counter: u32 = u32::default();
-//
-//    w.feed(Uint8Array::from(&PRELUDE[..]).into()).await?;
-//    w.feed(Uint8Array::from(&VERSION_V2.to_be_bytes()[..]).into())
-//        .await?;
-//
-//    let mut header_vec = Vec::with_capacity(MAX_HEADER_SIZE);
-//    header.msgpack_into(&mut header_vec)?;
-//
-//    w.feed(
-//        Uint8Array::from(
-//            &u32::try_from(header_vec.len())
-//                .map_err(|_e| Error::ConstraintViolation)?
-//                .to_be_bytes()[..],
-//        )
-//        .into(),
-//    )
-//    .await?;
-//
-//    w.feed(Uint8Array::from(&header_vec[..]).into()).await?;
-//
-//    let mut buf_tail: u32 = 0;
-//    let buf = Uint8Array::new_with_length(segment_size);
-//
-//    while let Some(Ok(data)) = r.next().await {
-//        let mut array: Uint8Array = data.dyn_into()?;
-//
-//        while array.byte_length() != 0 {
-//            let len = array.byte_length();
-//            let rem = buf.byte_length() - buf_tail;
-//
-//            if len < rem {
-//                buf.set(&array, buf_tail);
-//                array = Uint8Array::new_with_length(0);
-//                buf_tail += len;
-//            } else {
-//                buf.set(&array.slice(0, rem), buf_tail);
-//                array = array.slice(rem, len);
-//
-//                let ct = encrypt(
-//                    &key,
-//                    &aead_nonce(nonce, counter, false),
-//                    &Uint8Array::new_with_length(0),
-//                    &buf,
-//                )
-//                .await?;
-//
-//                w.feed(ct.into()).await?;
-//
-//                counter = counter.checked_add(1).ok_or(Error::Symmetric)?;
-//                buf_tail = 0;
-//            }
-//        }
-//    }
-//
-//    let final_ct = encrypt(
-//        &key,
-//        &aead_nonce(nonce, counter, true),
-//        &Uint8Array::new_with_length(0),
-//        &buf.slice(0, buf_tail),
-//    )
-//    .await?;
-//
-//    w.feed(final_ct.into()).await?;
-//
-//    w.flush().await?;
-//    w.close().await
-//    let mut counter: u32 = u32::default();
-//
-//    w.feed(Uint8Array::from(&PRELUDE[..]).into()).await?;
-//    w.feed(Uint8Array::from(&VERSION_V2.to_be_bytes()[..]).into())
-//        .await?;
-//
-//    let mut header_vec = Vec::with_capacity(MAX_HEADER_SIZE);
-//    header.msgpack_into(&mut header_vec)?;
-//
-//    w.feed(
-//        Uint8Array::from(
-//            &u32::try_from(header_vec.len())
-//                .map_err(|_e| Error::ConstraintViolation)?
-//                .to_be_bytes()[..],
-//        )
-//        .into(),
-//    )
-//    .await?;
-//
-//    w.feed(Uint8Array::from(&header_vec[..]).into()).await?;
-//
-//    let mut buf_tail: u32 = 0;
-//    let buf = Uint8Array::new_with_length(segment_size);
-//
-//    while let Some(Ok(data)) = r.next().await {
-//        let mut array: Uint8Array = data.dyn_into()?;
-//
-//        while array.byte_length() != 0 {
-//            let len = array.byte_length();
-//            let rem = buf.byte_length() - buf_tail;
-//
-//            if len < rem {
-//                buf.set(&array, buf_tail);
-//                array = Uint8Array::new_with_length(0);
-//                buf_tail += len;
-//            } else {
-//                buf.set(&array.slice(0, rem), buf_tail);
-//                array = array.slice(rem, len);
-//
-//                let ct = encrypt(
-//                    &key,
-//                    &aead_nonce(nonce, counter, false),
-//                    &Uint8Array::new_with_length(0),
-//                    &buf,
-//                )
-//                .await?;
-//
-//                w.feed(ct.into()).await?;
-//
-//                counter = counter.checked_add(1).ok_or(Error::Symmetric)?;
-//                buf_tail = 0;
-//            }
-//        }
-//    }
-//
-//    let final_ct = encrypt(
-//        &key,
-//        &aead_nonce(nonce, counter, true),
-//        &Uint8Array::new_with_length(0),
-//        &buf.slice(0, buf_tail),
-//    )
-//    .await?;
-//
-//    w.feed(final_ct.into()).await?;
-//
-//    w.flush().await?;
-//    w.close().await
-//}

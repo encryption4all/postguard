@@ -1,4 +1,4 @@
-//! IRMAseal encryption header definitions.
+//! IRMAseal header definitions.
 
 use crate::artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64};
 use crate::artifacts::{MultiRecipientCiphertext, PublicKey, UserSecretKey};
@@ -85,13 +85,6 @@ pub enum Algorithm {
     /// AES-128-GCM.
     // Good performance with hardware acceleration.
     Aes128Gcm(Iv<12>),
-    //    // The algorithms listed below are unsupported, but reserved for future use.
-    //    /// XSalsa20Poly1305.
-    //    // Good performance in software.
-    //    XSalsa20Poly1305(Iv<24>),
-    //    /// AES-128-OCB.
-    //    // CAESAR finalist.
-    //    Aes128Ocb(Iv<12>),
 }
 
 impl Algorithm {
@@ -118,7 +111,7 @@ pub struct Header {
 /// Contains data specific to one recipient.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientHeader {
-    /// The [`HiddenPolicy`] associated with this identifier.
+    /// The [`HiddenRecipientPolicy`] associated with this identifier.
     #[serde(rename = "p")]
     pub policy: HiddenRecipientPolicy,
 
@@ -135,7 +128,6 @@ impl RecipientHeader {
     }
 }
 
-// TODO: maybe switch to a builder API.
 impl Header {
     /// Creates a new [`Header`] using the Master Public Key and the policies.
     pub fn new<R: RngCore + CryptoRng>(
@@ -194,7 +186,7 @@ impl Header {
     /// Internally uses the "named" convention, which preserves field names.
     /// Fields names are shortened to limit overhead:
     /// * `rs`: map of serialized [`RecipientHeader`]s with keyed by recipient identifier,
-    ///    * `p`: serialized [`HiddenPolicy`],
+    ///    * `p`: serialized [`HiddenRecipientPolicy`],
     ///    * `ct`: associated ciphertext with this policy,
     /// * `algo`: [algorithm][`Algorithm`],
     /// * `mode`: [mode][`Mode`],
@@ -223,9 +215,6 @@ impl Header {
     pub fn from_json(s: &str) -> Result<Self, Error> {
         serde_json::from_str(s).map_err(Error::Json)
     }
-
-    //TODO: pub fn mode_checked(&self, expected: Mode) -> Result<Mode, Error> {}
-    //TODO: pub fn algo_checked(&self, expected: Algorithm) -> Result<Algorithm, Error> {}
 }
 
 #[cfg(test)]
