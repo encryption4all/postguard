@@ -11,6 +11,8 @@ const HINT_TYPES: &[&str] = &[
     "pbdf.sidn-pbdf.mobilenumber.mobilenumber",
     "pbdf.pbdf.surfnet-2.id",
     "pbdf.nuts.agb.agbcode",
+    "irma-demo.sidn-pbdf.mobilenumber.mobilenumber",
+    "irma-demo.nuts.agb.agbcode",
 ];
 
 /// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
