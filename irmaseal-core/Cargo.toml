@@ -14,7 +14,7 @@ categories = ["cryptography"]
 
 [dependencies]
 irma = "0.2.1"
-ibe = { version = "0.2.2", features = ["cgwkv", "mkem"] }
+ibe = { version = "0.2.3", features = ["cgwkv", "mkem"] }
 rand = { version = "0.8.4" }
 subtle = "2.3"
 serde = { version = "1.0.126", features = ["derive"] }

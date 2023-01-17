@@ -1006,11 +1006,10 @@ dependencies = [
 
 [[package]]
 name = "group"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7391856def869c1c81063a03457c676fbcd419709c3dfb33d8d319de484b154d"
+checksum = "5dfbfb3a6cfbd390d5c9564ab283a0349b9b9fcd46a706c1eb10e0db70bfbac7"
 dependencies = [
- "byteorder",
  "ff",
  "rand_core",
  "subtle",
@@ -1217,9 +1216,9 @@ dependencies = [
 
 [[package]]
 name = "ibe"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2dc34fd5af0875a49739b1164a11ff2f2b3e6bbc0fca3baf3ecd43faa70acc"
+checksum = "21520cd163ab20ee8ba3df103f1d8f76acbc04c0caa35c8ad3a0a78b621fc201"
 dependencies = [
  "arrayref",
  "byteorder",

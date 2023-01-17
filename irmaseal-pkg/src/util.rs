@@ -30,7 +30,7 @@ pub(crate) fn xxhash64(x: &[u8]) -> String {
     let mut h = XxHash64::with_seed(0);
     h.write(x);
     let out = h.finish().to_be_bytes();
-    base64::encode(&out)
+    base64::encode(out)
 }
 
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
@@ -55,7 +55,7 @@ impl ParametersData {
         // Precompute the serialized public parameters.
         let pp = serde_json::to_string(&Parameters::<K> {
             format_version: 0x00,
-            public_key: PublicKey::<K>(*pk),
+            public_key: PublicKey::<K>(pk.clone()),
         })
         .expect("could not serialize public parameters");
 
