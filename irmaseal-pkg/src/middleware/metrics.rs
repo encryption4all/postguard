@@ -6,6 +6,7 @@ use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse},
 };
 use futures::Future;
+use futures_util::future::FutureExt;
 
 pub(crate) fn collect_metrics<
     B: MessageBody,
@@ -14,19 +15,38 @@ pub(crate) fn collect_metrics<
     req: ServiceRequest,
     srv: &S,
 ) -> impl Future<Output = Result<ServiceResponse<B>, actix_web::Error>> {
+    let mut values = None;
+
     if let Some(Ok(header)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
         if let Some(path) = req.match_pattern() {
             if let [host, host_version, app, app_version] =
                 header.split(',').collect::<Vec<&str>>()[..]
             {
-                POSTGUARD_CLIENTS
-                    .with_label_values(&[&path, host, host_version, app, app_version])
-                    .inc()
+                values = Some([
+                    path,
+                    host.to_string(),
+                    host_version.to_string(),
+                    app.to_string(),
+                    app_version.to_string(),
+                ]);
             }
         }
     }
 
-    srv.call(req)
+    srv.call(req).map(|res| {
+        let status = match &res {
+            Ok(resp) => resp.status(),
+            Err(e) => e.as_response_error().status_code(),
+        };
+
+        if let Some([a, b, c, d, e]) = values {
+            POSTGUARD_CLIENTS
+                .with_label_values(&[&a, &b, &c, &d, &e, status.as_str()])
+                .inc();
+        }
+
+        res
+    })
 }
 
 #[cfg(test)]

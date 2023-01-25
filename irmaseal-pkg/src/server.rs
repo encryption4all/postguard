@@ -22,9 +22,16 @@ lazy_static! {
     pub(crate) static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
         "postguard_clients",
         "Contains information about PostGuard clients connecting with the PKG.",
-        &["path", "host", "host_version", "client", "client_version"]
+        &[
+            "path",
+            "host",
+            "host_version",
+            "client",
+            "client_version",
+            "status"
+        ]
     )
-    .unwrap();
+    .expect("could not initialize metrics");
 }
 
 #[derive(Clone)]
