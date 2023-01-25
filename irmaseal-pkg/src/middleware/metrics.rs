@@ -128,12 +128,12 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = test::read_body(res).await;
 
-        let expected ="\
+        let expected = "\
         # HELP postguard_clients Contains information about PostGuard clients connecting with the PKG.\n\
         # TYPE postguard_clients counter\n\
-        postguard_clients{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",host_version=\"1234.5678.90\",path=\"/v2/key/{timestamp}\"} 1\n\
-        postguard_clients{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",host_version=\"1234.5678.90\",path=\"/v2/parameters\"} 2\n\
-        postguard_clients{client=\"pg4tb\",client_version=\"0.0.2\",host=\"Thunderbird\",host_version=\"1234.5678.90\",path=\"/v2/parameters\"} 1\n";
+        postguard_clients{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",host_version=\"1234.5678.90\",path=\"/v2/key/{timestamp}\",status=\"200\"} 1\n\
+        postguard_clients{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",host_version=\"1234.5678.90\",path=\"/v2/parameters\",status=\"200\"} 2\n\
+        postguard_clients{client=\"pg4tb\",client_version=\"0.0.2\",host=\"Thunderbird\",host_version=\"1234.5678.90\",path=\"/v2/parameters\",status=\"200\"} 1\n";
 
         assert_eq!(actix_web::web::Bytes::from(expected), body);
     }
