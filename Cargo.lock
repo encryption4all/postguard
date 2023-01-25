@@ -1316,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "irmaseal-cli"
-version = "0.2.0-beta.0"
+version = "0.2.0"
 dependencies = [
  "arrayvec",
  "clap 3.0.10",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "irmaseal-core"
-version = "0.2.0-beta.2"
+version = "0.2.0"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "irmaseal-pkg"
-version = "0.2.0-beta.0"
+version = "0.2.0"
 dependencies = [
  "actix-cors",
  "actix-http",
