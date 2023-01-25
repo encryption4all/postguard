@@ -4,7 +4,7 @@ use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
 use irmaseal_core::artifacts::PublicKey;
 use irmaseal_core::identity::{Attribute, Policy, RecipientPolicy};
-use irmaseal_core::rust::stream::StreamSealerConfig;
+use irmaseal_core::rust::stream::SealerStreamConfig;
 use irmaseal_core::Sealer;
 use rand::{CryptoRng, RngCore};
 use std::io::Cursor;
@@ -29,7 +29,7 @@ fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], mpk: &PublicKey<CGWKV>, rn
     )]);
 
     block_on(async {
-        Sealer::<StreamSealerConfig>::new(mpk, &policies, rng)
+        Sealer::<SealerStreamConfig>::new(mpk, &policies, rng)
             .unwrap()
             .seal(&mut input, &mut output)
             .await

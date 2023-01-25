@@ -45,25 +45,19 @@ web-sys = { version = "0.3", features = [
 ], optional = true }
 
 [dev-dependencies]
+tokio = { version = "1.24.2", features = ["full"] }
+tokio-util = { version = "0.7.4", features = ["compat"] }
 serde-transcode = "1.1.1"
 criterion = "0.4"
 rand = "0.8.5"
+futures = { version = "0.3", features = ["io-compat"]}
+futures-util = "0.3.25"
 
 [features]
 default = ["rust"]
 rust = ["aead", "aes-gcm"]
 rust_stream = ["futures", "aead/stream", "aes-gcm"]
-web = [
-  "getrandom/js",
-  "wasm-bindgen",
-  "js-sys",
-  "futures",
-  "wasm-bindgen-futures",
-  "web-sys/SubtleCrypto",
-  "web-sys/AesGcmParams",
-  "web-sys/Crypto",
-  "web-sys/CryptoKey",
-]
+web = ["getrandom/js", "wasm-bindgen", "js-sys", "futures", "wasm-bindgen-futures", "web-sys/SubtleCrypto", "web-sys/AesGcmParams", "web-sys/Crypto", "web-sys/CryptoKey"]
 web_stream = []
 
 [[bench]]

@@ -109,9 +109,8 @@
 //! ### Seal a slice using the Rust Crypto backend.
 //!
 //! ```
-//! use irmaseal_core::artifacts::{PublicKey, UserSecretKey};
 //! use irmaseal_core::error::Error;
-//! use irmaseal_core::rust::{SealerMemoryConfig as SealConfig, UnsealerMemoryConfig as UnsealConfig};
+//! use irmaseal_core::rust::{SealerMemoryConfig, UnsealerMemoryConfig};
 //! use irmaseal_core::test::TestSetup;
 //! use irmaseal_core::{SealedPacket, Sealer, Unsealer};
 //!
@@ -125,7 +124,7 @@
 //! // Specifying the configuration is only required when there
 //! // are multiple options in scope.
 //! let packet =
-//!     Sealer::<SealConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
+//!     Sealer::<SealerMemoryConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
 //! let out_bin = packet.into_bytes()?;
 //!
 //! println!("out: {:?}", &out_bin);
@@ -134,7 +133,7 @@
 //! let packet2 = SealedPacket::from_bytes(&out_bin)?;
 //! let id = "john.doe@example.com";
 //! let usk = &setup.usks[id];
-//! let original = Unsealer::<_, UnsealConfig>::new(packet2).unseal(id, usk)?;
+//! let original = Unsealer::<_,UnsealerMemoryConfig>::new(packet2).unseal(id, usk)?;
 //!
 //! assert_eq!(&input.to_vec(), &original);
 //!
@@ -142,12 +141,43 @@
 //! # }
 //! ```
 //!
-//! ### Seal a stream using the Rust Crypto backend.
+//! ### Seal a bytestream using the Rust Crypto backend.
 //!
-//! TODO: make this example
+//! ```
+//! use irmaseal_core::error::Error;
+//! use irmaseal_core::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
+//! use irmaseal_core::test::TestSetup;
+//! use irmaseal_core::{Sealer, Unsealer};
+//! use futures::io::Cursor;
 //!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Error> {
+//! let mut rng = rand::thread_rng();
+//! let setup = TestSetup::default();
+//!                                                                         
+//! let mut input = Cursor::new(b"SECRET DATA");
+//! let mut encrypted = Vec::new();
+//!                                                                         
+//! Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+//!     .seal(&mut input, &mut encrypted)
+//!     .await?;
+//!                                                                         
+//! let mut original = Vec::new();
+//! let id = "john.doe@example.com";
+//! let usk = &setup.usks[id];
+//! Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(encrypted))
+//!     .await?
+//!     .unseal(id, usk, &mut original)
+//!     .await?;
+//!                                                                         
+//! assert_eq!(input.into_inner().to_vec(), original);
+//! # Ok(())
+//! # }
+//! ```
 //! ### Using the Web Crypto backend.
 //!
+//! Using the Web Crypto backend in Rust is can be useful in Rust web frameworks.
+//! Otherwise, it is best to use the Javascript API with type annotations.
 //! See [`irmaseal-wasm-bindings`](../../irmaseal-wasm-bindings/tests/tests.rs).
 
 #![deny(missing_debug_implementations, rust_2018_idioms, missing_docs)]

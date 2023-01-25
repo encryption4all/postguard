@@ -11,14 +11,15 @@ use crate::{Sealer, SealerConfig, Unsealer, UnsealerConfig};
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use aead::KeyInit;
 use aes_gcm::Aes128Gcm;
+use futures::io::{AsyncRead, AsyncWrite};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
-use futures::{AsyncRead, AsyncWrite, TryFutureExt};
+use futures::TryFutureExt;
 use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
 
 /// Configures an [`Sealer`] to process a payload stream.
 #[derive(Debug)]
-pub struct StreamSealerConfig {
+pub struct SealerStreamConfig {
     segment_size: u32,
     key: [u8; KEY_SIZE],
     nonce: [u8; STREAM_NONCE_SIZE],
@@ -26,17 +27,17 @@ pub struct StreamSealerConfig {
 
 /// Configures an [`Unsealer`] to process a payload stream.
 #[derive(Debug)]
-pub struct StreamUnsealerConfig {
+pub struct UnsealerStreamConfig {
     segment_size: u32,
 }
 
-impl SealerConfig for StreamSealerConfig {}
-impl UnsealerConfig for StreamUnsealerConfig {}
-impl crate::sealed::SealerConfig for StreamSealerConfig {}
-impl crate::sealed::UnsealerConfig for StreamUnsealerConfig {}
+impl SealerConfig for SealerStreamConfig {}
+impl UnsealerConfig for UnsealerStreamConfig {}
+impl crate::sealed::SealerConfig for SealerStreamConfig {}
+impl crate::sealed::UnsealerConfig for UnsealerStreamConfig {}
 
-impl Sealer<StreamSealerConfig> {
-    /// Construct a new [`Sealer`] that can process payloads streamingly.
+impl Sealer<SealerStreamConfig> {
+    /// Construct a new [`Sealer`] that can process streaming payloads.
     pub fn new<Rng: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &Policy,
@@ -55,7 +56,7 @@ impl Sealer<StreamSealerConfig> {
 
         Ok(Sealer {
             header,
-            config: StreamSealerConfig {
+            config: SealerStreamConfig {
                 segment_size,
                 key,
                 nonce,
@@ -63,7 +64,7 @@ impl Sealer<StreamSealerConfig> {
         })
     }
 
-    /// Add a size hint (optionally).
+    /// Optional: Add a size hint.
     ///
     /// This can help the receiver save some reallocations.
     pub fn with_size_hint(mut self, size_hint: (u64, Option<u64>)) -> Self {
@@ -131,7 +132,7 @@ impl Sealer<StreamSealerConfig> {
     }
 }
 
-impl<R> Unsealer<R, StreamUnsealerConfig>
+impl<R> Unsealer<R, UnsealerStreamConfig>
 where
     R: AsyncRead + Unpin,
 {
@@ -162,7 +163,7 @@ where
         Ok(Unsealer {
             version,
             header,
-            config: StreamUnsealerConfig { segment_size },
+            config: UnsealerStreamConfig { segment_size },
             r: r.into_inner(), // This (new) reader is locked to the payload.
         })
     }
@@ -220,12 +221,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::error::Error;
+    use crate::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
     use crate::test::TestSetup;
-    use crate::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
+    use crate::{Sealer, Unsealer};
+    use crate::{SYMMETRIC_CRYPTO_DEFAULT_CHUNK, TAG_SIZE};
+    use futures::io::AsyncSeekExt;
+    use futures::AsyncWriteExt;
     use futures::{executor::block_on, io::AllowStdIo};
     use rand::RngCore;
     use std::io::Cursor;
+    use std::io::SeekFrom;
+    use tokio::fs::{File, OpenOptions};
+    use tokio_util::compat::TokioAsyncReadCompatExt;
 
     const LENGTHS: &[u32] = &[
         1,
@@ -245,7 +253,7 @@ mod tests {
         let mut output = AllowStdIo::new(Vec::new());
 
         block_on(async {
-            Sealer::<StreamSealerConfig>::new(&setup.mpk, &setup.policy, &mut rng)
+            Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)
                 .unwrap()
                 .seal(&mut input, &mut output)
                 .await
@@ -264,7 +272,7 @@ mod tests {
         let usk_id = setup.usks.get(id).unwrap();
 
         block_on(async {
-            let mut unsealer = Unsealer::<_, StreamUnsealerConfig>::new(&mut input)
+            let mut unsealer = Unsealer::<_, UnsealerStreamConfig>::new(&mut input)
                 .await
                 .unwrap();
 
@@ -308,7 +316,7 @@ mod tests {
 
         // Flip a byte that is guaranteed to be in the encrypted payload.
         let ct_len = ct.len();
-        ct[ct_len - 5] = !ct[ct_len - 5];
+        ct[ct_len - TAG_SIZE - 5] = !ct[ct_len - TAG_SIZE - 5];
 
         // This should panic.
         let _plain2 = unseal_helper(&setup, &ct, 1);
@@ -327,5 +335,75 @@ mod tests {
 
         // This should panic as well.
         let _plain2 = unseal_helper(&setup, &ct, 1);
+    }
+
+    #[tokio::test]
+    async fn test_tokio_file() -> Result<(), Error> {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::default();
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(std::env::temp_dir().join("foo.txt"))
+            .await?
+            .compat();
+
+        file.write_all(b"SECRET DATA").await?;
+        file.seek(SeekFrom::Start(0)).await?;
+
+        let mut encrypted_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(std::env::temp_dir().join("foo.enc"))
+            .await?
+            .compat();
+
+        Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+            .seal(file, &mut encrypted_file)
+            .await?;
+
+        encrypted_file.seek(SeekFrom::Start(0)).await?;
+
+        let original = File::create(std::env::temp_dir().join("foo2.txt"))
+            .await?
+            .compat();
+
+        let id = "john.doe@example.com";
+        let usk = &setup.usks[id];
+        Unsealer::<_, UnsealerStreamConfig>::new(&mut encrypted_file)
+            .await?
+            .unseal(id, usk, original)
+            .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cursor() -> Result<(), Error> {
+        use futures::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::default();
+
+        let mut input = Cursor::new(b"SECRET DATA");
+        let mut encrypted = Vec::new();
+
+        Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+            .seal(&mut input, &mut encrypted)
+            .await?;
+
+        let mut original = Vec::new();
+        let id = "john.doe@example.com";
+        let usk = &setup.usks[id];
+        Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(encrypted))
+            .await?
+            .unseal(id, usk, &mut original)
+            .await?;
+
+        assert_eq!(input.into_inner().to_vec(), original);
+        Ok(())
     }
 }

@@ -36,6 +36,10 @@ pub struct RecipientPolicy {
     pub con: Vec<Attribute>,
 }
 
+impl RecipientPolicy {
+    // TODO: new_with_con
+}
+
 /// An IRMAseal hidden policy.
 ///
 /// A policy where (part of) the value of the attributes is hidden.
