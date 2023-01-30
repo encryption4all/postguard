@@ -176,11 +176,16 @@
 //! ```
 //! ### Using the Web Crypto backend.
 //!
-//! Using the Web Crypto backend in Rust is can be useful in Rust web frameworks.
-//! Otherwise, it is best to use the Javascript API with type annotations.
-//! See [`irmaseal-wasm-bindings`](../../irmaseal-wasm-bindings/tests/tests.rs).
+//! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
+//! Yew/Dioxus/Leptos). Otherwise, it is best to use the Javascript/Typescript, see
+//! [`irmaseal-wasm-bindings`](../../irmaseal-wasm-bindings/tests/tests.rs).
 
-#![deny(missing_debug_implementations, rust_2018_idioms, missing_docs)]
+#![deny(
+    missing_debug_implementations,
+    rust_2018_idioms,
+    missing_docs,
+    rustdoc::broken_intra_doc_links
+)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod api;
@@ -219,7 +224,6 @@ extern crate alloc;
 #[derive(Debug)]
 pub struct Sealer<C: SealerConfig> {
     // The prebuilt header.
-    // TODO: Maybe replace this with a HeaderBuilder?
     header: Header,
 
     // The implementation-specific configuration.

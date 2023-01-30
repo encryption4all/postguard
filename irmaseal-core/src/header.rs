@@ -93,7 +93,7 @@ impl Algorithm {
     }
 }
 
-/// Header type, contains header for _all_ recipients.
+/// A header contains header data for _all_ recipients.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Header {
     /// Map of recipient identifiers to [`RecipientHeader`]s.
@@ -108,7 +108,7 @@ pub struct Header {
     pub mode: Mode,
 }
 
-/// Contains data specific to one recipient.
+/// Contains header data specific to _one_ recipient.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientHeader {
     /// The [`HiddenRecipientPolicy`] associated with this identifier.
