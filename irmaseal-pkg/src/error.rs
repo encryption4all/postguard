@@ -14,6 +14,8 @@ pub enum Error {
     UpstreamError,
     VersionError,
     DecodingError,
+    NoAttributesError,
+    NoTimestampError,
     ValidityError,
     Unexpected,
 }
@@ -64,8 +66,10 @@ impl ResponseError for Error {
             Error::SessionNotFound => StatusCode::NOT_FOUND,
             Error::UpstreamError => StatusCode::SERVICE_UNAVAILABLE,
             Error::DecodingError => StatusCode::UNAUTHORIZED,
+            Error::NoAttributesError => StatusCode::FORBIDDEN,
             Error::ValidityError => StatusCode::BAD_REQUEST,
             Error::Unexpected => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::NoTimestampError => StatusCode::BAD_REQUEST,
         }
     }
 }
@@ -80,6 +84,8 @@ impl Display for Error {
             Error::VersionError => write!(f, "no such protocol version"),
             Error::DecodingError => write!(f, "JWT decoding error"),
             Error::ValidityError => write!(f, "validity exceeds maximum validity"),
+            Error::NoTimestampError => write!(f, "no (valid) timestamp given"),
+            Error::NoAttributesError => write!(f, "no valid attributes were disclosed"),
             Error::Prometheus(e) => write!(f, "prometheus error: {e}"),
             Error::Unexpected => write!(f, "unexpected"),
         }

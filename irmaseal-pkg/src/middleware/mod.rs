@@ -2,19 +2,14 @@
 //!
 //! # Authentication
 //!
-//! Authentication middleware can be used to wrap a (key) service.
-//! The middleware has two responsibilities:
-//!
-//! 1. Authenticate the user from the request. The request can contain authentication-specific
-//!    data.
-//!
-//! 2. Derive an IBE identity from the validated authentication results. This identity is passed to
-//!    the wrapped key service. Subsequently the key service generates the associated
-//!    [`UserSecretKey`][`irmaseal_core::UserSecretKey].
-//!
+//! Authentication middleware can be used to wrap a (key) service. The middleware has only one
+//! responsibility: Authenticate the user from the request. The request can contain
+//! authentication-specific data and provide the underlying service with validated authentication
+//! results. The key service is responsible for verifying timestamps and expiries.
+//!    
 //! # Metrics
 //!
-//! The metrics middleware collects prometheus metrics.
+//! The metrics middleware collects Prometheus metrics.
 
 pub mod irma;
 pub mod metrics;

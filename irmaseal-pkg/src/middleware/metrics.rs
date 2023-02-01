@@ -41,6 +41,7 @@ mod tests {
     use irma::SessionStatus;
     use irmaseal_core::api::{KeyResponse, Parameters};
     use irmaseal_core::kem::cgw_kv::CGWKV;
+    use irmaseal_core::UserSecretKey;
     use irmaseal_core::{Attribute, Policy};
 
     #[actix_web::test]
@@ -99,7 +100,8 @@ mod tests {
             .insert_header(header)
             .set_json(pol.clone())
             .to_request();
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req_usk).await;
         assert_eq!(key_response.status, SessionStatus::Done);
 
         // Collect metrics

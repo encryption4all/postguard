@@ -45,7 +45,7 @@ pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     }
 }
 
-pub fn now() -> Result<u64, crate::Error> {
+pub fn current_time_u64() -> Result<u64, crate::Error> {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_e| crate::Error::Unexpected)?

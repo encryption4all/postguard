@@ -166,6 +166,7 @@ pub(crate) mod tests {
     use actix_web::{test, web, App, Error};
     use irma::{ProofStatus, SessionStatus};
     use irmaseal_core::api::{KeyResponse, Parameters};
+    use irmaseal_core::UserSecretKey;
     use irmaseal_core::{Attribute, Policy};
     use rand::thread_rng;
     use std::time::SystemTime;
@@ -185,7 +186,14 @@ pub(crate) mod tests {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
 
-        let pd = ParametersData::new(&pk, None).unwrap();
+        let pd = ParametersData::new(
+            &Parameters::<CGWKV> {
+                format_version: 0x00,
+                public_key: PublicKey::<CGWKV>(pk),
+            },
+            None,
+        )
+        .unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
@@ -202,7 +210,7 @@ pub(crate) mod tests {
                         .service(
                             resource("/key/{timestamp}")
                                 .app_data(Data::new(sk))
-                                .wrap(NoAuth::<CGWKV>::new())
+                                .wrap(NoAuth::new())
                                 .route(web::get().to(handlers::request_key::<CGWKV>)),
                         ),
                 ),
@@ -246,7 +254,8 @@ pub(crate) mod tests {
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
@@ -264,7 +273,7 @@ pub(crate) mod tests {
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
-        let id = pol.derive::<CGWKV>().unwrap();
+        let id = pol.derive_kem::<CGWKV>().unwrap();
 
         let req_pk = test::TestRequest::get().uri("/v2/parameters").to_request();
         let ppk: Parameters<CGWKV> = test::call_and_read_body_json(&app, req_pk).await;
@@ -277,7 +286,8 @@ pub(crate) mod tests {
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req_usk).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
@@ -304,7 +314,7 @@ pub(crate) mod tests {
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
-        let id = pol.derive::<CGWKV>().unwrap();
+        let id = pol.derive_kem::<CGWKV>().unwrap();
 
         let req_pk = test::TestRequest::get().uri("/v2/parameters").to_request();
         let ppk: Parameters<CGWKV> = test::call_and_read_body_json(&app, req_pk).await;
@@ -317,7 +327,8 @@ pub(crate) mod tests {
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req_usk).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
@@ -337,7 +348,7 @@ pub(crate) mod tests {
             .set_json(pol_wrong)
             .to_request();
 
-        let key_response_wrong: KeyResponse<CGWKV> =
+        let key_response_wrong: KeyResponse<UserSecretKey<CGWKV>> =
             test::call_and_read_body_json(&app, req_usk_wrong).await;
 
         // Make sure a USK retrieved for a different policy cannot decapsulate.

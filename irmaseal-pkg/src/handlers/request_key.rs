@@ -1,11 +1,13 @@
 use actix_web::{web::Data, HttpResponse};
 use actix_web::{HttpMessage, HttpRequest};
 
-use irma::SessionResult;
 use irmaseal_core::api::KeyResponse;
 use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{Attribute, Policy, UserSecretKey};
+use irmaseal_core::{Policy, UserSecretKey};
 use serde::Serialize;
+
+use crate::middleware::irma::IrmaAuthResult;
+use crate::util::current_time_u64;
 
 pub async fn request_key<K>(
     req: HttpRequest,
@@ -18,44 +20,49 @@ where
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();
 
-    let validated = req
-        .extensions()
-        .get::<Option<Vec<Attribute>>>()
-        .cloned()
-        .ok_or(crate::Error::Unexpected)?;
-
-    let session_result = req
-        .extensions()
-        .get::<SessionResult>()
-        .cloned()
-        .ok_or(crate::Error::Unexpected)?;
-
     let timestamp = req
+        .match_info()
+        .query("timestamp")
+        .parse::<u64>()
+        .map_err(|_e| crate::Error::NoTimestampError)?;
+
+    let IrmaAuthResult {
+        con,
+        status,
+        proof_status,
+        exp,
+    } = req
         .extensions()
-        .get::<u64>()
+        .get::<IrmaAuthResult>()
         .cloned()
         .ok_or(crate::Error::Unexpected)?;
+
+    // It is not allowed to ask for USKs with a timestamp in the future.
+    let now = current_time_u64()?;
+    if timestamp > now {
+        return Err(crate::Error::ChronologyError);
+    }
+
+    // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
+    if let Some(exp) = exp {
+        if timestamp > exp {
+            return Err(crate::Error::ChronologyError);
+        }
+    }
 
     req.extensions_mut().clear();
 
-    if let Some(val) = validated {
-        let policy = Policy {
-            timestamp,
-            con: val,
-        };
+    let policy = Policy { timestamp, con };
 
-        let id = policy
-            .derive_kem::<K>()
-            .map_err(|_e| crate::Error::Unexpected)?;
+    let id = policy
+        .derive_kem::<K>()
+        .map_err(|_e| crate::Error::Unexpected)?;
 
-        let usk = K::extract_usk(None, sk, &id, &mut rng);
+    let usk = K::extract_usk(None, sk, &id, &mut rng);
 
-        Ok(HttpResponse::Ok().json(KeyResponse {
-            status: session_result.status,
-            proof_status: session_result.proof_status,
-            key: Some(UserSecretKey::<K>(usk)),
-        }))
-    } else {
-        Ok(HttpResponse::Forbidden().finish())
-    }
+    Ok(HttpResponse::Ok().json(KeyResponse {
+        status,
+        proof_status,
+        key: Some(UserSecretKey::<K>(usk)),
+    }))
 }

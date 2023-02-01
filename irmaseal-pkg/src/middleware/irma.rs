@@ -18,7 +18,13 @@ use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation
 
 use serde::{Deserialize, Serialize};
 
-use crate::util::now;
+#[derive(Debug, Clone)]
+pub(crate) struct IrmaAuthResult {
+    pub con: Vec<Attribute>,
+    pub status: SessionStatus,
+    pub proof_status: Option<ProofStatus>,
+    pub exp: Option<u64>,
+}
 
 /// Custom claims signed by the IRMA server.
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,10 +79,7 @@ where
         let auth = self.auth_data.clone();
 
         async move {
-            // there is a path parameter and a timestamp -> check
-            // there is a path parameter and no timestamp -> deny
-            // there is no path parameter and no timestamp -> do nothing
-            let timestamp = req.match_info().query("timestamp").parse::<u64>().unwrap();
+            let mut exp = None;
 
             let session_result = match &*auth {
                 Auth::Token(url) => {
@@ -95,13 +98,6 @@ where
                         .await
                         .map_err(|_e| crate::Error::Unexpected)?;
 
-                    let now = now()?;
-
-                    // It is not allowed to ask for USKs with a timestamp in the future.
-                    if timestamp > now {
-                        return Err(crate::Error::ChronologyError.into());
-                    }
-
                     res
                 }
                 Auth::Jwt(decoding_key) => {
@@ -119,10 +115,7 @@ where
                             }
                         })?;
 
-                    // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
-                    if timestamp > decoded.claims.exp {
-                        return Err(crate::Error::ChronologyError.into());
-                    }
+                    exp = Some(decoded.claims.exp);
 
                     SessionResult {
                         token: decoded.claims.token,
@@ -164,9 +157,14 @@ where
                 _ => None,
             };
 
-            req.extensions_mut().insert(validated);
-            req.extensions_mut().insert(session_result);
-            req.extensions_mut().insert(timestamp);
+            let con = validated.ok_or(crate::Error::NoAttributesError)?;
+
+            req.extensions_mut().insert(IrmaAuthResult {
+                con,
+                exp,
+                status: session_result.status,
+                proof_status: session_result.proof_status,
+            });
 
             let res = srv.call(req).await?;
 
@@ -227,7 +225,7 @@ where
         async move {
             let auth_data = match auth_type {
                 IrmaAuthType::Jwt => {
-                    let jwt_pk_bytes = reqwest::get(&format!("{}/publickey", url))
+                    let jwt_pk_bytes = reqwest::get(&format!("{url}/publickey"))
                         .await
                         .expect("could not retrieve JWT public key")
                         .bytes()
