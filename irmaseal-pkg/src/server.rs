@@ -1,8 +1,3 @@
-use crate::handlers;
-use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
-use crate::middleware::metrics::collect_metrics;
-use crate::opts::*;
-use crate::util::*;
 use actix_cors::Cors;
 use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
@@ -13,11 +8,19 @@ use actix_web::{
     web::{resource, scope, Data},
     App, HttpServer,
 };
+
+use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::metrics::collect_metrics;
+use crate::opts::*;
+use crate::util::*;
+use crate::{handlers, PKGError};
+
 use irmaseal_core::api::Parameters;
 use irmaseal_core::ibs::gg;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
 use irmaseal_core::PublicKey;
+
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
 
@@ -50,7 +53,7 @@ pub struct ParametersData {
 }
 
 #[actix_rt::main]
-pub async fn exec(server_opts: ServerOpts) {
+pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     let ServerOpts {
         host,
         port,
@@ -72,16 +75,14 @@ pub async fn exec(server_opts: ServerOpts) {
             public_key: PublicKey::<CGWKV>(ibe_kp.pk),
         },
         Some(&ibe_public),
-    );
+    )?;
 
     let ibs_pk: gg::PublicKey =
         rmp_serde::from_slice(&std::fs::read(&ibs_public).unwrap()).unwrap();
-    let ibs_pd = ParametersData::new(&ibs_pk, Some(&ibs_public));
+    let ibs_pd = ParametersData::new(&ibs_pk, Some(&ibs_public))?;
 
     let ibs_sk: gg::SecretKey =
         rmp_serde::from_slice(&std::fs::read(&ibs_secret).unwrap()).unwrap();
-
-    dbg!(&ibs_pd);
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
@@ -148,12 +149,12 @@ pub async fn exec(server_opts: ServerOpts) {
                     ),
             )
     })
-    .bind(format!("{host}:{port}"))
-    .unwrap()
+    .bind(format!("{host}:{port}"))?
     .shutdown_timeout(1)
     .run()
-    .await
-    .unwrap();
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -184,7 +185,7 @@ pub(crate) mod tests {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
 
-        let pd = ParametersData::new(&pk, None);
+        let pd = ParametersData::new(&pk, None).unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(

@@ -55,7 +55,7 @@ enum Auth {
 #[doc(hidden)]
 pub struct IrmaAuthService<S> {
     service: Rc<S>,
-    auth_data: Auth,
+    auth_data: Rc<Auth>,
 }
 
 impl<S> Service<ServiceRequest> for IrmaAuthService<S>
@@ -70,6 +70,7 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let srv = self.service.clone();
+        let auth = self.auth_data.clone();
 
         async move {
             // there is a path parameter and a timestamp -> check
@@ -77,7 +78,7 @@ where
             // there is no path parameter and no timestamp -> do nothing
             let timestamp = req.match_info().query("timestamp").parse::<u64>().unwrap();
 
-            let session_result = match self.auth_data {
+            let session_result = match &*auth {
                 Auth::Token(url) => {
                     let token_str = req.match_info().query("token");
 
@@ -87,7 +88,7 @@ where
 
                     let token = SessionToken(token_str.to_string());
 
-                    let res = IrmaClientBuilder::new(&url)
+                    let res = IrmaClientBuilder::new(url)
                         .map_err(|_e| crate::Error::Unexpected)?
                         .build()
                         .result(&token)
@@ -111,7 +112,7 @@ where
                     validation.leeway = 0;
 
                     let decoded =
-                        decode::<Claims>(jwt, &decoding_key, &validation).map_err(|e| {
+                        decode::<Claims>(jwt, decoding_key, &validation).map_err(|e| {
                             match e.into_kind() {
                                 ErrorKind::ExpiredSignature => crate::Error::ChronologyError,
                                 _ => crate::Error::DecodingError,
@@ -242,7 +243,7 @@ where
 
             Ok(IrmaAuthService {
                 service: Rc::new(service),
-                auth_data,
+                auth_data: Rc::new(auth_data),
             })
         }
         .boxed_local()

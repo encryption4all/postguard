@@ -3,29 +3,23 @@ use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::{kem::IBKEM, Compress};
 
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-use crate::opts::*;
+use crate::{opts::*, PKGError};
 
-fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
-    fn inner(path: &Path, contents: &[u8]) {
-        use std::io::Write;
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .unwrap()
-            .write_all(contents)
-            .unwrap()
-    }
-    inner(path.as_ref(), contents.as_ref())
+fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> std::io::Result<()> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(contents.as_ref())
 }
 
-pub fn exec(gen_opts: &GenOpts) {
-    let mut rng1 = rand::thread_rng();
-    let mut rng2 = rand::thread_rng();
+pub fn exec(gen_opts: &GenOpts) -> Result<(), PKGError> {
+    let mut rng = rand::thread_rng();
 
     let GenOpts {
         scheme,
@@ -37,21 +31,23 @@ pub fn exec(gen_opts: &GenOpts) {
 
     match scheme.as_ref() {
         "3" => {
-            let (ibe_pk, ibe_sk) = CGWKV::setup(&mut rng2);
-            let (ibs_pk, ibs_sk) = gg::setup(&mut rng1);
+            let (ibe_pk, ibe_sk) = CGWKV::setup(&mut rng);
+            let (ibs_pk, ibs_sk) = gg::setup(&mut rng);
 
             let ibs_pk_bytes = rmp_serde::to_vec(&ibs_pk).unwrap();
             let ibs_sk_bytes = rmp_serde::to_vec(&ibs_sk).unwrap();
 
-            write_owned(ibe_public, ibe_pk.to_bytes().as_ref());
-            write_owned(ibe_secret, ibe_sk.to_bytes().as_ref());
-            write_owned(ibs_public, ibs_pk_bytes);
-            write_owned(ibs_secret, ibs_sk_bytes);
+            write_owned(ibe_public, ibe_pk.to_bytes().as_ref())?;
+            write_owned(ibe_secret, ibe_sk.to_bytes().as_ref())?;
+            write_owned(ibs_public, ibs_pk_bytes)?;
+            write_owned(ibs_secret, ibs_sk_bytes)?;
 
-            println!("written!");
+            println!("Written!");
         }
-        _ => {
-            println!("Wrong version identifier. Nothing written.");
+        x => {
+            return Err(PKGError::InvalidVersion(x.into()));
         }
-    }
+    };
+
+    Ok(())
 }

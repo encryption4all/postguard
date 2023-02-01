@@ -52,10 +52,10 @@ pub struct DecryptionKeyResponse<K: IBKEM>(KeyResponse<UserSecretKey<K>>);
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SigningKey {
     /// The signing key.
-    key: ibs::gg::UserSecretKey,
+    pub key: ibs::gg::UserSecretKey,
 
     /// The time of issuance of the key by the PKG (also included in the identity).
-    iat: u64,
+    pub iat: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

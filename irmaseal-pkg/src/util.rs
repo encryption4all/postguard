@@ -1,13 +1,17 @@
-use crate::server::ParametersData;
 use actix_http::header::HeaderValue;
 use actix_http::header::HttpDate;
 use actix_web::dev::ServiceRequest;
 use actix_web::http::header::EntityTag;
-use arrayref::array_ref;
-use core::hash::Hasher;
+
 use irmaseal_core::kem::{cgw_kv::CGWKV, IBKEM};
 use irmaseal_core::Compress;
 use irmaseal_core::Error;
+
+use crate::server::ParametersData;
+use crate::PKGError;
+
+use arrayref::array_ref;
+use core::hash::Hasher;
 use paste::paste;
 use serde::Serialize;
 use std::path::Path;
@@ -52,13 +56,10 @@ pub fn now() -> Result<u64, crate::Error> {
 
 impl ParametersData {
     /// Precompute the public parameters, including cache headers.
-    ///
-    /// # Panics
-    ///
-    /// This function panics when the parameters serialization fails.
-    pub(crate) fn new<T: Serialize>(t: &T, path: Option<&str>) -> ParametersData {
+    pub(crate) fn new<T: Serialize>(t: &T, path: Option<&str>) -> Result<ParametersData, PKGError> {
         // Precompute the serialized public parameters.
-        let pp = serde_json::to_string(t).expect("could not serialize public parameters");
+        let pp = serde_json::to_string(t)
+            .map_err(|e| PKGError::Setup(format!("could not serialize public key: {e}")))?;
 
         // Also compute cache headers.
         let modified_raw: HttpDate = if let Some(p) = path {
@@ -72,13 +73,14 @@ impl ParametersData {
         .into();
 
         let last_modified = HttpDate::from_str(&modified_raw.to_string()).unwrap();
+
         let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
 
-        ParametersData {
+        Ok(ParametersData {
             pp,
             last_modified,
             etag,
-        }
+        })
     }
 }
 
@@ -113,12 +115,3 @@ macro_rules! read_keypair {
 }
 
 read_keypair!(CGWKV);
-
-use irmaseal_core::ibs::gg;
-
-pub fn ibs_gg_read(path: impl AsRef<Path>) -> Result<gg::PublicKey, Error> {
-    let bytes = std::fs::read(path).unwrap();
-    let pk: gg::PublicKey = rmp_serde::from_slice(&bytes).unwrap();
-
-    Ok(pk)
-}
