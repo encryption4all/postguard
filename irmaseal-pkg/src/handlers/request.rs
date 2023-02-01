@@ -1,7 +1,7 @@
 use crate::Error;
 use actix_web::{web::Data, web::Json, HttpResponse};
 use irma::*;
-use irmaseal_core::api::KeyRequest;
+use irmaseal_core::api::AuthRequest;
 
 /// Maximum allowed valitidy (in seconds) of a JWT (1 day).
 const MAX_VALIDITY: u64 = 60 * 60 * 24;
@@ -11,7 +11,7 @@ const DEFAULT_VALIDITY: u64 = 60 * 5;
 
 pub async fn request(
     url: Data<String>,
-    value: Json<KeyRequest>,
+    value: Json<AuthRequest>,
 ) -> Result<HttpResponse, crate::Error> {
     let irma_url = url.get_ref().clone();
     let kr = value.into_inner();

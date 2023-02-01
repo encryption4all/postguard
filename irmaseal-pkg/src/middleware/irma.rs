@@ -2,21 +2,23 @@
 
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    Error, HttpMessage, HttpResponse,
+    Error, HttpMessage,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_web_httpauth::extractors::AuthExtractor;
 
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
-use std::{marker::PhantomData, rc::Rc};
+use std::rc::Rc;
 
 use irma::*;
-use irmaseal_core::{api::KeyResponse, kem::IBKEM, Attribute, Policy, UserSecretKey};
+use irmaseal_core::Attribute;
 
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 
 use serde::{Deserialize, Serialize};
+
+use crate::util::now;
 
 /// Custom claims signed by the IRMA server.
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,17 +53,14 @@ enum Auth {
 }
 
 #[doc(hidden)]
-pub struct IrmaAuthService<S, K> {
+pub struct IrmaAuthService<S> {
     service: Rc<S>,
-    auth_data: Rc<Auth>,
-    scheme: PhantomData<K>,
+    auth_data: Auth,
 }
 
-impl<S, K> Service<ServiceRequest> for IrmaAuthService<S, K>
+impl<S> Service<ServiceRequest> for IrmaAuthService<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
-    K: IBKEM + 'static,
-    UserSecretKey<K>: Serialize,
 {
     type Response = ServiceResponse;
     type Error = Error;
@@ -71,16 +70,14 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let srv = self.service.clone();
-        let auth = self.auth_data.clone();
 
         async move {
-            let timestamp = req
-                .match_info()
-                .query("timestamp")
-                .parse::<u64>()
-                .map_err(|_e| crate::Error::Unexpected)?;
+            // there is a path parameter and a timestamp -> check
+            // there is a path parameter and no timestamp -> deny
+            // there is no path parameter and no timestamp -> do nothing
+            let timestamp = req.match_info().query("timestamp").parse::<u64>().unwrap();
 
-            let session_result = match &*auth {
+            let session_result = match self.auth_data {
                 Auth::Token(url) => {
                     let token_str = req.match_info().query("token");
 
@@ -90,17 +87,14 @@ where
 
                     let token = SessionToken(token_str.to_string());
 
-                    let res = IrmaClientBuilder::new(url)
+                    let res = IrmaClientBuilder::new(&url)
                         .map_err(|_e| crate::Error::Unexpected)?
                         .build()
                         .result(&token)
                         .await
                         .map_err(|_e| crate::Error::Unexpected)?;
 
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(|_e| crate::Error::Unexpected)?
-                        .as_secs();
+                    let now = now()?;
 
                     // It is not allowed to ask for USKs with a timestamp in the future.
                     if timestamp > now {
@@ -117,7 +111,7 @@ where
                     validation.leeway = 0;
 
                     let decoded =
-                        decode::<Claims>(jwt, decoding_key, &validation).map_err(|e| {
+                        decode::<Claims>(jwt, &decoding_key, &validation).map_err(|e| {
                             match e.into_kind() {
                                 ErrorKind::ExpiredSignature => crate::Error::ChronologyError,
                                 _ => crate::Error::DecodingError,
@@ -141,7 +135,7 @@ where
             };
 
             // Validate the session result. Purge attributes that were not present.
-            let validated = match session_result {
+            let validated: Option<Vec<Attribute>> = match session_result {
                 SessionResult {
                     status: SessionStatus::Done,
                     proof_status: Some(ProofStatus::Valid),
@@ -169,45 +163,13 @@ where
                 _ => None,
             };
 
-            let (key, new_req) = if let Some(val) = validated {
-                let policy = Policy {
-                    timestamp,
-                    con: val,
-                };
+            req.extensions_mut().insert(validated);
+            req.extensions_mut().insert(session_result);
+            req.extensions_mut().insert(timestamp);
 
-                let id = policy
-                    .derive::<K>()
-                    .map_err(|_e| crate::Error::Unexpected)?;
+            let res = srv.call(req).await?;
 
-                // Pass the derived id to the key service.
-                req.extensions_mut().insert(id);
-
-                // Invoke the (wrapped) key service.
-                let res = srv.call(req).await?;
-
-                // Retrieve the (if present) key from the response extensions.
-                let usk = res
-                    .response()
-                    .extensions()
-                    .get::<K::Usk>()
-                    .cloned()
-                    .map(UserSecretKey::<K>);
-
-                let new_req = res.request().clone();
-
-                (usk, new_req)
-            } else {
-                (None, req.into_parts().0)
-            };
-
-            Ok(ServiceResponse::new(
-                new_req,
-                HttpResponse::Ok().json(KeyResponse {
-                    status: session_result.status,
-                    proof_status: session_result.proof_status,
-                    key,
-                }),
-            ))
+            Ok(res)
         }
         .boxed_local()
     }
@@ -231,37 +193,30 @@ pub enum IrmaAuthType {
 
 /// IRMA Authentication middleware.
 #[derive(Debug, Clone)]
-pub struct IrmaAuth<K> {
+pub struct IrmaAuth {
     /// The URL to the IRMA server.
     irma_url: String,
     /// The authentication method.
     method: IrmaAuthType,
-    scheme: PhantomData<K>,
 }
 
-impl<K: IBKEM> IrmaAuth<K> {
+impl IrmaAuth {
     /// Create IRMA authentication middleware used to wrap a key service.
     ///
     /// See [`IrmaAuthType`] for the available methods.
     pub fn new(irma_url: String, method: IrmaAuthType) -> Self {
-        Self {
-            irma_url,
-            method,
-            scheme: PhantomData,
-        }
+        Self { irma_url, method }
     }
 }
 
-impl<S, K> Transform<S, ServiceRequest> for IrmaAuth<K>
+impl<S> Transform<S, ServiceRequest> for IrmaAuth
 where
     S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
-    K: IBKEM + 'static,
-    UserSecretKey<K>: Serialize,
 {
     type Response = ServiceResponse;
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Transform, Self::InitError>>;
-    type Transform = IrmaAuthService<S, K>;
+    type Transform = IrmaAuthService<S>;
     type InitError = ();
 
     fn new_transform(&self, service: S) -> Self::Future {
@@ -287,8 +242,7 @@ where
 
             Ok(IrmaAuthService {
                 service: Rc::new(service),
-                auth_data: Rc::new(auth_data),
-                scheme: PhantomData,
+                auth_data,
             })
         }
         .boxed_local()

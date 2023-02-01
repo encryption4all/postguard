@@ -24,8 +24,8 @@ fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
 }
 
 pub fn exec(gen_opts: &GenOpts) {
-    let mut rng1 = rand1::thread_rng();
-    let mut rng2 = rand2::thread_rng();
+    let mut rng1 = rand::thread_rng();
+    let mut rng2 = rand::thread_rng();
 
     let GenOpts {
         scheme,

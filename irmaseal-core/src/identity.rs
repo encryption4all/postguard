@@ -2,7 +2,7 @@ use super::Error;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
-use tiny_keccak::{Hasher, Sha3};
+use tiny_keccak::{Hasher, Sha3, Shake};
 
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
@@ -82,7 +82,7 @@ impl Policy {
 }
 
 impl Policy {
-    pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
+    pub fn derive<const N: usize>(&self) -> Result<[u8; N], Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
         //  - con[0..n - 1] consisting of n conjunctions.
@@ -99,9 +99,9 @@ impl Policy {
             return Err(Error::ConstraintViolation);
         }
 
-        let mut tmp = [0u8; 64];
+        let mut tmp = [0u8; N];
 
-        let mut pre_h = Sha3::v512();
+        let mut pre_h = Shake::v256();
         pre_h.update(&[0x00]);
 
         let mut copy = self.con.clone();
@@ -139,9 +139,13 @@ impl Policy {
         pre_h.update(&self.timestamp.to_be_bytes());
         pre_h.finalize(&mut tmp);
 
+        Ok(tmp)
+    }
+
+    pub fn derive_kem<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
         // This hash is superfluous in theory, but derive does not support incremental hashing.
         // As a practical considerion we use an extra hash here.
-        Ok(<K as IBKEM>::Id::derive(&tmp))
+        Ok(<K as IBKEM>::Id::derive(&self.derive::<64>()?))
     }
 }
 

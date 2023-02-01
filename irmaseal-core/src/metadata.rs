@@ -61,7 +61,7 @@ impl Metadata {
         // Map policies to IBE identities.
         let ids = policies
             .values()
-            .map(|p| p.derive::<CGWKV>())
+            .map(|p| p.derive_kem::<CGWKV>())
             .collect::<Result<Vec<<CGWKV as IBKEM>::Id>, _>>()?;
 
         // Generate the shared secret and ciphertexts.

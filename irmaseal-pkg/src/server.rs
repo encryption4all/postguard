@@ -78,6 +78,9 @@ pub async fn exec(server_opts: ServerOpts) {
         rmp_serde::from_slice(&std::fs::read(&ibs_public).unwrap()).unwrap();
     let ibs_pd = ParametersData::new(&ibs_pk, Some(&ibs_public));
 
+    let ibs_sk: gg::SecretKey =
+        rmp_serde::from_slice(&std::fs::read(&ibs_secret).unwrap()).unwrap();
+
     dbg!(&ibs_pd);
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
@@ -114,6 +117,11 @@ pub async fn exec(server_opts: ServerOpts) {
                             .route(web::get().to(handlers::parameters)),
                     )
                     .service(
+                        resource("/sign/parameters")
+                            .app_data(Data::new(ibs_pd.clone()))
+                            .route(web::get().to(handlers::parameters)),
+                    )
+                    .service(
                         scope("/{_:(irma|request)}")
                             .service(
                                 resource("/start")
@@ -128,27 +136,19 @@ pub async fn exec(server_opts: ServerOpts) {
                             .service(
                                 resource("/key/{timestamp}")
                                     .app_data(Data::new(ibe_kp.sk))
-                                    .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::get().to(handlers::request_key::<CGWKV>)),
-                            ),
-                    )
-                    .service(
-                        scope("/sign")
-                            .service(
-                                resource("/parameters")
-                                    .app_data(Data::new(ibs_pd.clone()))
-                                    .route(web::get().to(handlers::parameters)),
                             )
                             .service(
-                                resource("/key/{timestamp}")
-                                    .app_data(Data::new(ibe_sk.sk))
-                                    .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
-                                    .route(web::get().to(handlers::request_key::<CGWKV>)),
+                                resource("/sign/key")
+                                    .app_data(Data::new(ibs_sk))
+                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .route(web::get().to(handlers::request_signing_key)),
                             ),
                     ),
             )
     })
-    .bind(format!("{}:{}", host, port))
+    .bind(format!("{host}:{port}"))
     .unwrap()
     .shutdown_timeout(1)
     .run()

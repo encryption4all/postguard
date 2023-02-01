@@ -2,18 +2,20 @@ use actix_web::{web::Data, HttpResponse};
 use actix_web::{HttpMessage, HttpRequest};
 
 use irma::SessionResult;
-use irmaseal_core::api::KeyResponse;
-use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{Attribute, Policy, UserSecretKey};
+use irmaseal_core::api::{KeyResponse, SigningKey};
+use irmaseal_core::{Attribute, Policy};
 use serde::Serialize;
 
-pub async fn request_key<K>(
+use irmaseal_core::ibs::gg::{keygen, Identity, SecretKey};
+
+use crate::util::now;
+
+pub async fn request_signing_key(
     req: HttpRequest,
-    msk: Data<K::Sk>,
+    msk: Data<SecretKey>,
 ) -> Result<HttpResponse, crate::Error>
 where
-    K: IBKEM + 'static,
-    UserSecretKey<K>: Serialize,
+    SecretKey: Serialize,
 {
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();
@@ -30,30 +32,28 @@ where
         .cloned()
         .ok_or(crate::Error::Unexpected)?;
 
-    let timestamp = req
-        .extensions()
-        .get::<u64>()
-        .cloned()
-        .ok_or(crate::Error::Unexpected)?;
-
     req.extensions_mut().clear();
+
+    let iat = now()?;
 
     if let Some(val) = validated {
         let policy = Policy {
-            timestamp,
+            timestamp: iat,
             con: val,
         };
 
-        let id = policy
-            .derive_kem::<K>()
+        let derived = policy
+            .derive::<32>()
             .map_err(|_e| crate::Error::Unexpected)?;
 
-        let usk = K::extract_usk(None, sk, &id, &mut rng);
+        let id = Identity(derived);
+
+        let key = keygen(sk, &id, &mut rng);
 
         Ok(HttpResponse::Ok().json(KeyResponse {
             status: session_result.status,
             proof_status: session_result.proof_status,
-            key: Some(UserSecretKey::<K>(usk)),
+            key: Some(SigningKey { key, iat }),
         }))
     } else {
         Ok(HttpResponse::Forbidden().finish())

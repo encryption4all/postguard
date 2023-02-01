@@ -41,6 +41,15 @@ pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     }
 }
 
+pub fn now() -> Result<u64, crate::Error> {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_e| crate::Error::Unexpected)?
+        .as_secs();
+
+    Ok(n)
+}
+
 impl ParametersData {
     /// Precompute the public parameters, including cache headers.
     ///
