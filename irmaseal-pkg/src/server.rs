@@ -352,7 +352,7 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
-    async fn test_round() {
+    async fn test_round_kem() {
         let mut rng = thread_rng();
         let (app, _, sk, _, _) = default_setup().await;
 
@@ -393,7 +393,7 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
-    async fn test_wrong_policy() {
+    async fn test_round_kem_wrong_policy() {
         let mut rng = thread_rng();
         let (app, _, _, _, _) = default_setup().await;
 
