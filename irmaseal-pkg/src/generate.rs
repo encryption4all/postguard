@@ -42,7 +42,7 @@ pub fn exec(gen_opts: &GenOpts) -> Result<(), PKGError> {
             write_owned(ibs_public, ibs_pk_bytes)?;
             write_owned(ibs_secret, ibs_sk_bytes)?;
 
-            println!("Written!");
+            println!("The following keys were written:\n{ibe_public}\n{ibe_secret}\n{ibs_public}\n{ibs_secret}");
         }
         x => {
             return Err(PKGError::InvalidVersion(x.into()));

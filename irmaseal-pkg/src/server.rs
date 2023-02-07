@@ -165,7 +165,8 @@ pub(crate) mod tests {
     use actix_web::dev::{Service, ServiceResponse};
     use actix_web::{test, web, App, Error};
     use irma::{ProofStatus, SessionStatus};
-    use irmaseal_core::api::{KeyResponse, Parameters};
+    use irmaseal_core::api::{KeyResponse, Parameters, SigningKey};
+    use irmaseal_core::ibs::gg;
     use irmaseal_core::UserSecretKey;
     use irmaseal_core::{Attribute, Policy};
     use rand::thread_rng;
@@ -182,9 +183,12 @@ pub(crate) mod tests {
         impl Service<Request, Response = ServiceResponse, Error = Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
+        gg::PublicKey,
+        gg::SecretKey,
     ) {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
+        let (pks, sks) = gg::setup(&mut rng);
 
         let pd = ParametersData::new(
             &Parameters::<CGWKV> {
@@ -194,6 +198,7 @@ pub(crate) mod tests {
             None,
         )
         .unwrap();
+        let pds = ParametersData::new(&pks, None).unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
@@ -208,21 +213,32 @@ pub(crate) mod tests {
                                 .route(web::get().to(handlers::parameters)),
                         )
                         .service(
+                            resource("/sign/parameters")
+                                .app_data(Data::new(pds))
+                                .route(web::get().to(handlers::parameters)),
+                        )
+                        .service(
                             resource("/key/{timestamp}")
                                 .app_data(Data::new(sk))
                                 .wrap(NoAuth::new())
                                 .route(web::get().to(handlers::request_key::<CGWKV>)),
+                        )
+                        .service(
+                            resource("/sign/key")
+                                .app_data(Data::new(sks))
+                                .wrap(NoAuth::new())
+                                .route(web::get().to(handlers::request_signing_key)),
                         ),
                 ),
         )
         .await;
 
-        (app, pk, sk)
+        (app, pk, sk, pks, sks)
     }
 
     #[actix_web::test]
     async fn test_get_parameters() {
-        let (app, pk, _) = default_setup().await;
+        let (app, pk, _, _, _) = default_setup().await;
 
         let resp = test::TestRequest::get()
             .uri("/v2/parameters")
@@ -239,8 +255,25 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
+    async fn test_get_parameters_signing() {
+        let (app, _, _, _, _) = default_setup().await;
+
+        let resp = test::TestRequest::get()
+            .uri("/v2/sign/parameters")
+            .send_request(&app)
+            .await;
+
+        assert!(resp.headers().contains_key("last-modified"));
+        assert!(resp.headers().contains_key("cache-control"));
+        assert!(resp.headers().contains_key("etag"));
+
+        let _: gg::PublicKey = test::read_body_json(resp).await;
+        // TODO: check more than just correct deserialize.
+    }
+
+    #[actix_web::test]
     async fn test_get_usk() {
-        let (app, _, _) = default_setup().await;
+        let (app, _, _, _, _) = default_setup().await;
 
         let ts = now();
 
@@ -262,9 +295,66 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
+    async fn test_get_usk_signing() {
+        let (app, _, _, _, _) = default_setup().await;
+
+        let ts = now();
+
+        let pol = Policy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let req = test::TestRequest::get()
+            .uri("/v2/sign/key")
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<SigningKey> = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+    }
+
+    #[actix_web::test]
+    async fn test_get_round_signing() {
+        let mut rng = thread_rng();
+        let (app, _, _, pks, _) = default_setup().await;
+
+        let ts = now();
+
+        let pol = Policy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let id = gg::Identity::from(pol.derive::<32>().unwrap());
+
+        let req = test::TestRequest::get()
+            .uri("/v2/sign/key")
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<SigningKey> = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+
+        let message = b"some identical message";
+        let sig = gg::Signer::new(&key_response.key.unwrap().key, &mut rng)
+            .chain(message)
+            .sign();
+
+        assert!(gg::Verifier::new(&pks, &sig, &id).chain(message).verify());
+        assert!(!gg::Verifier::new(&pks, &sig, &id)
+            .chain("some other message")
+            .verify());
+    }
+
+    #[actix_web::test]
     async fn test_round() {
         let mut rng = thread_rng();
-        let (app, _, sk) = default_setup().await;
+        let (app, _, sk, _, _) = default_setup().await;
 
         let ts = now();
 
@@ -305,7 +395,7 @@ pub(crate) mod tests {
     #[actix_web::test]
     async fn test_wrong_policy() {
         let mut rng = thread_rng();
-        let (app, _, _) = default_setup().await;
+        let (app, _, _, _, _) = default_setup().await;
 
         let ts = now();
 

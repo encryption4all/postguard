@@ -46,7 +46,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_get_metrics() {
-        let (app, pk, _) = default_setup().await;
+        let (app, pk, _, _, _) = default_setup().await;
         let header_name = HeaderName::from_str(PG_CLIENT_HEADER).unwrap();
 
         // First request
