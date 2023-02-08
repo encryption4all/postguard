@@ -1,11 +1,12 @@
 use actix_web::{web::Data, HttpResponse};
 use actix_web::{HttpMessage, HttpRequest};
 
-use irmaseal_core::api::{KeyResponse, SigningKey};
+use irmaseal_core::api::KeyResponse;
+use irmaseal_core::artifacts::SigningKey;
 use irmaseal_core::identity::RecipientPolicy;
 use serde::Serialize;
 
-use irmaseal_core::ibs::gg::{keygen, Identity, SecretKey};
+use irmaseal_core::ibs::gg::{keygen, Identity, SecretKey, IDENTITY_SIZE};
 
 use crate::middleware::irma::IrmaAuthResult;
 use crate::util::current_time_u64;
@@ -42,10 +43,10 @@ where
     };
 
     let derived = policy
-        .derive::<32>()
+        .derive::<IDENTITY_SIZE>()
         .map_err(|_e| crate::Error::Unexpected)?;
 
-    let id = Identity(derived);
+    let id = Identity::from(derived);
     let key = keygen(sk, &id, &mut rng);
 
     Ok(HttpResponse::Ok().json(KeyResponse {

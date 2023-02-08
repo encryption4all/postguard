@@ -174,7 +174,8 @@ pub(crate) mod tests {
 
     use crate::middleware::irma_noauth::NoAuth;
     use irma::{ProofStatus, SessionStatus};
-    use irmaseal_core::api::{KeyResponse, Parameters, SigningKey};
+    use irmaseal_core::api::{KeyResponse, Parameters};
+    use irmaseal_core::artifacts::SigningKey;
     use irmaseal_core::ibs::gg;
     use irmaseal_core::identity::{Attribute, RecipientPolicy};
 

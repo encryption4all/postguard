@@ -185,7 +185,6 @@
 //! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
 //! Yew/Dioxus/Leptos). Otherwise, it is best to use the Javascript/Typescript, see
 //! TODO: link to NPM package.
-
 #![deny(
     missing_debug_implementations,
     rust_2018_idioms,

@@ -163,6 +163,16 @@ impl_serialize!(UserSecretKey<CGWKV>, <CGWKV as IBKEM>::Usk);
 impl_serialize!(Ciphertext<CGWKV>, <CGWKV as IBKEM>::Ct);
 impl_serialize!(MultiRecipientCiphertext<CGWKV>, MkemCt<CGWKV>);
 
+/// An identity-based signing key.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SigningKey {
+    /// The signing key.
+    pub key: ibs::gg::UserSecretKey,
+
+    /// The time of issuance of the key by the PKG (also included in the identity).
+    pub iat: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

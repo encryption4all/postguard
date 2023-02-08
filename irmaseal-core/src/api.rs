@@ -44,13 +44,3 @@ pub struct KeyResponse<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<T>,
 }
-
-/// An identity-ased signing key.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SigningKey {
-    /// The signing key.
-    pub key: ibs::gg::UserSecretKey,
-
-    /// The time of issuance of the key by the PKG (also included in the identity).
-    pub iat: u64,
-}
