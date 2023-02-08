@@ -1,6 +1,5 @@
-use crate::constants::*;
+use crate::consts::*;
 use js_sys::{Array, Object, Reflect, Uint8Array};
-use std::convert::TryInto;
 use wasm_bindgen::{prelude::*, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{AesGcmParams, Crypto, CryptoKey};
@@ -11,6 +10,7 @@ const MODE: &str = "AES-GCM";
 // we have to import crypto using a custom binding.
 #[wasm_bindgen]
 extern "C" {
+    #[allow(unsafe_code)]
     #[wasm_bindgen(js_namespace = crypto, js_name = valueOf)]
     fn get_crypto() -> Crypto;
 }
@@ -51,7 +51,8 @@ pub async fn encrypt(
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
     pars.additional_data(aad);
-    pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
+    pars.tag_length((TAG_SIZE * 8).try_into().unwrap()); // This can never fail, since the input is
+                                                         // constant.
 
     let result = subtle.encrypt_with_object_and_buffer_source(&pars, key, data)?;
     let array_buffer = JsFuture::from(result).await?;

@@ -1,7 +1,10 @@
-use super::Error;
+//! Identity definitions and utilities.
+
+use crate::error::Error;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tiny_keccak::{Hasher, Sha3};
 
 const IDENTITY_UNSET: u64 = u64::MAX;
@@ -15,48 +18,48 @@ const HINT_TYPES: &[&str] = &[
     "irma-demo.nuts.agb.agbcode",
 ];
 
-/// An IRMAseal Attribute(Request), which is a simplest case of an IRMA ConDisCon.
+/// The complete encryption policy for all recipients.
+pub type Policy = BTreeMap<String, RecipientPolicy>;
+
+/// An IRMAseal AttributeRequest, which is a simple case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
+    /// Attribute type.
     pub atype: String,
+
+    /// Attribute value.
     #[serde(rename = "v")]
     pub value: Option<String>,
-    // TODO: not null bool?
 }
 
-/// An IRMAseal policy.
-///
-/// Contains a timestamp and a conjuction of Attribute(Requests).
+/// An IRMAseal policy used to encapsulate a shared secret for one recipient.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct Policy {
+pub struct RecipientPolicy {
+    /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
+
+    /// A conjunction of attributes.
     pub con: Vec<Attribute>,
 }
 
-/// A hidden IRMAseal policy.
-///
-/// The attribute values of this type are (partly) hidden.
-/// We split this from Attribut by type to ensure no mixups!
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct HiddenAttribute {
-    #[serde(rename = "t")]
-    pub atype: String,
-    #[serde(rename = "v")]
-    pub hidden_value: Option<String>,
-}
-
 /// An IRMAseal hidden policy.
+///
+/// A policy where (part of) the value of the attributes is hidden.
+/// This type is safe for usage in (public) [Header][`crate::Header`] alongside the ciphertext.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct HiddenPolicy {
+pub struct HiddenRecipientPolicy {
+    /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
-    pub con: Vec<HiddenAttribute>,
+
+    /// A conjunction of attributes, with redacted values.
+    pub con: Vec<Attribute>,
 }
 
 impl Attribute {
-    pub fn hintify_value(&self) -> HiddenAttribute {
+    fn hintify_value(&self) -> Attribute {
         let hidden_value = self.value.as_ref().map(|v| {
             if HINT_TYPES.contains(&&self.atype[..]) {
                 let (begin, end) = v.split_at(v.len().saturating_sub(AMOUNT_CHARS_TO_HIDE));
@@ -66,24 +69,23 @@ impl Attribute {
             }
         });
 
-        HiddenAttribute {
+        Attribute {
             atype: self.atype.clone(),
-            hidden_value,
+            value: hidden_value,
         }
     }
 }
 
-impl Policy {
+impl RecipientPolicy {
     /// Completely hides the attribute value, or provides a hint for certain attribute types
-    pub fn to_hidden(&self) -> HiddenPolicy {
-        HiddenPolicy {
+    pub fn to_hidden(&self) -> HiddenRecipientPolicy {
+        HiddenRecipientPolicy {
             timestamp: self.timestamp,
             con: self.con.iter().map(Attribute::hintify_value).collect(),
         }
     }
-}
 
-impl Policy {
+    /// Derive an [identity][`IBKEM::Id`] from a [`Policy`].
     pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
@@ -148,9 +150,9 @@ impl Policy {
 }
 
 impl Attribute {
-    /// Conveniently construct a new attribute. It is also possible to directly construct this object.
+    /// Construct a new attribute request.
     pub fn new(atype: &str, value: Option<&str>) -> Self {
-        let atype = atype.to_owned();
+        let atype = atype.to_string();
         let value = value.map(|s| s.to_owned());
 
         Attribute { atype, value }
@@ -159,8 +161,8 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_common::TestSetup;
-    use crate::{Attribute, Policy};
+    use crate::identity::{Attribute, RecipientPolicy};
+    use crate::test::TestSetup;
     use ibe::kem::cgw_kv::CGWKV;
 
     #[test]
@@ -168,8 +170,7 @@ mod tests {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::default();
 
-        let policies: Vec<Policy> = setup.policies.into_values().collect();
-
+        let policies: Vec<RecipientPolicy> = setup.policy.into_values().collect();
         let p1_derived = policies[1].derive::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();
@@ -188,20 +189,20 @@ mod tests {
             value: Some("123456789".to_string()),
         };
         let hinted = attr.hintify_value();
-        assert_eq!(hinted.hidden_value, Some("12345****".to_string()));
+        assert_eq!(hinted.value, Some("12345****".to_string()));
 
         let attr_short = Attribute {
             atype: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
             value: Some("123".to_string()),
         };
         let hinted_short = attr_short.hintify_value();
-        assert_eq!(hinted_short.hidden_value, Some("***".to_string()));
+        assert_eq!(hinted_short.value, Some("***".to_string()));
 
         let attr_not_whitelisted = Attribute {
             atype: "pbdf.sidn-pbdf.mobilenumber.test".to_string(),
             value: Some("123456789".to_string()),
         };
         let hinted_empty = attr_not_whitelisted.hintify_value();
-        assert_eq!(hinted_empty.hidden_value, Some("".to_string()));
+        assert_eq!(hinted_empty.value, Some("".to_string()));
     }
 }

@@ -5,7 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use inquire::{Select, Text};
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
-use irmaseal_core::stream::Unsealer;
+use irmaseal_core::stream::rust::Unsealer;
 use irmaseal_core::{api::*, Attribute};
 use qrcode::render::Pixel;
 use qrcode::Color;
@@ -72,7 +72,7 @@ pub async fn exec(dec_opts: DecOpts) {
     let mut unsealer = Unsealer::new(&mut async_read).await.unwrap();
     eprintln!("IRMASeal format version: {:#?}", unsealer.version);
 
-    let hidden_policies = &unsealer.meta.policies;
+    let hidden_policies = &unsealer.header.policies;
     let options: Vec<_> = hidden_policies.keys().cloned().collect();
     let id = Select::new("What's your recipient identifier?", options)
         .prompt()
@@ -81,7 +81,7 @@ pub async fn exec(dec_opts: DecOpts) {
     let rec_info = hidden_policies.get(&id).unwrap();
     let mut reconstructed_policy = rec_info.policy.clone();
     for attr in reconstructed_policy.con.iter_mut() {
-        attr.hidden_value = Text::new(&format!("Enter value for {}?", attr.atype))
+        attr.value = Text::new(&format!("Enter value for {}?", attr.atype))
             .prompt()
             .ok();
     }
@@ -92,7 +92,7 @@ pub async fn exec(dec_opts: DecOpts) {
             .iter()
             .map(|attr| Attribute {
                 atype: attr.atype.clone(),
-                value: attr.hidden_value.clone(),
+                value: attr.value.clone(),
             })
             .collect(),
         validity: None,

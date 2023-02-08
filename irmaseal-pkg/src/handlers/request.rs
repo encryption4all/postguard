@@ -17,6 +17,7 @@ pub async fn request(
     let kr = value.into_inner();
 
     let dr = DisclosureRequestBuilder::new()
+<<<<<<< HEAD
         .add_discons(
             kr.con
                 .iter()
@@ -29,6 +30,27 @@ pub async fn request(
                 })
                 .collect(),
         )
+||||||| 4a51aa9
+        .add_discon(vec![kr
+            .con
+            .iter()
+            .map(|attr| AttributeRequest::Compound {
+                attr_type: attr.atype.clone(),
+                value: attr.value.clone(),
+                not_null: true,
+            })
+            .collect()])
+=======
+        .add_discon(vec![kr
+            .con
+            .iter()
+            .map(|attr| AttributeRequest::Compound {
+                attr_type: attr.atype.to_string(),
+                value: attr.value.clone(),
+                not_null: true,
+            })
+            .collect()])
+>>>>>>> refactor-lib
         .build();
 
     let validity = match kr.validity {

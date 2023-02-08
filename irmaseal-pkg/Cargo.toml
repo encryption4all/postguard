@@ -25,10 +25,11 @@ serde_json = "1.0.68"
 subtle = "2.1.1"
 env_logger = "0.9.0"
 log = "0.4.17"
-prometheus = { version = "0.13.1", default-features = false }
 lazy_static = "1.4.0"
 twox-hash = "1.6.3"
 base64 = "0.13.1"
+jsonwebtoken = { version = "8.0.1", features = ["use_pem"] }
+prometheus = { version = "0.13.1", default-features = false }
 
 [dependencies.clap]
 features = ["derive"]
@@ -40,7 +41,3 @@ version = "0.3"
 
 [dependencies.irmaseal-core]
 path = "../irmaseal-core"
-
-[dependencies.jsonwebtoken]
-features = ["use_pem"]
-version = "8.0.1"

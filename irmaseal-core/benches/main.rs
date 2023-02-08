@@ -2,10 +2,11 @@ use futures::executor::block_on;
 use futures::io::AllowStdIo;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
-use irmaseal_core::stream::seal;
-use irmaseal_core::{Attribute, Policy, PublicKey};
+use irmaseal_core::artifacts::PublicKey;
+use irmaseal_core::identity::{Attribute, Policy, RecipientPolicy};
+use irmaseal_core::rust::stream::SealerStreamConfig;
+use irmaseal_core::Sealer;
 use rand::{CryptoRng, RngCore};
-use std::collections::BTreeMap;
 use std::io::Cursor;
 
 use criterion::*;
@@ -16,9 +17,9 @@ fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], mpk: &PublicKey<CGWKV>, rn
     let mut input = AllowStdIo::new(Cursor::new(plain));
     let mut output = futures::io::sink();
 
-    let policies = BTreeMap::<String, Policy>::from([(
+    let policies = Policy::from([(
         String::from("test id"),
-        Policy {
+        RecipientPolicy {
             timestamp: 0,
             con: vec![Attribute {
                 atype: "test type".to_owned(),
@@ -28,7 +29,9 @@ fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], mpk: &PublicKey<CGWKV>, rn
     )]);
 
     block_on(async {
-        seal(mpk, &policies, rng, &mut input, &mut output)
+        Sealer::<SealerStreamConfig>::new(mpk, &policies, rng)
+            .unwrap()
+            .seal(&mut input, &mut output)
             .await
             .unwrap();
     });

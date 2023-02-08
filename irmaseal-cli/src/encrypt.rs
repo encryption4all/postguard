@@ -1,7 +1,7 @@
 use crate::opts::EncOpts;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
-use irmaseal_core::stream::seal;
+use irmaseal_core::stream::rust::seal;
 use irmaseal_core::{Attribute, Policy};
 use std::collections::BTreeMap;
 use std::fs::File;

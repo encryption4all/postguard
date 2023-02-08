@@ -26,7 +26,6 @@ pub struct EncOpts {
     #[clap(index = 1)]
     pub input: String,
 
-    // TODO: include example
     /// JSON representation of recipients and policies.
     #[clap(short = 'I', long)]
     pub identity: String,
