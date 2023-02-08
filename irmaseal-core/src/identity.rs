@@ -82,6 +82,7 @@ impl Policy {
 }
 
 impl Policy {
+    /// Derives an N-byte identity from a [`Policy`].
     pub fn derive<const N: usize>(&self) -> Result<[u8; N], Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
@@ -99,9 +100,10 @@ impl Policy {
             return Err(Error::ConstraintViolation);
         }
 
-        let mut tmp = [0u8; N];
-
+        let mut tmp = [0u8; 64];
         let mut pre_h = Shake::v256();
+
+        // 0 indicates the IRMA authentication method.
         pre_h.update(&[0x00]);
 
         let mut copy = self.con.clone();
@@ -132,14 +134,14 @@ impl Policy {
             }
 
             f.finalize(&mut tmp);
-
             pre_h.update(&tmp);
         }
 
         pre_h.update(&self.timestamp.to_be_bytes());
-        pre_h.finalize(&mut tmp);
+        let mut res = [0u8; N];
+        pre_h.finalize(&mut res);
 
-        Ok(tmp)
+        Ok(res)
     }
 
     pub fn derive_kem<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
