@@ -41,7 +41,7 @@ impl Default for TestSetup {
         let usks = policies
             .iter()
             .map(|(id, pol)| {
-                let derived = pol.derive::<CGWKV>().unwrap();
+                let derived = pol.derive_kem::<CGWKV>().unwrap();
                 let usk = UserSecretKey(CGWKV::extract_usk(Some(&mpk.0), &msk, &derived, &mut rng));
                 (id.clone(), usk)
             })

@@ -140,6 +140,9 @@
 //! # Ok(())
 //! # }
 //! ```
+#![cfg_attr(
+    feature = "rust_stream",
+    doc = r##"
 //!
 //! ### Seal a bytestream using the Rust Crypto backend.
 //!
@@ -174,11 +177,14 @@
 //! # Ok(())
 //! # }
 //! ```
+"##
+)]
+//!
 //! ### Using the Web Crypto backend.
 //!
 //! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
 //! Yew/Dioxus/Leptos). Otherwise, it is best to use the Javascript/Typescript, see
-//! [`irmaseal-wasm-bindings`](../../irmaseal-wasm-bindings/tests/tests.rs).
+//! TODO: link to NPM package.
 
 #![deny(
     missing_debug_implementations,
@@ -208,6 +214,9 @@ pub mod web;
 
 #[doc(hidden)]
 pub use ibe::{kem, Compress};
+
+#[doc(hidden)]
+pub use ibs;
 
 #[doc(hidden)]
 pub use consts::*;

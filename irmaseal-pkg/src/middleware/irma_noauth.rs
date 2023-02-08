@@ -6,31 +6,26 @@
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     web::Json,
-    Error, HttpMessage, HttpResponse,
+    Error, HttpMessage,
 };
 
 use futures::future::{ready, Ready};
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
-use std::marker::PhantomData;
 use std::rc::Rc;
 
-use serde::Serialize;
-
-use irma::{ProofStatus, SessionStatus};
-use irmaseal_core::{api::KeyResponse, kem::IBKEM, Policy, UserSecretKey};
+use crate::middleware::irma::IrmaAuthResult;
+use irma::ProofStatus;
+use irmaseal_core::identity::RecipientPolicy;
 
 #[doc(hidden)]
-pub struct NoAuthService<S, K> {
+pub struct NoAuthService<S> {
     service: Rc<S>,
-    scheme: PhantomData<K>,
 }
 
-impl<S, K> Service<ServiceRequest> for NoAuthService<S, K>
+impl<S> Service<ServiceRequest> for NoAuthService<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
-    K: IBKEM + 'static,
-    UserSecretKey<K>: Serialize,
 {
     type Response = ServiceResponse;
     type Error = Error;
@@ -43,63 +38,46 @@ where
 
         async move {
             // Retrieve the policy from the request.
-            let pol = req.extract::<Json<Policy>>().await?.into_inner();
+            let pol = req.extract::<Json<RecipientPolicy>>().await?.into_inner();
 
-            // Derive an id for this policy.
-            let id = pol.derive::<K>().map_err(|_e| crate::Error::Unexpected)?;
-
-            // Pass the derived id to the key service, which expects it in the extensions.
-            req.extensions_mut().insert(id);
+            // Pass the result to the key service, which expects it in the extensions.
+            req.extensions_mut().insert(IrmaAuthResult {
+                con: pol.con,
+                status: irma::SessionStatus::Done,
+                proof_status: Some(ProofStatus::Valid),
+                exp: None,
+            });
 
             // Invoke the (wrapped) key service.
             let res = srv.call(req).await?;
 
-            // Retrieve the (if present) key from the response extensions.
-            let usk = res
-                .response()
-                .extensions()
-                .get::<K::Usk>()
-                .cloned()
-                .map(UserSecretKey);
-
-            // Create a new response, including the key.
-            let new_req = res.request().clone();
-            let new_res = HttpResponse::Ok().json(KeyResponse {
-                status: SessionStatus::Done,
-                proof_status: Some(ProofStatus::Valid),
-                key: usk,
-            });
-
-            Ok(ServiceResponse::new(new_req, new_res))
+            Ok(res)
         }
         .boxed_local()
     }
 }
 
-pub struct NoAuth<K>(PhantomData<K>);
+pub struct NoAuth;
 
-impl<K> NoAuth<K> {
+impl NoAuth {
     pub fn new() -> Self {
-        NoAuth(PhantomData)
+        NoAuth {}
     }
 }
 
-impl<S, K> Transform<S, ServiceRequest> for NoAuth<K>
+impl<S> Transform<S, ServiceRequest> for NoAuth
 where
     S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
-    K: IBKEM + 'static,
-    UserSecretKey<K>: Serialize,
 {
     type Response = ServiceResponse;
     type Error = Error;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
-    type Transform = NoAuthService<S, K>;
+    type Transform = NoAuthService<S>;
     type InitError = ();
 
     fn new_transform(&self, service: S) -> Self::Future {
         ready(Ok(NoAuthService {
             service: Rc::new(service),
-            scheme: PhantomData,
         }))
     }
 }

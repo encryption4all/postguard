@@ -60,12 +60,13 @@ mod tests {
     use actix_web::test;
     use irma::SessionStatus;
     use irmaseal_core::api::{KeyResponse, Parameters};
+    use irmaseal_core::artifacts::UserSecretKey;
+    use irmaseal_core::identity::{Attribute, RecipientPolicy};
     use irmaseal_core::kem::cgw_kv::CGWKV;
-    use irmaseal_core::{Attribute, Policy};
 
     #[actix_web::test]
     async fn test_get_metrics() {
-        let (app, pk, _) = default_setup().await;
+        let (app, pk, _, _, _) = default_setup().await;
         let header_name = HeaderName::from_str(PG_CLIENT_HEADER).unwrap();
 
         // First request
@@ -110,7 +111,7 @@ mod tests {
             HeaderValue::from_static("Outlook,1234.5678.90,pg4ol,0.0.1"),
         );
         let ts = crate::server::tests::now();
-        let pol = Policy {
+        let pol = RecipientPolicy {
             timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
@@ -119,7 +120,8 @@ mod tests {
             .insert_header(header)
             .set_json(pol.clone())
             .to_request();
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req_usk).await;
         assert_eq!(key_response.status, SessionStatus::Done);
 
         // Collect metrics

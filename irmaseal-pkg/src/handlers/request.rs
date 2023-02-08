@@ -1,7 +1,7 @@
 use crate::Error;
 use actix_web::{web::Data, web::Json, HttpResponse};
 use irma::*;
-use irmaseal_core::api::KeyRequest;
+use irmaseal_core::api::IrmaAuthRequest;
 
 /// Maximum allowed valitidy (in seconds) of a JWT (1 day).
 const MAX_VALIDITY: u64 = 60 * 60 * 24;
@@ -11,13 +11,12 @@ const DEFAULT_VALIDITY: u64 = 60 * 5;
 
 pub async fn request(
     url: Data<String>,
-    value: Json<KeyRequest>,
+    value: Json<IrmaAuthRequest>,
 ) -> Result<HttpResponse, crate::Error> {
     let irma_url = url.get_ref().clone();
     let kr = value.into_inner();
 
     let dr = DisclosureRequestBuilder::new()
-<<<<<<< HEAD
         .add_discons(
             kr.con
                 .iter()
@@ -30,27 +29,6 @@ pub async fn request(
                 })
                 .collect(),
         )
-||||||| 4a51aa9
-        .add_discon(vec![kr
-            .con
-            .iter()
-            .map(|attr| AttributeRequest::Compound {
-                attr_type: attr.atype.clone(),
-                value: attr.value.clone(),
-                not_null: true,
-            })
-            .collect()])
-=======
-        .add_discon(vec![kr
-            .con
-            .iter()
-            .map(|attr| AttributeRequest::Compound {
-                attr_type: attr.atype.to_string(),
-                value: attr.value.clone(),
-                not_null: true,
-            })
-            .collect()])
->>>>>>> refactor-lib
         .build();
 
     let validity = match kr.validity {

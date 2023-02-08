@@ -1,11 +1,11 @@
 //! Identity definitions and utilities.
 
 use crate::error::Error;
+use alloc::collections::BTreeMap;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use tiny_keccak::{Hasher, Sha3};
+use tiny_keccak::{Hasher, Sha3, Shake};
 
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
@@ -85,8 +85,8 @@ impl RecipientPolicy {
         }
     }
 
-    /// Derive an [identity][`IBKEM::Id`] from a [`Policy`].
-    pub fn derive<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
+    /// Derives an N-byte identity from a [`Policy`].
+    pub fn derive<const N: usize>(&self) -> Result<[u8; N], Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
         //  - con[0..n - 1] consisting of n conjunctions.
@@ -104,8 +104,9 @@ impl RecipientPolicy {
         }
 
         let mut tmp = [0u8; 64];
+        let mut pre_h = Shake::v256();
 
-        let mut pre_h = Sha3::v512();
+        // 0 indicates the IRMA authentication method.
         pre_h.update(&[0x00]);
 
         let mut copy = self.con.clone();
@@ -136,16 +137,21 @@ impl RecipientPolicy {
             }
 
             f.finalize(&mut tmp);
-
             pre_h.update(&tmp);
         }
 
         pre_h.update(&self.timestamp.to_be_bytes());
-        pre_h.finalize(&mut tmp);
+        let mut res = [0u8; N];
+        pre_h.finalize(&mut res);
 
+        Ok(res)
+    }
+
+    /// Derive a KEMs associated identity from a [`Policy`].
+    pub fn derive_kem<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
         // This hash is superfluous in theory, but derive does not support incremental hashing.
         // As a practical considerion we use an extra hash here.
-        Ok(<K as IBKEM>::Id::derive(&tmp))
+        Ok(<K as IBKEM>::Id::derive(&self.derive::<64>()?))
     }
 }
 
@@ -171,15 +177,15 @@ mod tests {
         let setup = TestSetup::default();
 
         let policies: Vec<RecipientPolicy> = setup.policy.into_values().collect();
-        let p1_derived = policies[1].derive::<CGWKV>().unwrap();
+        let p1_derived = policies[1].derive_kem::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();
         reversed.con.reverse();
-        assert_eq!(&p1_derived, &reversed.derive::<CGWKV>().unwrap());
+        assert_eq!(&p1_derived, &reversed.derive_kem::<CGWKV>().unwrap());
 
         // The timestamp should matter, and therefore map to a different IBE identity.
         reversed.timestamp += 1;
-        assert_ne!(&p1_derived, &reversed.derive::<CGWKV>().unwrap());
+        assert_ne!(&p1_derived, &reversed.derive_kem::<CGWKV>().unwrap());
     }
 
     #[test]

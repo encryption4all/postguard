@@ -138,7 +138,7 @@ impl Header {
         // Map each RecipientPolicy to an IBE identity.
         let ids = policies
             .values()
-            .map(RecipientPolicy::derive::<CGWKV>)
+            .map(RecipientPolicy::derive_kem::<CGWKV>)
             .collect::<Result<Vec<<CGWKV as IBKEM>::Id>, _>>()?;
 
         // Generate the shared secret and ciphertexts.

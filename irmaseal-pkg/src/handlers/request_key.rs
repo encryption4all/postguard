@@ -1,110 +1,70 @@
 use actix_web::{web::Data, HttpResponse};
 use actix_web::{HttpMessage, HttpRequest};
 
+use irmaseal_core::api::KeyResponse;
+use irmaseal_core::artifacts::UserSecretKey;
+use irmaseal_core::identity::RecipientPolicy;
 use irmaseal_core::kem::IBKEM;
 
-<<<<<<< HEAD
-pub async fn request_key<K: IBKEM + 'static>(
+use crate::middleware::irma::IrmaAuthResult;
+use crate::util::current_time_u64;
+
+use serde::Serialize;
+
+pub async fn request_key<K>(
     req: HttpRequest,
-||||||| 4a51aa9
-/// Custom claims signed by the IRMA server.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Claims {
-    // Mandatory JWT fields.
-    exp: u64,
-    iat: u64,
-    iss: String,
-    sub: String,
-
-    // Mandatory IRMA claims, always present.
-    token: irma::SessionToken,
-    status: irma::SessionStatus,
-    r#type: irma::SessionType,
-
-    // Optional fields, only present when the session is a finished disclosure session.
-    proof_status: Option<irma::ProofStatus>,
-    disclosed: Option<Vec<Vec<DisclosedAttribute>>>,
-}
-
-/// Fetch identity iff valid, or else yield nothing.
-fn fetch_policy(timestamp: u64, disclosed: &[Vec<DisclosedAttribute>]) -> Option<Policy> {
-    // Convert disclosed attributes to a Policy
-    let res: Result<Vec<Attribute>, _> = disclosed
-        .iter()
-        .flatten()
-        .map(|a| match a.status {
-            AttributeStatus::Present => Ok(Attribute {
-                atype: a.identifier.clone(),
-                value: a.raw_value.clone(),
-            }),
-            _ => Err(Error::Unexpected),
-        })
-        .collect();
-
-    let con = res.ok()?;
-
-    Some(Policy { timestamp, con })
-}
-
-pub async fn request_key<K: IBKEM>(
-=======
-/// Custom claims signed by the IRMA server.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Claims {
-    // Mandatory JWT fields.
-    exp: u64,
-    iat: u64,
-    iss: String,
-    sub: String,
-
-    // Mandatory IRMA claims, always present.
-    token: irma::SessionToken,
-    status: irma::SessionStatus,
-    r#type: irma::SessionType,
-
-    // Optional fields, only present when the session is a finished disclosure session.
-    proof_status: Option<irma::ProofStatus>,
-    disclosed: Option<Vec<Vec<DisclosedAttribute>>>,
-}
-
-/// Fetch identity iff valid, or else yield nothing.
-fn fetch_policy(timestamp: u64, disclosed: &[Vec<DisclosedAttribute>]) -> Option<Policy> {
-    // Convert disclosed attributes to a Policy
-    let res: Result<Vec<Attribute>, _> = disclosed
-        .iter()
-        .flatten()
-        .map(|a| match a.status {
-            AttributeStatus::Present => Ok(Attribute::new(&a.identifier, a.raw_value.as_deref())),
-            _ => Err(Error::Unexpected),
-        })
-        .collect();
-
-    let con = res.ok()?;
-
-    Some(Policy { timestamp, con })
-}
-
-pub async fn request_key<K: IBKEM>(
->>>>>>> refactor-lib
     msk: Data<K::Sk>,
-) -> Result<HttpResponse, crate::Error> {
+) -> Result<HttpResponse, crate::Error>
+where
+    K: IBKEM + 'static,
+    UserSecretKey<K>: Serialize,
+{
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();
 
-    let id = req
+    let timestamp = req
+        .match_info()
+        .query("timestamp")
+        .parse::<u64>()
+        .map_err(|_e| crate::Error::NoTimestampError)?;
+
+    let IrmaAuthResult {
+        con,
+        status,
+        proof_status,
+        exp,
+    } = req
         .extensions()
-        .get::<K::Id>()
+        .get::<IrmaAuthResult>()
         .cloned()
         .ok_or(crate::Error::Unexpected)?;
 
+    // It is not allowed to ask for USKs with a timestamp in the future.
+    let now = current_time_u64()?;
+    if timestamp > now {
+        return Err(crate::Error::ChronologyError);
+    }
+
+    // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
+    if let Some(exp) = exp {
+        if timestamp > exp {
+            return Err(crate::Error::ChronologyError);
+        }
+    }
+
     req.extensions_mut().clear();
+
+    let policy = RecipientPolicy { timestamp, con };
+
+    let id = policy
+        .derive_kem::<K>()
+        .map_err(|_e| crate::Error::Unexpected)?;
 
     let usk = K::extract_usk(None, sk, &id, &mut rng);
 
-    let mut res = HttpResponse::Ok().finish();
-    res.extensions_mut().insert(usk);
-
-    Ok(res)
+    Ok(HttpResponse::Ok().json(KeyResponse {
+        status,
+        proof_status,
+        key: Some(UserSecretKey::<K>(usk)),
+    }))
 }

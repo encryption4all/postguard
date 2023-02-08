@@ -6,7 +6,7 @@ authors = [
 edition = "2021"
 license = "MIT"
 name = "irmaseal-pkg"
-version = "0.2.0"
+version = "0.3.0-rc.0"
 
 [dependencies]
 actix-cors = "0.6.1"
@@ -18,7 +18,7 @@ arrayref = "0.3.5"
 futures-util = "*"
 irma = "0.2.1"
 paste = "1.0.5"
-rand = "0.8.4"
+rand = { package = "rand", version = "0.8" }
 reqwest = "0.11.10"
 serde = "*"
 serde_json = "1.0.68"
@@ -28,8 +28,9 @@ log = "0.4.17"
 lazy_static = "1.4.0"
 twox-hash = "1.6.3"
 base64 = "0.13.1"
-jsonwebtoken = { version = "8.0.1", features = ["use_pem"] }
-prometheus = { version = "0.13.1", default-features = false }
+jsonwebtoken = { version = "8.0", features = ["use_pem"] }
+prometheus = { version = "0.13", default-features = false }
+rmp-serde = "1.1.1"
 
 [dependencies.clap]
 features = ["derive"]
@@ -41,3 +42,4 @@ version = "0.3"
 
 [dependencies.irmaseal-core]
 path = "../irmaseal-core"
+features = []

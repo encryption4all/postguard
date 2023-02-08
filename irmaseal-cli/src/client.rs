@@ -1,5 +1,6 @@
+:se irmaseal_core::api::SigningKey;
 use irmaseal_core::kem::IBKEM;
-use irmaseal_core::{api::*, PublicKey};
+use irmaseal_core::{api::*, PublicKey, UserSecretKey};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
@@ -59,7 +60,7 @@ impl<'a> Client<'a> {
         K: IBKEM,
         PublicKey<K>: DeserializeOwned,
     {
-        Ok(self
+        let res = self
             .client
             .get(self.create_url("v2/parameters"))
             .headers(HEADERS.clone())
@@ -67,11 +68,28 @@ impl<'a> Client<'a> {
             .await?
             .error_for_status()?
             .json::<Parameters<K>>()
-            .await?)
+            .await?;
+
+        Ok(res)
     }
 
-    pub async fn request_start(&self, kr: &KeyRequest) -> Result<irma::SessionData, ClientError> {
-        Ok(self
+    // TODO
+    pub async fn signing_parameters(&self) -> Result<Parameters<K>, ClientError> {
+        let res = self
+            .client
+            .get(self.create_url("v2/sign/parameters"))
+            .headers(HEADERS.clone())
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Parameters<K>>()
+            .await?;
+
+        Ok(res)
+    }
+
+    pub async fn request_start(&self, kr: &IrmaAuthRequest) -> Result<irma::SessionData, ClientError> {
+        let res = self
             .client
             .post(self.create_url("v2/irma/start"))
             .headers(HEADERS.clone())
@@ -80,11 +98,13 @@ impl<'a> Client<'a> {
             .await?
             .error_for_status()?
             .json::<irma::SessionData>()
-            .await?)
+            .await?;
+
+        Ok(res)
     }
 
     pub async fn request_jwt(&self, token: &irma::SessionToken) -> Result<String, ClientError> {
-        Ok(self
+        let res = self
             .client
             .get(self.create_url(&format!("v2/irma/jwt/{}", token.0)))
             .headers(HEADERS.clone())
@@ -92,19 +112,21 @@ impl<'a> Client<'a> {
             .await?
             .error_for_status()?
             .text()
-            .await?)
+            .await?;
+
+        Ok(res)
     }
 
-    pub async fn request_key<K>(
+    pub async fn request_decryption_key<K>(
         &self,
         timestamp: u64,
         auth: &str,
-    ) -> Result<KeyResponse<K>, ClientError>
+    ) -> Result<KeyResponse<UserSecretKey<K>>, ClientError>
     where
         K: IBKEM,
-        KeyResponse<K>: DeserializeOwned,
+        KeyResponse<UserSecretKey<K>>: DeserializeOwned,
     {
-        Ok(self
+        let res = self
             .client
             .get(self.create_url(&format!("v2/irma/key/{timestamp}")))
             .bearer_auth(auth)
@@ -112,7 +134,28 @@ impl<'a> Client<'a> {
             .send()
             .await?
             .error_for_status()?
-            .json::<KeyResponse<K>>()
-            .await?)
+            .json::<KeyResponse<UserSecretKey<K>>>()
+            .await?;
+
+        Ok(res)
+    }
+
+    pub async fn request_signing_key(
+        &self,
+        auth: &str,
+    ) -> Result<KeyResponse<SigningKey>, ClientError>
+where {
+        let res = self
+            .client
+            .get(self.create_url(&format!("v2/irma/key/sign")))
+            .bearer_auth(auth)
+            .headers(HEADERS.clone())
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<KeyResponse<SigningKey>>()
+            .await?;
+
+        Ok(res)
     }
 }

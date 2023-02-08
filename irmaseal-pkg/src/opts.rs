@@ -23,16 +23,24 @@ pub enum Subcommand {
 #[clap(name = "Gen")]
 pub struct GenOpts {
     /// Version of the protocol.
-    #[clap(short = 's', long, possible_values = &["1", "2"], default_value = "2")]
+    #[clap(short = 's', long, possible_values = &["3"], default_value = "3")]
     pub scheme: String,
 
-    /// Path to store the private key.
-    #[clap(short = 'S', long, default_value = "./pkg.sec")]
-    pub secret: String,
+    /// Path to store the IBE private key.
+    #[clap(long, default_value = "./pkg_ibe.sec")]
+    pub ibe_secret: String,
 
-    /// Path to store the public key.
-    #[clap(short = 'P', long, default_value = "./pkg.pub")]
-    pub public: String,
+    /// Path to store the IBE public key.
+    #[clap(long, default_value = "./pkg_ibe.pub")]
+    pub ibe_public: String,
+
+    /// Path to store the IBS private key.
+    #[clap(long, default_value = "./pkg_ibs.sec")]
+    pub ibs_secret: String,
+
+    /// Path to store the IBS public key.
+    #[clap(long, default_value = "./pkg_ibs.pub")]
+    pub ibs_public: String,
 }
 
 /// Run the IRMASeal PKG HTTP service.
@@ -51,11 +59,19 @@ pub struct ServerOpts {
     #[clap(short, long, default_value = "https://irmacrypt.nl/irma", value_hint = ValueHint::Url)]
     pub irma: String,
 
-    /// Master secret key file path.
-    #[clap(short = 'S', long, default_value = "./pkg.sec")]
-    pub secret: String,
+    /// Path to store the IBS private key.
+    #[clap(long, default_value = "./pkg_ibe.sec", value_hint = ValueHint::FilePath)]
+    pub ibe_secret: String,
 
-    /// Master public key file path.
-    #[clap(short = 'P', long, default_value = "./pkg.pub", value_hint = ValueHint::FilePath)]
-    pub public: String,
+    /// Path to store the IBS public key.
+    #[clap(long, default_value = "./pkg_ibe.pub", value_hint = ValueHint::FilePath)]
+    pub ibe_public: String,
+
+    /// Path to store the IBS private key.
+    #[clap(long, default_value = "./pkg_ibs.sec", value_hint = ValueHint::FilePath)]
+    pub ibs_secret: String,
+
+    /// Path to store the IBS public key.
+    #[clap(long, default_value = "./pkg_ibs.pub", value_hint = ValueHint::FilePath)]
+    pub ibs_public: String,
 }

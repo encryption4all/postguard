@@ -1,8 +1,3 @@
-use crate::handlers;
-use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
-use crate::middleware::metrics::collect_metrics;
-use crate::opts::*;
-use crate::util::*;
 use actix_cors::Cors;
 use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
@@ -13,8 +8,19 @@ use actix_web::{
     web::{resource, scope, Data},
     App, HttpServer,
 };
+
+use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::metrics::collect_metrics;
+use crate::opts::*;
+use crate::util::*;
+use crate::{handlers, PKGError};
+
+use irmaseal_core::api::Parameters;
+use irmaseal_core::artifacts::*;
+use irmaseal_core::ibs::gg;
 use irmaseal_core::kem::cgw_kv::CGWKV;
 use irmaseal_core::kem::IBKEM;
+
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
 
@@ -41,7 +47,7 @@ pub struct MasterKeyPair<K: IBKEM> {
 }
 
 /// Precomputed parameter data.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ParametersData {
     /// Pre-serialized public parameters (JSON).
     pub pp: String,
@@ -54,21 +60,36 @@ pub struct ParametersData {
 }
 
 #[actix_rt::main]
-pub async fn exec(server_opts: ServerOpts) {
+pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     let ServerOpts {
         host,
         port,
         irma,
-        secret,
-        public,
+        ibe_secret,
+        ibe_public,
+        ibs_secret,
+        ibs_public,
     } = server_opts;
 
-    let kp = MasterKeyPair::<CGWKV> {
-        pk: cgwkv_read_pk(&public).expect("cannot read public key from disk"),
-        sk: cgwkv_read_sk(&secret).expect("cannot read secret key from disk"),
+    let ibe_kp = MasterKeyPair::<CGWKV> {
+        pk: cgwkv_read_pk(&ibe_public).expect("cannot read public key from disk"),
+        sk: cgwkv_read_sk(&ibe_secret).expect("cannot read secret key from disk"),
     };
 
-    let pd = ParametersData::new(&kp.pk, Some(&public));
+    let ibe_pd = ParametersData::new(
+        &Parameters::<CGWKV> {
+            format_version: 0x00,
+            public_key: PublicKey::<CGWKV>(ibe_kp.pk),
+        },
+        Some(&ibe_public),
+    )?;
+
+    let ibs_pk: gg::PublicKey =
+        rmp_serde::from_slice(&std::fs::read(&ibs_public).unwrap()).unwrap();
+    let ibs_pd = ParametersData::new(&ibs_pk, Some(&ibs_public))?;
+
+    let ibs_sk: gg::SecretKey =
+        rmp_serde::from_slice(&std::fs::read(&ibs_secret).unwrap()).unwrap();
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
@@ -100,7 +121,12 @@ pub async fn exec(server_opts: ServerOpts) {
                     .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
                     .service(
                         resource("/parameters")
-                            .app_data(Data::new(pd.clone()))
+                            .app_data(Data::new(ibe_pd.clone()))
+                            .route(web::get().to(handlers::parameters)),
+                    )
+                    .service(
+                        resource("/sign/parameters")
+                            .app_data(Data::new(ibs_pd.clone()))
                             .route(web::get().to(handlers::parameters)),
                     )
                     .service(
@@ -117,31 +143,41 @@ pub async fn exec(server_opts: ServerOpts) {
                             )
                             .service(
                                 resource("/key/{timestamp}")
-                                    .app_data(Data::new(kp.sk))
-                                    .wrap(IrmaAuth::<CGWKV>::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .app_data(Data::new(ibe_kp.sk))
+                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::get().to(handlers::request_key::<CGWKV>)),
+                            )
+                            .service(
+                                resource("/sign/key")
+                                    .app_data(Data::new(ibs_sk))
+                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .route(web::get().to(handlers::request_signing_key)),
                             ),
                     ),
             )
     })
-    .bind(format!("{}:{}", host, port))
-    .unwrap()
+    .bind(format!("{host}:{port}"))?
     .shutdown_timeout(1)
     .run()
-    .await
-    .unwrap()
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::middleware::irma_noauth::NoAuth;
+
     use actix_http::Request;
     use actix_web::dev::{Service, ServiceResponse};
     use actix_web::{test, web, App, Error};
+
+    use crate::middleware::irma_noauth::NoAuth;
     use irma::{ProofStatus, SessionStatus};
-    use irmaseal_core::api::{KeyResponse, Parameters};
-    use irmaseal_core::{Attribute, Policy};
+    use irmaseal_core::api::{KeyResponse, Parameters, SigningKey};
+    use irmaseal_core::ibs::gg;
+    use irmaseal_core::identity::{Attribute, RecipientPolicy};
+
     use rand::thread_rng;
     use std::time::SystemTime;
 
@@ -156,11 +192,22 @@ pub(crate) mod tests {
         impl Service<Request, Response = ServiceResponse, Error = Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
+        gg::PublicKey,
+        gg::SecretKey,
     ) {
         let mut rng = thread_rng();
         let (pk, sk) = CGWKV::setup(&mut rng);
+        let (pks, sks) = gg::setup(&mut rng);
 
-        let pd = ParametersData::new(&pk, None);
+        let pd = ParametersData::new(
+            &Parameters::<CGWKV> {
+                format_version: 0x00,
+                public_key: PublicKey::<CGWKV>(pk),
+            },
+            None,
+        )
+        .unwrap();
+        let pds = ParametersData::new(&pks, None).unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
@@ -175,21 +222,32 @@ pub(crate) mod tests {
                                 .route(web::get().to(handlers::parameters)),
                         )
                         .service(
+                            resource("/sign/parameters")
+                                .app_data(Data::new(pds))
+                                .route(web::get().to(handlers::parameters)),
+                        )
+                        .service(
                             resource("/key/{timestamp}")
                                 .app_data(Data::new(sk))
-                                .wrap(NoAuth::<CGWKV>::new())
+                                .wrap(NoAuth::new())
                                 .route(web::get().to(handlers::request_key::<CGWKV>)),
+                        )
+                        .service(
+                            resource("/sign/key")
+                                .app_data(Data::new(sks))
+                                .wrap(NoAuth::new())
+                                .route(web::get().to(handlers::request_signing_key)),
                         ),
                 ),
         )
         .await;
 
-        (app, pk, sk)
+        (app, pk, sk, pks, sks)
     }
 
     #[actix_web::test]
     async fn test_get_parameters() {
-        let (app, pk, _) = default_setup().await;
+        let (app, pk, _, _, _) = default_setup().await;
 
         let resp = test::TestRequest::get()
             .uri("/v2/parameters")
@@ -206,12 +264,29 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
+    async fn test_get_parameters_signing() {
+        let (app, _, _, _, _) = default_setup().await;
+
+        let resp = test::TestRequest::get()
+            .uri("/v2/sign/parameters")
+            .send_request(&app)
+            .await;
+
+        assert!(resp.headers().contains_key("last-modified"));
+        assert!(resp.headers().contains_key("cache-control"));
+        assert!(resp.headers().contains_key("etag"));
+
+        let _: gg::PublicKey = test::read_body_json(resp).await;
+        // TODO: check more than just correct deserialize.
+    }
+
+    #[actix_web::test]
     async fn test_get_usk() {
-        let (app, _, _) = default_setup().await;
+        let (app, _, _, _, _) = default_setup().await;
 
         let ts = now();
 
-        let pol = Policy {
+        let pol = RecipientPolicy {
             timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
@@ -221,25 +296,83 @@ pub(crate) mod tests {
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
     }
 
     #[actix_web::test]
-    async fn test_round() {
-        let mut rng = thread_rng();
-        let (app, _, sk) = default_setup().await;
+    async fn test_get_usk_signing() {
+        let (app, _, _, _, _) = default_setup().await;
 
         let ts = now();
 
-        let pol = Policy {
+        let pol = RecipientPolicy {
             timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
-        let id = pol.derive::<CGWKV>().unwrap();
+        let req = test::TestRequest::get()
+            .uri("/v2/sign/key")
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<SigningKey> = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+    }
+
+    #[actix_web::test]
+    async fn test_get_round_signing() {
+        let mut rng = thread_rng();
+        let (app, _, _, pks, _) = default_setup().await;
+
+        let ts = now();
+
+        let pol = RecipientPolicy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let id = gg::Identity::from(pol.derive::<32>().unwrap());
+
+        let req = test::TestRequest::get()
+            .uri("/v2/sign/key")
+            .set_json(pol.clone())
+            .to_request();
+
+        let key_response: KeyResponse<SigningKey> = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+
+        let message = b"some identical message";
+        let sig = gg::Signer::new(&key_response.key.unwrap().key, &mut rng)
+            .chain(message)
+            .sign();
+
+        assert!(gg::Verifier::new(&pks, &sig, &id).chain(message).verify());
+        assert!(!gg::Verifier::new(&pks, &sig, &id)
+            .chain("some other message")
+            .verify());
+    }
+
+    #[actix_web::test]
+    async fn test_round_kem() {
+        let mut rng = thread_rng();
+        let (app, _, sk, _, _) = default_setup().await;
+
+        let ts = now();
+
+        let pol = RecipientPolicy {
+            timestamp: ts,
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let id = pol.derive_kem::<CGWKV>().unwrap();
 
         let req_pk = test::TestRequest::get().uri("/v2/parameters").to_request();
         let ppk: Parameters<CGWKV> = test::call_and_read_body_json(&app, req_pk).await;
@@ -252,7 +385,8 @@ pub(crate) mod tests {
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req_usk).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
@@ -268,18 +402,18 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
-    async fn test_wrong_policy() {
+    async fn test_round_kem_wrong_policy() {
         let mut rng = thread_rng();
-        let (app, _, _) = default_setup().await;
+        let (app, _, _, _, _) = default_setup().await;
 
         let ts = now();
 
-        let pol = Policy {
+        let pol = RecipientPolicy {
             timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
-        let id = pol.derive::<CGWKV>().unwrap();
+        let id = pol.derive_kem::<CGWKV>().unwrap();
 
         let req_pk = test::TestRequest::get().uri("/v2/parameters").to_request();
         let ppk: Parameters<CGWKV> = test::call_and_read_body_json(&app, req_pk).await;
@@ -292,7 +426,8 @@ pub(crate) mod tests {
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<CGWKV> = test::call_and_read_body_json(&app, req_usk).await;
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req_usk).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
@@ -302,7 +437,7 @@ pub(crate) mod tests {
         assert_eq!(ss1, ss2);
 
         // Test that if a USK is retrieved for a different policy, decapsulation will fail.
-        let pol_wrong = Policy {
+        let pol_wrong = RecipientPolicy {
             timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("anothervalue"))],
         };
@@ -312,7 +447,7 @@ pub(crate) mod tests {
             .set_json(pol_wrong)
             .to_request();
 
-        let key_response_wrong: KeyResponse<CGWKV> =
+        let key_response_wrong: KeyResponse<UserSecretKey<CGWKV>> =
             test::call_and_read_body_json(&app, req_usk_wrong).await;
 
         // Make sure a USK retrieved for a different policy cannot decapsulate.
