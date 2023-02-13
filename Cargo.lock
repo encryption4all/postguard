@@ -1396,58 +1396,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "irmaseal-cli"
-version = "0.3.0-rc.0"
-dependencies = [
- "arrayvec",
- "clap",
- "futures 0.3.26",
- "indicatif",
- "inquire",
- "irma",
- "irmaseal-core",
- "lazy_static",
- "qrcode",
- "rand",
- "reqwest 0.10.10",
- "serde",
- "serde_json",
- "tokio 0.2.25",
-]
-
-[[package]]
-name = "irmaseal-core"
-version = "0.3.0-rc.0"
-dependencies = [
- "aead",
- "aes-gcm",
- "base64ct",
- "cipher 0.3.0",
- "criterion",
- "futures 0.3.26",
- "futures-util",
- "getrandom",
- "ibe",
- "ibs",
- "irma",
- "js-sys",
- "rand",
- "rmp-serde",
- "serde",
- "serde-big-array",
- "serde-transcode",
- "serde-wasm-bindgen",
- "serde_json",
- "subtle",
- "tiny-keccak",
- "tokio 1.25.0",
- "tokio-util 0.7.4",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "irmaseal-curve"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1458,55 +1406,6 @@ dependencies = [
  "pairing",
  "rand_core",
  "subtle",
-]
-
-[[package]]
-name = "irmaseal-pkg"
-version = "0.3.0-rc.0"
-dependencies = [
- "actix-cors",
- "actix-http",
- "actix-rt",
- "actix-web",
- "actix-web-httpauth",
- "arrayref",
- "base64 0.13.1",
- "clap",
- "env_logger",
- "futures 0.3.26",
- "futures-util",
- "irma",
- "irmaseal-core",
- "jsonwebtoken",
- "lazy_static",
- "log",
- "paste",
- "prometheus",
- "rand",
- "reqwest 0.11.14",
- "rmp-serde",
- "serde",
- "serde_json",
- "subtle",
- "twox-hash",
-]
-
-[[package]]
-name = "irmaseal-wasm-bindings"
-version = "0.3.0-rc.0"
-dependencies = [
- "futures 0.3.26",
- "getrandom",
- "irmaseal-core",
- "js-sys",
- "rand",
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "wasm-streams",
- "web-sys",
 ]
 
 [[package]]
@@ -2021,6 +1920,106 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "478c572c3d73181ff3c2539045f6eb99e5491218eae919370993b890cdbdd98e"
 
 [[package]]
+name = "pg-cli"
+version = "0.3.0-rc.0"
+dependencies = [
+ "arrayvec",
+ "clap",
+ "futures 0.3.26",
+ "indicatif",
+ "inquire",
+ "irma",
+ "lazy_static",
+ "pg-core",
+ "qrcode",
+ "rand",
+ "reqwest 0.10.10",
+ "serde",
+ "serde_json",
+ "tokio 0.2.25",
+]
+
+[[package]]
+name = "pg-core"
+version = "0.3.0-rc.0"
+dependencies = [
+ "aead",
+ "aes-gcm",
+ "base64ct",
+ "cipher 0.3.0",
+ "criterion",
+ "futures 0.3.26",
+ "futures-util",
+ "getrandom",
+ "ibe",
+ "ibs",
+ "irma",
+ "js-sys",
+ "rand",
+ "rmp-serde",
+ "serde",
+ "serde-transcode",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "subtle",
+ "tiny-keccak",
+ "tokio 1.25.0",
+ "tokio-util 0.7.4",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "pg-pkg"
+version = "0.3.0-rc.0"
+dependencies = [
+ "actix-cors",
+ "actix-http",
+ "actix-rt",
+ "actix-web",
+ "actix-web-httpauth",
+ "arrayref",
+ "base64 0.13.1",
+ "clap",
+ "env_logger",
+ "futures 0.3.26",
+ "futures-util",
+ "irma",
+ "jsonwebtoken",
+ "lazy_static",
+ "log",
+ "paste",
+ "pg-core",
+ "prometheus",
+ "rand",
+ "reqwest 0.11.14",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "subtle",
+ "twox-hash",
+]
+
+[[package]]
+name = "pg-wasm"
+version = "0.3.0-rc.0"
+dependencies = [
+ "futures 0.3.26",
+ "getrandom",
+ "js-sys",
+ "pg-core",
+ "rand",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+ "wasm-streams",
+ "web-sys",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2489,15 +2488,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb7d1f0d3021d347a83e556fc4683dea2ea09d87bccdf88ff5c12545d89d5efb"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde-big-array"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd31f59f6fe2b0c055371bb2f16d7f0aa7d8881676c04a55b1596d1a17cd10a4"
-dependencies = [
- "serde",
 ]
 
 [[package]]

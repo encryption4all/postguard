@@ -1,0 +1,71 @@
+[package]
+name = "pg-core"
+description = "PostGuard core library communication and bytestream operations."
+version = "0.3.0-rc.0"
+authors = [
+  "Leon Botros <l.botros@cs.ru.nl",
+  "Wouter Geraedts <git@woutergeraedts.nl>"
+]
+edition = "2021"
+license = "MIT"
+keywords = ["ibe", "encryption", "ecc"]
+homepage = "https://github.com/encryption4all/postguard/tree/main/pg-core"
+categories = ["cryptography"]
+
+[dependencies]
+irma = "0.2.1"
+ibe = { version = "0.2.3", features = ["cgwkv", "mkem"] }
+ibs = "0.4.0-rc.1"
+rand = { version = "0.8", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+rmp-serde = "1.1"
+serde_json = "1.0"
+subtle = "2.3"
+tiny-keccak = { version = "2.0", features = ["sha3"] }
+base64ct = { version = "1.5" }
+
+# For both stream features.
+futures = { version = "0.3", optional = true }
+
+# For the Rust Crypto backend.
+aead = { version = "0.5", features = ["stream", "alloc"], optional = true }
+aes-gcm = { version = "0.10", optional = true }
+
+# For the Web Crypto backend ("web" feature).
+getrandom = { version = "0.2", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+cipher = { version = "0.3", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+serde-wasm-bindgen = { version = "0.4", optional = true }
+web-sys = { version = "0.3", features = [
+  "SubtleCrypto",
+  "AesGcmParams",
+  "Crypto",
+  "CryptoKey",
+], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.24.2", features = ["full"] }
+tokio-util = { version = "0.7.4", features = ["compat"] }
+serde-transcode = "1.1.1"
+criterion = "0.4"
+rand = "0.8.5"
+futures = { version = "0.3", features = ["io-compat"]}
+futures-util = "0.3.25"
+
+[features]
+default = ["rust"]
+rust = ["aead", "aes-gcm"]
+rust_stream = ["futures", "aead/stream", "aes-gcm"]
+web = ["getrandom/js", "wasm-bindgen", "js-sys", "futures", "wasm-bindgen-futures", "web-sys/SubtleCrypto", "web-sys/AesGcmParams", "web-sys/Crypto", "web-sys/CryptoKey"]
+web_stream = []
+
+[[bench]]
+name = "main"
+harness = false
+required-features = ["rust", "rust_stream"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
