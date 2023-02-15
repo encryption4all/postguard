@@ -1,12 +1,9 @@
 //! Streaming mode.
 
 use crate::artifacts::{PublicKey, UserSecretKey};
-use crate::consts::*;
+use crate::client::*;
 use crate::error::Error;
-use crate::header::*;
 use crate::identity::Policy;
-use crate::util::{stream, *};
-use crate::{Sealer, SealerConfig, Unsealer, UnsealerConfig};
 
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use aead::KeyInit;
@@ -33,8 +30,8 @@ pub struct UnsealerStreamConfig {
 
 impl SealerConfig for SealerStreamConfig {}
 impl UnsealerConfig for UnsealerStreamConfig {}
-impl crate::sealed::SealerConfig for SealerStreamConfig {}
-impl crate::sealed::UnsealerConfig for UnsealerStreamConfig {}
+impl crate::client::sealed::SealerConfig for SealerStreamConfig {}
+impl crate::client::sealed::UnsealerConfig for UnsealerStreamConfig {}
 
 impl Sealer<SealerStreamConfig> {
     /// Construct a new [`Sealer`] that can process streaming payloads.
@@ -45,7 +42,7 @@ impl Sealer<SealerStreamConfig> {
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(pk, policies, rng)?;
 
-        let (segment_size, _) = stream::mode_checked(&header)?;
+        let (segment_size, _) = mode_checked(&header)?;
         let Algorithm::Aes128Gcm(iv) = header.algo;
 
         let mut key = [0u8; KEY_SIZE];
@@ -158,7 +155,7 @@ where
 
         let header = Header::from_bytes(&*header_raw)?;
 
-        let (segment_size, _) = stream::mode_checked(&header)?;
+        let (segment_size, _) = mode_checked(&header)?;
 
         Ok(Unsealer {
             version,
@@ -221,10 +218,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::{Sealer, SealerStreamConfig, Unsealer, UnsealerStreamConfig};
     use crate::error::Error;
-    use crate::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
     use crate::test::TestSetup;
-    use crate::{Sealer, Unsealer};
     use crate::{SYMMETRIC_CRYPTO_DEFAULT_CHUNK, TAG_SIZE};
     use futures::{executor::block_on, io::AllowStdIo};
     use rand::RngCore;
@@ -295,7 +291,8 @@ mod tests {
 
     #[test]
     fn test_reflection_seal_unsealer() {
-        let setup = TestSetup::default();
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
 
         for l in LENGTHS {
             seal_and_unseal(&setup, rand_vec(*l as usize));
@@ -305,7 +302,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_corrupt_body() {
-        let setup = TestSetup::default();
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
 
         let plain = rand_vec(100);
         let mut ct = seal_helper(&setup, &plain);
@@ -321,7 +319,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_corrupt_tag() {
-        let setup = TestSetup::default();
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
 
         let plain = rand_vec(100);
         let mut ct = seal_helper(&setup, &plain);
@@ -340,7 +339,7 @@ mod tests {
         use tokio_util::compat::TokioAsyncReadCompatExt;
 
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
 
         let in_name = std::env::temp_dir().join("foo.txt");
         let out_name = std::env::temp_dir().join("foo.enc");
@@ -408,7 +407,7 @@ mod tests {
         use futures::io::Cursor;
 
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
 
         let mut input = Cursor::new(b"SECRET DATA");
         let mut encrypted = Vec::new();

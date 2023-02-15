@@ -1,19 +1,14 @@
 //! Implementation for Rust, backed by [Rust Crypto](https://github.com/RustCrypto).
 
 use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::client::*;
 use crate::error::Error;
-use crate::header::{Algorithm, Header, Mode};
 use crate::identity::Policy;
-use crate::{consts::*, Unsealer, UnsealerConfig};
-use crate::{Sealer, SealerConfig};
 
 use aead::{Aead, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
 use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
-
-#[doc(inline)]
-pub use crate::SealedPacket;
 
 #[cfg(feature = "rust_stream")]
 pub mod stream;
@@ -36,10 +31,10 @@ pub struct SealerMemoryConfig {
 pub struct UnsealerMemoryConfig {}
 
 impl SealerConfig for SealerMemoryConfig {}
-impl crate::sealed::SealerConfig for SealerMemoryConfig {}
+impl super::sealed::SealerConfig for SealerMemoryConfig {}
 
 impl UnsealerConfig for UnsealerMemoryConfig {}
-impl crate::sealed::UnsealerConfig for UnsealerMemoryConfig {}
+impl super::sealed::UnsealerConfig for UnsealerMemoryConfig {}
 
 impl Sealer<SealerMemoryConfig> {
     /// Create a new [`Sealer`].
@@ -123,13 +118,13 @@ impl Unsealer<SealedPacket, UnsealerMemoryConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rust::UnsealerMemoryConfig as Conf;
+    use crate::client::rust::UnsealerMemoryConfig as Conf;
     use crate::test::TestSetup;
 
     #[test]
     fn test_seal_memory() -> Result<(), Error> {
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
 
         let input = b"SECRET DATA";
         let packet =

@@ -1,5 +1,6 @@
 //! Implementation for the web, backed by [Web Crypto](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API).
 
+// FIXME
 //#[cfg(all(not(target_arch = "wasm32-unknown-unknown"), not(docsrs)))]
 //compile_error!("feature \"web\" can only be used for wasm targets");
 
@@ -8,23 +9,19 @@ mod aesgcm;
 #[cfg(feature = "web_stream")]
 pub mod stream;
 
+use super::web::aesgcm::encrypt;
+use super::web::aesgcm::{decrypt, get_key};
+
 use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::client::*;
 use crate::error::Error;
-use crate::header::{Algorithm, Header, Mode};
 use crate::identity::Policy;
-use crate::web::aesgcm::encrypt;
-use crate::web::aesgcm::{decrypt, get_key};
-use crate::{consts::*, Unsealer, UnsealerConfig};
-use crate::{Sealer, SealerConfig};
 
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Error as JsError;
 use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use wasm_bindgen::JsValue;
-
-#[doc(inline)]
-pub use crate::SealedPacket;
 
 impl From<Error> for JsValue {
     fn from(err: Error) -> Self {
@@ -44,10 +41,10 @@ pub struct SealerMemoryConfig {
 pub struct UnsealerMemoryConfig {}
 
 impl SealerConfig for SealerMemoryConfig {}
-impl crate::sealed::SealerConfig for SealerMemoryConfig {}
+impl super::sealed::SealerConfig for SealerMemoryConfig {}
 
 impl UnsealerConfig for UnsealerMemoryConfig {}
-impl crate::sealed::UnsealerConfig for UnsealerMemoryConfig {}
+impl super::sealed::UnsealerConfig for UnsealerMemoryConfig {}
 
 impl Sealer<SealerMemoryConfig> {
     /// Create a new [`Sealer`].

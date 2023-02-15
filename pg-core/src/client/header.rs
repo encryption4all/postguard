@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn test_enc_dec_json() {
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
 
         let ids: Vec<String> = setup.policy.keys().cloned().collect();
         let (header, _ss) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
@@ -249,7 +249,7 @@ mod tests {
         use std::io::Cursor;
 
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
         let ids: Vec<String> = setup.policy.keys().cloned().collect();
 
         let (header, _ss) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
@@ -276,7 +276,7 @@ mod tests {
         // This test encodes to binary and then transcodes into serde_json.
         // The transcoded data is compared with a direct serialization of the same header.
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
 
         let mut v1 = Vec::new();
 
@@ -311,7 +311,7 @@ mod tests {
         use std::io::Cursor;
 
         let mut rng = rand::thread_rng();
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
         let ids: Vec<String> = setup.policy.keys().cloned().collect();
 
         let test_id = &ids[1];

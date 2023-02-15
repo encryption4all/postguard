@@ -1,6 +1,6 @@
 //! PostGuard errors.
 
-use crate::header::{Algorithm, Mode};
+use crate::client::{Algorithm, Mode};
 
 /// An PostGuard error.
 #[derive(Debug)]

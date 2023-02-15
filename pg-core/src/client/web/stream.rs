@@ -1,13 +1,12 @@
 //! Streaming mode.
 
+use super::aesgcm::{decrypt, encrypt, get_key};
+
 use crate::artifacts::{PublicKey, UserSecretKey};
-use crate::consts::*;
+use crate::client::*;
 use crate::error::Error;
-use crate::header::*;
 use crate::identity::Policy;
-use crate::util::{preamble_checked, stream};
-use crate::web::aesgcm::{decrypt, encrypt, get_key};
-use crate::{Sealer, SealerConfig, Unsealer, UnsealerConfig};
+use crate::util::preamble_checked;
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
@@ -32,8 +31,8 @@ pub struct StreamUnsealerConfig {
 
 impl SealerConfig for StreamSealerConfig {}
 impl UnsealerConfig for StreamUnsealerConfig {}
-impl crate::sealed::SealerConfig for StreamSealerConfig {}
-impl crate::sealed::UnsealerConfig for StreamUnsealerConfig {}
+impl crate::client::sealed::SealerConfig for StreamSealerConfig {}
+impl crate::client::sealed::UnsealerConfig for StreamUnsealerConfig {}
 
 impl Sealer<StreamSealerConfig> {
     /// Construct a new [`Sealer`] that can process payloads streamingly.
@@ -44,7 +43,7 @@ impl Sealer<StreamSealerConfig> {
     ) -> Result<Self, JsValue> {
         let (header, ss) = Header::new(pk, policies, rng)?;
 
-        let (segment_size, _) = stream::mode_checked(&header)?;
+        let (segment_size, _) = mode_checked(&header)?;
         let Algorithm::Aes128Gcm(iv) = header.algo;
 
         let mut key = [0u8; KEY_SIZE];
@@ -228,7 +227,7 @@ where
         }
 
         let header = Header::from_bytes(&*header_buf)?;
-        let (segment_size, _) = stream::mode_checked(&header)?;
+        let (segment_size, _) = mode_checked(&header)?;
 
         Ok(Unsealer {
             version,
