@@ -1,25 +1,39 @@
 //! # PostGuard core library
+#![doc(
+    html_favicon_url = "https://postguard.eu/favicon.ico",
+    html_logo_url = "https://postguard.eu/pg_logo_no_text.svg"
+)]
+#![doc = "<div style=\"max-width: 400px; margin: auto\">"]
+#![doc = include_str!("./../../img/pg_logo.svg")]
+#![doc = "</div>"]
+#![deny(
+    missing_debug_implementations,
+    rust_2018_idioms,
+    missing_docs,
+    rustdoc::broken_intra_doc_links
+)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+//! PostGuard is cryptographic protocol that utilizes identity-based primitives (key
+//! encapsulation and signatures) to provide confidentiality, integrity and authenticity over
+//! messages.
 //!
-//! This library provides implementations of the PostGuard protocol.
+//! The library implements a hybrid Encrypt-then-Sign (EtS) approach:
 //!
-//! PostGuard is cryptographic protocol that utilizes identity-based encryption (IBE) to provide
-//! confidentiality and integrity over messages.
+//! * KEM: First, a shared secret is encapsulated for all recipients using [`Multi-User Identity-Based
+//! Encryption`][`ibe::kem::mkem`].
 //!
-//! The library implements a hybrid KEM+DEM approach:
-//! * First, a shared secret is encapsulated for all recipients using [Multi-recipient
-//! Identity-Based Encryption][`ibe::kem::mkem`].
-//!
-//! * Then, the ciphertext and all information that is required for decryption is available in the
+//! * SIGN: The ciphertext(s) and all information that is required for decryption is available in the
 //! [header][`crate::header::Header`]. The header is publicly visible and therefore all sensitive
-//! content is purged.
+//! content is purged. The header, ciphertexts and arbitrary-long message is signed using a
+//! identity-based signature under the identity of the sender.
 //!
-//! * Finally, the arbitrary-sized payload stream is written either at once (using
+//! * DEM: The arbitrary-sized payload stream is written either at once (using
 //! [Mode::InMemory][`crate::header::Mode::InMemory`]) using an AEAD or in user-defined segments
 //! ([Mode::Streaming][`crate::header::Mode::Streaming`]) and encrypted using the shared secret as
 //! symmetric key as described in  the paper [Online Authenticated-Encryption and its Nonce-Reuse
 //! Misuse-Resistance][1].
 //!
-//! The bytestream consists of the following segments, followed by their length in bytes:
+//! The wire format consists of the following segments, followed by their length in bytes:
 //!
 //! ```text
 //!                  PREAMBLE (10)                ||
@@ -109,22 +123,21 @@
 //! ### Seal a slice using the Rust Crypto backend.
 //!
 //! ```
-//! use pg_core::error::Error;
-//! use pg_core::rust::{SealerMemoryConfig, UnsealerMemoryConfig};
+//! use pg_core::client::{SealedPacket, Sealer, Unsealer};
 //! use pg_core::test::TestSetup;
-//! use pg_core::{SealedPacket, Sealer, Unsealer};
+//! # use pg_core::error::Error;
 //!
 //! # fn main() -> Result<(), Error> {
 //! let mut rng = rand::thread_rng();
-//! let setup = TestSetup::default();
+//! let setup = TestSetup::new(&mut rng);
 //!
 //! // Encryption & serialization.
 //! let input = b"SECRET DATA";
 //!
 //! // Specifying the configuration is only required when there
 //! // are multiple options in scope.
-//! let packet =
-//!     Sealer::<SealerMemoryConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
+//! let packet: SealedPacket =
+//!     Sealer::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
 //! let out_bin = packet.into_bytes()?;
 //!
 //! println!("out: {:?}", &out_bin);
@@ -133,7 +146,7 @@
 //! let packet2 = SealedPacket::from_bytes(&out_bin)?;
 //! let id = "john.doe@example.com";
 //! let usk = &setup.usks[id];
-//! let original = Unsealer::<_,UnsealerMemoryConfig>::new(packet2).unseal(id, usk)?;
+//! let original = Unsealer::new(packet2).unseal(id, usk)?;
 //!
 //! assert_eq!(&input.to_vec(), &original);
 //!

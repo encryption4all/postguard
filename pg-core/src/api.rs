@@ -23,7 +23,7 @@ pub struct Parameters<K: IBKEM> {
 /// An authentication request for a IRMA identity.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IrmaAuthRequest {
-    /// The conjunction of [`Attributes`].
+    /// The conjunction of [`Attribute`].
     pub con: Vec<Attribute>,
     #[serde(skip_serializing_if = "Option::is_none")]
     /// The validity (in seconds) of the JWT response.
