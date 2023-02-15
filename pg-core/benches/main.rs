@@ -1,11 +1,12 @@
+use pg_core::artifacts::PublicKey;
+use pg_core::client::rust::stream::SealerStreamConfig;
+use pg_core::identity::{Attribute, Policy, RecipientPolicy};
+use pg_core::Sealer;
+
 use futures::executor::block_on;
 use futures::io::AllowStdIo;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
-use irmaseal_core::artifacts::PublicKey;
-use irmaseal_core::identity::{Attribute, Policy, RecipientPolicy};
-use irmaseal_core::rust::stream::SealerStreamConfig;
-use irmaseal_core::Sealer;
 use rand::{CryptoRng, RngCore};
 use std::io::Cursor;
 
