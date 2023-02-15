@@ -1292,9 +1292,9 @@ dependencies = [
 
 [[package]]
 name = "ibs"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbae8cfae5ed6bdc951a26e22c6e3a0c0fabe0316f9ee988417db1da32766f8d"
+checksum = "89db534e0bc5d1e22dcd9822341882043247d11c5ab100c79a188403e9e195ee"
 dependencies = [
  "curve25519-dalek",
  "rand_core",
