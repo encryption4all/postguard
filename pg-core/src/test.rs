@@ -3,6 +3,7 @@ use crate::identity::{Attribute, Policy, RecipientPolicy};
 use alloc::collections::BTreeMap;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
+use rand::{CryptoRng, Rng};
 
 #[derive(Debug)]
 pub struct TestSetup {
@@ -11,10 +12,9 @@ pub struct TestSetup {
     pub usks: BTreeMap<String, UserSecretKey<CGWKV>>,
 }
 
-impl Default for TestSetup {
-    fn default() -> Self {
-        let mut rng = rand::thread_rng();
-
+impl TestSetup {
+    /// Create a new test setup.
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R) -> Self {
         let id1 = String::from("j.doe@example.com");
         let id2 = String::from("john.doe@example.com");
 
@@ -35,14 +35,14 @@ impl Default for TestSetup {
 
         let policies = Policy::from([(id1, p1), (id2, p2)]);
 
-        let (tmpk, msk) = ibe::kem::cgw_kv::CGWKV::setup(&mut rng);
+        let (tmpk, msk) = ibe::kem::cgw_kv::CGWKV::setup(rng);
         let mpk = PublicKey::<CGWKV>(tmpk);
 
         let usks = policies
             .iter()
             .map(|(id, pol)| {
                 let derived = pol.derive_kem::<CGWKV>().unwrap();
-                let usk = UserSecretKey(CGWKV::extract_usk(Some(&mpk.0), &msk, &derived, &mut rng));
+                let usk = UserSecretKey(CGWKV::extract_usk(Some(&mpk.0), &msk, &derived, rng));
                 (id.clone(), usk)
             })
             .collect();

@@ -173,8 +173,9 @@ mod tests {
 
     #[test]
     fn test_ordering() {
+        let mut rng = rand::thread_rng();
         // Test that symantically equivalent policies map to the same IBE identity.
-        let setup = TestSetup::default();
+        let setup = TestSetup::new(&mut rng);
 
         let policies: Vec<RecipientPolicy> = setup.policy.into_values().collect();
         let p1_derived = policies[1].derive_kem::<CGWKV>().unwrap();
