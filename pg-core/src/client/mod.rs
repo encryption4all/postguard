@@ -1,7 +1,11 @@
-//! PostGuard client functionality. Used for encrypting/signing and decrypting/verifying parties.
+//! PostGuard client functionality.
+//!
+//! Used for:
+//! - Encrypting, signing, packing metadata (*sealing*),
+//! - Decrypting, verifying, unpacking metdata (*unsealing*).
 
 mod header;
-pub use header::*;
+pub use header::{Algorithm, Header, Mode, RecipientHeader};
 
 #[cfg(feature = "rust")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rust")))]
@@ -16,7 +20,7 @@ use crate::error::Error;
 use crate::util::*;
 use serde::{Deserialize, Serialize};
 
-/// A Sealer is like a builder used to encrypt and optionally sign data using PostGuard.
+/// A Sealer is used to encrypt and sign data using PostGuard.
 #[derive(Debug)]
 pub struct Sealer<C: SealerConfig> {
     // The prebuilt header.
@@ -65,9 +69,9 @@ pub(crate) mod sealed {
     pub trait SealerConfig {}
 }
 
-/// A PostGuard encrypted packet.
+/// A PostGuard in-memory sealed packet.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SealedPacket {
+pub struct PostGuardPacket {
     /// The version of the header.
     pub version: u16,
 
@@ -78,7 +82,7 @@ pub struct SealedPacket {
     pub ciphertext: Vec<u8>,
 }
 
-impl SealedPacket {
+impl PostGuardPacket {
     /// Serialize to a JSON string.
     pub fn into_json(self) -> Result<String, Error> {
         serde_json::to_string(&self).map_err(Error::Json)
@@ -126,7 +130,7 @@ impl SealedPacket {
         let ct_len = payload_len as usize + TAG_SIZE;
         let ciphertext = b[len - ct_len..].to_vec();
 
-        Ok(SealedPacket {
+        Ok(PostGuardPacket {
             version,
             header,
             ciphertext,

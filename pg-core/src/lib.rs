@@ -22,16 +22,17 @@
 //! * KEM: First, a shared secret is encapsulated for all recipients using [`Multi-User Identity-Based
 //! Encryption`][`ibe::kem::mkem`].
 //!
-//! * SIGN: The ciphertext(s) and all information that is required for decryption is available in the
-//! [header][`crate::header::Header`]. The header is publicly visible and therefore all sensitive
+//! * Sign: The ciphertext(s) and all information that is required for decryption is available in the
+//! [header][`crate::client::Header`]. The header is publicly visible and therefore all sensitive
 //! content is purged. The header, ciphertexts and arbitrary-long message is signed using a
 //! identity-based signature under the identity of the sender.
 //!
-//! * DEM: The arbitrary-sized payload stream is written either at once (using
-//! [Mode::InMemory][`crate::header::Mode::InMemory`]) using an AEAD or in user-defined segments
-//! ([Mode::Streaming][`crate::header::Mode::Streaming`]) and encrypted using the shared secret as
-//! symmetric key as described in  the paper [Online Authenticated-Encryption and its Nonce-Reuse
+//! * DEM: The arbitrary-sized payload stream is written either at once (in memory) using an AEAD
+//! or in user-defined segments (streaming) and encrypted using the shared secret as symmetric key
+//! as described in  the paper [Online Authenticated-Encryption and its Nonce-Reuse
 //! Misuse-Resistance][1].
+//!
+//! ### Wire format
 //!
 //! The wire format consists of the following segments, followed by their length in bytes:
 //!
@@ -39,6 +40,9 @@
 //!                  PREAMBLE (10)                ||
 //! PRELUDE (4) || VERSION (2) || HEADER SIZE (4) || HEADER (*) || PAYLOAD (*)
 //! ```
+//!
+//!
+//! ## Symmetric Crypto Backends
 //!
 //! This library offers two symmetric cryptography providers, as listed below.
 //!
@@ -68,7 +72,7 @@
 //!
 //! [1]: https://eprint.iacr.org/2015/189.pdf
 //!
-//! ## Streaming vs Memory
+//! ## Streaming vs In-memory
 //!
 //! For large or arbitrary sized data streams, enable either the `rust_stream` or `web_stream`
 //! feature. In this mode, during decryption, each segment of the payload is seperately
@@ -79,7 +83,7 @@
 //!
 //! ## Examples
 //!
-//! ### Setting up the encryption parameters.
+//! ### Setting up the encryption parameters
 //!
 //! The public key should be retrieved from the Private Key Generator (PKG).
 //! The encryption policy can be initialized as follows:
@@ -120,10 +124,11 @@
 //! recipients are only able to decrypt if they are able to prove the that they own the attributes
 //! specified in the `con` field.
 //!
-//! ### Seal a slice using the Rust Crypto backend.
+//! ### Seal a slice using the Rust Crypto backend
 //!
 //! ```
-//! use pg_core::client::{SealedPacket, Sealer, Unsealer};
+//! use pg_core::client::{PostGuardPacket, Sealer, Unsealer};
+//! use pg_core::client::rust::{SealerMemoryConfig, UnsealerMemoryConfig};
 //! use pg_core::test::TestSetup;
 //! # use pg_core::error::Error;
 //!
@@ -136,17 +141,17 @@
 //!
 //! // Specifying the configuration is only required when there
 //! // are multiple options in scope.
-//! let packet: SealedPacket =
-//!     Sealer::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
+//! let packet: PostGuardPacket =
+//!     Sealer::<SealerMemoryConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
 //! let out_bin = packet.into_bytes()?;
 //!
 //! println!("out: {:?}", &out_bin);
 //!
 //! // Deserialization & decryption.
-//! let packet2 = SealedPacket::from_bytes(&out_bin)?;
+//! let packet2 = PostGuardPacket::from_bytes(&out_bin)?;
 //! let id = "john.doe@example.com";
 //! let usk = &setup.usks[id];
-//! let original = Unsealer::new(packet2).unseal(id, usk)?;
+//! let original = Unsealer::<_, UnsealerMemoryConfig>::new(packet2).unseal(id, usk)?;
 //!
 //! assert_eq!(&input.to_vec(), &original);
 //!
@@ -156,55 +161,46 @@
 #![cfg_attr(
     feature = "rust_stream",
     doc = r##"
-//!
-//! ### Seal a bytestream using the Rust Crypto backend.
-//!
-//! ```
-//! use pg_core::error::Error;
-//! use pg_core::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
-//! use pg_core::test::TestSetup;
-//! use pg_core::{Sealer, Unsealer};
-//! use futures::io::Cursor;
-//!
-//! # #[tokio::main]
-//! # async fn main() -> Result<(), Error> {
-//! let mut rng = rand::thread_rng();
-//! let setup = TestSetup::default();
-//!                                                                         
-//! let mut input = Cursor::new(b"SECRET DATA");
-//! let mut encrypted = Vec::new();
-//!                                                                         
-//! Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
-//!     .seal(&mut input, &mut encrypted)
-//!     .await?;
-//!                                                                         
-//! let mut original = Vec::new();
-//! let id = "john.doe@example.com";
-//! let usk = &setup.usks[id];
-//! Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(encrypted))
-//!     .await?
-//!     .unseal(id, usk, &mut original)
-//!     .await?;
-//!                                                                         
-//! assert_eq!(input.into_inner().to_vec(), original);
-//! # Ok(())
-//! # }
-//! ```
+ ### Seal a bytestream using the Rust Crypto backend
+
+ ```
+ use pg_core::client::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
+ use pg_core::client::{Sealer, Unsealer};
+ use pg_core::test::TestSetup;
+ use futures::io::Cursor;
+ # use pg_core::error::Error;
+
+ # #[tokio::main]
+ # async fn main() -> Result<(), Error> {
+ let mut rng = rand::thread_rng();
+ let setup = TestSetup::new(&mut rng);
+                                                                         
+ let mut input = Cursor::new(b"SECRET DATA");
+ let mut sealed = Vec::new();
+                                                                         
+ Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+     .seal(&mut input, &mut sealed)
+     .await?;
+                                                                         
+ let mut original = Vec::new();
+ let id = "john.doe@example.com";
+ let usk = &setup.usks[id];
+ Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(sealed))
+     .await?
+     .unseal(id, usk, &mut original)
+     .await?;
+                                                                         
+ assert_eq!(input.into_inner().to_vec(), original);
+ # Ok(())
+ # }
+ ```
 "##
 )]
 //!
-//! ### Using the Web Crypto backend.
+//! ### Using the Web Crypto backend
 //!
 //! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
-//! Yew/Dioxus/Leptos). Otherwise, it is best to use the Javascript/Typescript, see
-//! TODO: link to NPM package.
-#![deny(
-    missing_debug_implementations,
-    rust_2018_idioms,
-    missing_docs,
-    rustdoc::broken_intra_doc_links
-)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Yew/Dioxus/Leptos).
 
 extern crate alloc;
 

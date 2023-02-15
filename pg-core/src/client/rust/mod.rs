@@ -59,8 +59,8 @@ impl Sealer<SealerMemoryConfig> {
 
     /// Seals the entire payload.
     ///
-    /// See [`SealedPacket`] for serialization methods.
-    pub fn seal(mut self, input: impl AsRef<[u8]>) -> Result<SealedPacket, Error> {
+    /// See [`PostGuardPacket`] for serialization methods.
+    pub fn seal(mut self, input: impl AsRef<[u8]>) -> Result<PostGuardPacket, Error> {
         self.header = self.header.with_mode(Mode::InMemory {
             size: input
                 .as_ref()
@@ -76,7 +76,7 @@ impl Sealer<SealerMemoryConfig> {
             .encrypt(nonce, input.as_ref())
             .map_err(|_e| Error::Symmetric)?;
 
-        Ok(SealedPacket {
+        Ok(PostGuardPacket {
             version: VERSION_V2,
             header: self.header,
             ciphertext,
@@ -84,9 +84,9 @@ impl Sealer<SealerMemoryConfig> {
     }
 }
 
-impl Unsealer<SealedPacket, UnsealerMemoryConfig> {
+impl Unsealer<PostGuardPacket, UnsealerMemoryConfig> {
     /// Create a new [`Unsealer`].
-    pub fn new(packet: SealedPacket) -> Self {
+    pub fn new(packet: PostGuardPacket) -> Self {
         Self {
             version: packet.version,
             header: packet.header.clone(),
@@ -95,7 +95,7 @@ impl Unsealer<SealedPacket, UnsealerMemoryConfig> {
         }
     }
 
-    /// Unseals the content of a [`SealedPacket`] into a [`Vec`].
+    /// Unseals the content of a [`PostGuardPacket`] into a [`Vec`].
     pub fn unseal(self, ident: &str, usk: &UserSecretKey<CGWKV>) -> Result<Vec<u8>, Error> {
         let rec_info = self
             .header
@@ -131,7 +131,7 @@ mod tests {
             Sealer::<SealerMemoryConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
         let out_bin = packet.into_bytes()?;
 
-        let packet2 = SealedPacket::from_bytes(out_bin)?;
+        let packet2 = PostGuardPacket::from_bytes(out_bin)?;
         let id = "john.doe@example.com";
         let usk = &setup.usks[id];
         let original = Unsealer::<_, Conf>::new(packet2).unseal(id, usk)?;

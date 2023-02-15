@@ -69,8 +69,8 @@ impl Sealer<SealerMemoryConfig> {
 
     /// Seals the payload.
     ///
-    /// See [`SealedPacket`] for serialization methods.
-    pub async fn seal(mut self, input: &Uint8Array) -> Result<SealedPacket, JsValue> {
+    /// See [`PostGuardPacket`] for serialization methods.
+    pub async fn seal(mut self, input: &Uint8Array) -> Result<PostGuardPacket, JsValue> {
         self.header = self.header.with_mode(Mode::InMemory {
             size: input.byte_length(),
         });
@@ -85,7 +85,7 @@ impl Sealer<SealerMemoryConfig> {
         .await?
         .to_vec();
 
-        Ok(SealedPacket {
+        Ok(PostGuardPacket {
             version: VERSION_V2,
             header: self.header,
             ciphertext,
@@ -93,7 +93,7 @@ impl Sealer<SealerMemoryConfig> {
     }
 }
 
-impl Unsealer<SealedPacket, UnsealerMemoryConfig> {
+impl Unsealer<PostGuardPacket, UnsealerMemoryConfig> {
     /// Blabla
     pub async fn unseal(
         self,

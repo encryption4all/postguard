@@ -47,7 +47,7 @@ pub struct RecipientPolicy {
 /// An PostGuard hidden policy.
 ///
 /// A policy where (part of) the value of the attributes is hidden.
-/// This type is safe for usage in (public) [Header][`crate::header::Header`] alongside the ciphertext.
+/// This type is safe for usage in (public) [Header][`crate::client::Header`] alongside the ciphertext.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct HiddenRecipientPolicy {
     /// Timestamp (UNIX time).
