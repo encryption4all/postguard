@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use crate::middleware::irma::IrmaAuthResult;
 use irma::ProofStatus;
-use pg_core::identity::RecipientPolicy;
+use pg_core::identity::Policy;
 
 #[doc(hidden)]
 pub struct NoAuthService<S> {
@@ -38,7 +38,7 @@ where
 
         async move {
             // Retrieve the policy from the request.
-            let pol = req.extract::<Json<RecipientPolicy>>().await?.into_inner();
+            let pol = req.extract::<Json<Policy>>().await?.into_inner();
 
             // Pass the result to the key service, which expects it in the extensions.
             req.extensions_mut().insert(IrmaAuthResult {

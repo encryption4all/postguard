@@ -5,7 +5,7 @@ use super::aesgcm::{decrypt, encrypt, get_key};
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::Policy;
+use crate::identity::EncryptionPolicy;
 use crate::util::preamble_checked;
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
@@ -38,12 +38,12 @@ impl Sealer<StreamSealerConfig> {
     /// Construct a new [`Sealer`] that can process payloads streamingly.
     pub fn new<Rng: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
-        policies: &Policy,
+        policies: &EncryptionPolicy,
         rng: &mut Rng,
     ) -> Result<Self, JsValue> {
         let (header, ss) = Header::new(pk, policies, rng)?;
 
-        let (segment_size, _) = mode_checked(&header)?;
+        let (segment_size, _) = stream_mode_checked(&header)?;
         let Algorithm::Aes128Gcm(iv) = header.algo;
 
         let mut key = [0u8; KEY_SIZE];
@@ -227,7 +227,7 @@ where
         }
 
         let header = Header::from_bytes(&*header_buf)?;
-        let (segment_size, _) = mode_checked(&header)?;
+        let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
             version,

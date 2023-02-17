@@ -4,11 +4,13 @@ use crate::artifacts::{deserialize_bin_or_b64, serialize_bin_or_b64};
 use crate::artifacts::{MultiRecipientCiphertext, PublicKey, UserSecretKey};
 use crate::consts::*;
 use crate::error::Error;
-use crate::identity::{HiddenRecipientPolicy, Policy, RecipientPolicy};
-use alloc::collections::BTreeMap;
+use crate::identity::{EncryptionPolicy, HiddenPolicy, Policy};
+
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
+
+use alloc::collections::BTreeMap;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -113,7 +115,7 @@ pub struct Header {
 pub struct RecipientHeader {
     /// The [`HiddenRecipientPolicy`] associated with this identifier.
     #[serde(rename = "p")]
-    pub policy: HiddenRecipientPolicy,
+    pub policy: HiddenPolicy,
 
     /// Ciphertext for this specific recipient.
     pub ct: MultiRecipientCiphertext<CGWKV>,
@@ -132,13 +134,13 @@ impl Header {
     /// Creates a new [`Header`] using the Master Public Key and the policies.
     pub fn new<R: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
-        policies: &Policy,
+        policies: &EncryptionPolicy,
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
         // Map each RecipientPolicy to an IBE identity.
         let ids = policies
             .values()
-            .map(RecipientPolicy::derive_kem::<CGWKV>)
+            .map(Policy::derive_kem::<CGWKV>)
             .collect::<Result<Vec<<CGWKV as IBKEM>::Id>, _>>()?;
 
         // Generate the shared secret and ciphertexts.
@@ -181,26 +183,14 @@ impl Header {
         self
     }
 
-    /// Serializes the [`Header`] as compact binary MessagePack format into a [`std::io::Write`].
-    ///
-    /// Internally uses the "named" convention, which preserves field names.
-    /// Fields names are shortened to limit overhead:
-    /// * `rs`: map of serialized [`RecipientHeader`]s with keyed by recipient identifier,
-    ///    * `p`: serialized [`HiddenRecipientPolicy`],
-    ///    * `ct`: associated ciphertext with this policy,
-    /// * `algo`: [algorithm][`Algorithm`],
-    /// * `mode`: [mode][`Mode`],
-    /// * `iv`: the initialization vector.
+    /// Serializes the [`Header`] as compact binary format into a [`Write`].
     pub fn into_bytes<W: Write>(self, w: &mut W) -> Result<(), Error> {
-        let mut serializer = rmp_serde::encode::Serializer::new(w);
-
-        self.serialize(&mut serializer)
-            .map_err(|e| Error::MessagePack(Box::new(e)))
+        bincode::serialize_into(w, &self).map_err(|e| Error::Bincode(Box::new(e)))
     }
 
-    /// Deserialize the header from binary MessagePack format.
+    /// Deserialize the header from binary format from an [`Read`].
     pub fn from_bytes<R: Read>(r: R) -> Result<Self, Error> {
-        rmp_serde::decode::from_read(r).map_err(|e| Error::MessagePack(Box::new(e)))
+        bincode::deserialize_from(r).map_err(|e| Error::Bincode(Box::new(e)))
     }
 
     /// Serializes the header to a JSON string.
@@ -270,42 +260,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    // NOTE: This test panics (for now), but it is a nice to have to support one day.
-    fn test_transcode() {
-        // This test encodes to binary and then transcodes into serde_json.
-        // The transcoded data is compared with a direct serialization of the same header.
-        let mut rng = rand::thread_rng();
-        let setup = TestSetup::new(&mut rng);
-
-        let mut v1 = Vec::new();
-
-        let header = Header::new(&setup.mpk, &setup.policy, &mut rng)
-            .unwrap()
-            .0
-            .with_mode(Mode::InMemory { size: 1024 })
-            .with_algo(Algorithm::new_aes128_gcm(&mut rng));
-
-        let header2 = header.clone();
-
-        header.into_bytes(&mut v1).unwrap();
-
-        let s1 = header2.to_json().unwrap();
-
-        let mut tmp = Vec::new();
-
-        {
-            let mut des = rmp_serde::decode::Deserializer::new(&v1[..]);
-            let mut ser = serde_json::Serializer::new(&mut tmp);
-            serde_transcode::transcode(&mut des, &mut ser).unwrap();
-        }
-
-        let s2 = String::from_utf8(tmp).unwrap();
-
-        assert_eq!(s1, s2);
-    }
-
-    #[test]
     fn test_round() {
         // This test tests that both encoding methods derive the same keys as the sender.
         use std::io::Cursor;
@@ -321,7 +275,6 @@ mod tests {
         let header2 = header.clone();
         let header3 = header.clone();
 
-        // Encode to binary via MessagePack.
         let mut v = Vec::new();
         header.into_bytes(&mut v).unwrap();
 

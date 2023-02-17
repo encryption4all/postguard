@@ -15,7 +15,7 @@ use super::web::aesgcm::{decrypt, get_key};
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::Policy;
+use crate::identity::EncryptionPolicy;
 
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Error as JsError;
@@ -50,7 +50,7 @@ impl Sealer<SealerMemoryConfig> {
     /// Create a new [`Sealer`].
     pub fn new<R: RngCore + CryptoRng>(
         mpk: &PublicKey<CGWKV>,
-        policies: &Policy,
+        policies: &EncryptionPolicy,
         rng: &mut R,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(mpk, policies, rng)?;

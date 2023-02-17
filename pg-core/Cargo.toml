@@ -15,14 +15,14 @@ categories = ["cryptography"]
 [dependencies]
 irma = "0.2.1"
 ibe = { version = "0.2.3", features = ["cgwkv", "mkem"] }
-ibs = "0.4.0-rc.2"
+ibs = { path = "./../../ibs" }
 rand = { version = "0.8", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
-rmp-serde = "1.1"
 serde_json = "1.0"
 subtle = "2.3"
 tiny-keccak = { version = "2.0", features = ["sha3"] }
 base64ct = { version = "1.5" }
+bincode = "1.3.3"
 
 # For both stream features.
 futures = { version = "0.3", optional = true }

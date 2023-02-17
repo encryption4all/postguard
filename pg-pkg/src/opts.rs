@@ -28,19 +28,19 @@ pub struct GenOpts {
 
     /// Path to store the IBE private key.
     #[clap(long, default_value = "./pkg_ibe.sec")]
-    pub ibe_secret: String,
+    pub ibe_secret_path: String,
 
     /// Path to store the IBE public key.
     #[clap(long, default_value = "./pkg_ibe.pub")]
-    pub ibe_public: String,
+    pub ibe_public_path: String,
 
     /// Path to store the IBS private key.
     #[clap(long, default_value = "./pkg_ibs.sec")]
-    pub ibs_secret: String,
+    pub ibs_secret_path: String,
 
     /// Path to store the IBS public key.
     #[clap(long, default_value = "./pkg_ibs.pub")]
-    pub ibs_public: String,
+    pub ibs_public_path: String,
 }
 
 /// Run the IRMASeal PKG HTTP service.
@@ -61,17 +61,17 @@ pub struct ServerOpts {
 
     /// Path to store the IBS private key.
     #[clap(long, default_value = "./pkg_ibe.sec", value_hint = ValueHint::FilePath)]
-    pub ibe_secret: String,
+    pub ibe_secret_path: String,
 
     /// Path to store the IBS public key.
     #[clap(long, default_value = "./pkg_ibe.pub", value_hint = ValueHint::FilePath)]
-    pub ibe_public: String,
+    pub ibe_public_path: String,
 
     /// Path to store the IBS private key.
     #[clap(long, default_value = "./pkg_ibs.sec", value_hint = ValueHint::FilePath)]
-    pub ibs_secret: String,
+    pub ibs_secret_path: String,
 
     /// Path to store the IBS public key.
     #[clap(long, default_value = "./pkg_ibs.pub", value_hint = ValueHint::FilePath)]
-    pub ibs_public: String,
+    pub ibs_public_path: String,
 }

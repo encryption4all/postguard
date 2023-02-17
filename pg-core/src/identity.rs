@@ -19,9 +19,9 @@ const HINT_TYPES: &[&str] = &[
 ];
 
 /// The complete encryption policy for all recipients.
-pub type Policy = BTreeMap<String, RecipientPolicy>;
+pub type EncryptionPolicy = BTreeMap<String, Policy>;
 
-/// A PostGuard AttributeRequest, which is a simple case of an IRMA ConDisCon.
+/// A PostGuard IRMA attribute, which is a simple case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
     #[serde(rename = "t")]
@@ -35,7 +35,7 @@ pub struct Attribute {
 
 /// An PostGuard policy used to encapsulate a shared secret for one recipient.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct RecipientPolicy {
+pub struct Policy {
     /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
@@ -49,7 +49,7 @@ pub struct RecipientPolicy {
 /// A policy where (part of) the value of the attributes is hidden.
 /// This type is safe for usage in (public) [Header][`crate::client::Header`] alongside the ciphertext.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
-pub struct HiddenRecipientPolicy {
+pub struct HiddenPolicy {
     /// Timestamp (UNIX time).
     #[serde(rename = "ts")]
     pub timestamp: u64,
@@ -76,10 +76,10 @@ impl Attribute {
     }
 }
 
-impl RecipientPolicy {
+impl Policy {
     /// Completely hides the attribute value, or provides a hint for certain attribute types
-    pub fn to_hidden(&self) -> HiddenRecipientPolicy {
-        HiddenRecipientPolicy {
+    pub fn to_hidden(&self) -> HiddenPolicy {
+        HiddenPolicy {
             timestamp: self.timestamp,
             con: self.con.iter().map(Attribute::hintify_value).collect(),
         }
@@ -167,7 +167,7 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::identity::{Attribute, RecipientPolicy};
+    use crate::identity::{Attribute, Policy};
     use crate::test::TestSetup;
     use ibe::kem::cgw_kv::CGWKV;
 
@@ -177,7 +177,7 @@ mod tests {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::new(&mut rng);
 
-        let policies: Vec<RecipientPolicy> = setup.policy.into_values().collect();
+        let policies: Vec<Policy> = setup.policy.into_values().collect();
         let p1_derived = policies[1].derive_kem::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();

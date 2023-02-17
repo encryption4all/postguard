@@ -1,5 +1,5 @@
 use pg_core::api::*;
-use pg_core::artifacts::{PublicKey, SigningKey, UserSecretKey};
+use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey};
 use pg_core::kem::IBKEM;
 
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -146,7 +146,7 @@ impl<'a> Client<'a> {
     pub async fn request_signing_key(
         &self,
         auth: &str,
-    ) -> Result<KeyResponse<SigningKey>, ClientError>
+    ) -> Result<KeyResponse<SigningKeyExt>, ClientError>
 where {
         let res = self
             .client
@@ -156,7 +156,7 @@ where {
             .send()
             .await?
             .error_for_status()?
-            .json::<KeyResponse<SigningKey>>()
+            .json::<KeyResponse<SigningKeyExt>>()
             .await?;
 
         Ok(res)

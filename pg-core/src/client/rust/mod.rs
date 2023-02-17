@@ -3,7 +3,7 @@
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::Policy;
+use crate::identity::EncryptionPolicy;
 
 use aead::{Aead, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
@@ -40,7 +40,7 @@ impl Sealer<SealerMemoryConfig> {
     /// Create a new [`Sealer`].
     pub fn new<R: RngCore + CryptoRng>(
         mpk: &PublicKey<CGWKV>,
-        policies: &Policy,
+        policies: &EncryptionPolicy,
         rng: &mut R,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(mpk, policies, rng)?;

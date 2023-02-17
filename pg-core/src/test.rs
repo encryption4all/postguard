@@ -1,5 +1,5 @@
 use crate::artifacts::{PublicKey, UserSecretKey};
-use crate::identity::{Attribute, Policy, RecipientPolicy};
+use crate::identity::{Attribute, EncryptionPolicy, Policy};
 use alloc::collections::BTreeMap;
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
@@ -8,7 +8,7 @@ use rand::{CryptoRng, Rng};
 #[derive(Debug)]
 pub struct TestSetup {
     pub mpk: PublicKey<CGWKV>,
-    pub policy: Policy,
+    pub policy: EncryptionPolicy,
     pub usks: BTreeMap<String, UserSecretKey<CGWKV>>,
 }
 
@@ -18,14 +18,14 @@ impl TestSetup {
         let id1 = String::from("j.doe@example.com");
         let id2 = String::from("john.doe@example.com");
 
-        let p1 = RecipientPolicy {
+        let p1 = Policy {
             timestamp: 1566722350,
             con: vec![Attribute::new(
                 "pbdf.gemeente.personalData.bsn",
                 Some("123456789"),
             )],
         };
-        let p2 = RecipientPolicy {
+        let p2 = Policy {
             timestamp: 1566722350,
             con: vec![
                 Attribute::new("pbdf.gemeente.personalData.name", Some("john")),
@@ -33,7 +33,7 @@ impl TestSetup {
             ],
         };
 
-        let policies = Policy::from([(id1, p1), (id2, p2)]);
+        let policies = EncryptionPolicy::from([(id1, p1), (id2, p2)]);
 
         let (tmpk, msk) = ibe::kem::cgw_kv::CGWKV::setup(rng);
         let mpk = PublicKey::<CGWKV>(tmpk);

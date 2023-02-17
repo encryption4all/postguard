@@ -3,11 +3,10 @@ use actix_http::header::HttpDate;
 use actix_web::dev::ServiceRequest;
 use actix_web::http::header::EntityTag;
 
-use pg_core::error::Error as CoreError;
 use pg_core::kem::{cgw_kv::CGWKV, IBKEM};
 use pg_core::Compress;
 
-use crate::error::{Error, PKGError};
+use crate::error::PKGError;
 use crate::server::ParametersData;
 
 use arrayref::array_ref;
@@ -73,7 +72,6 @@ impl ParametersData {
         .into();
 
         let last_modified = HttpDate::from_str(&modified_raw.to_string()).unwrap();
-
         let etag = EntityTag::new_strong(xxhash64(pp.as_bytes()));
 
         Ok(ParametersData {
@@ -87,31 +85,45 @@ impl ParametersData {
 macro_rules! read_keypair {
     ($scheme: ident) => {
         paste! {
-        pub fn [<$scheme:lower _read_pk>](path: impl AsRef<Path>) -> Result<<$scheme as IBKEM>::Pk, Error> {
-            const LENGTH: usize = $scheme::PK_BYTES;
+            pub(crate) fn [<$scheme:lower _read_key_pair>](pk_path: impl AsRef<Path>, sk_path: impl AsRef<Path>) -> Result<(<$scheme as IBKEM>::Pk, <$scheme as IBKEM>::Sk), PKGError> {
+                const PK_LENGTH: usize = $scheme::PK_BYTES;
+                const SK_LENGTH: usize = $scheme::SK_BYTES;
 
-            let bytes = std::fs::read(path).unwrap();
-            if bytes.len() != LENGTH {
-                return Err(Error::Core(CoreError::FormatViolation("wrong pk length".to_string())));
+                let pk_bytes = std::fs::read(pk_path).unwrap();
+                if pk_bytes.len() != PK_LENGTH {
+                    return Err(PKGError::Setup("wrong pk length".to_string()));
+                }
+
+                let pk_bytes = array_ref![&pk_bytes, 0, PK_LENGTH];
+                let pk = open_ct(<$scheme as IBKEM>::Pk::from_bytes(pk_bytes)).ok_or(PKGError::Setup("could not read pk".to_string()))?;
+
+                let sk_bytes = std::fs::read(sk_path).unwrap();
+                if sk_bytes.len() != SK_LENGTH {
+                    return Err(PKGError::Setup("wrong sk length".to_string()));
+                }
+
+                let sk_bytes = array_ref![&sk_bytes, 0, SK_LENGTH];
+                let sk = open_ct(<$scheme as IBKEM>::Sk::from_bytes(sk_bytes)).ok_or(PKGError::Setup("could not read sk".to_string()))?;
+
+                Ok((pk, sk))
             }
-
-            let bytes = array_ref![&bytes, 0, LENGTH];
-            open_ct(<$scheme as IBKEM>::Pk::from_bytes(bytes)).ok_or(Error::Core(CoreError::FormatViolation("test".to_string())))
-        }
-
-        pub fn [<$scheme:lower _read_sk>](path: impl AsRef<Path>) -> Result<<$scheme as IBKEM>::Sk, Error> {
-            const LENGTH: usize = $scheme::SK_BYTES;
-
-            let bytes = std::fs::read(path).unwrap();
-            if bytes.len() != LENGTH {
-                return Err(Error::Core(CoreError::FormatViolation("wrong sk length".to_string())));
-            }
-
-            let bytes = array_ref![&bytes, 0, LENGTH];
-            open_ct(<$scheme as IBKEM>::Sk::from_bytes(bytes)).ok_or(Error::Core(CoreError::FormatViolation("test".to_string())))
-        }
         }
     };
 }
 
 read_keypair!(CGWKV);
+
+pub(crate) fn gg_read_key_pair(
+    pk_path: impl AsRef<Path>,
+    sk_path: impl AsRef<Path>,
+) -> Result<(pg_core::ibs::gg::PublicKey, pg_core::ibs::gg::SecretKey), PKGError> {
+    let pk_bytes = std::fs::read(pk_path)?;
+    let pk: pg_core::ibs::gg::PublicKey = bincode::deserialize(&pk_bytes)
+        .map_err(|e| PKGError::Setup(format!("could not deserialize ibs pk: {e}")))?;
+
+    let sk_bytes = std::fs::read(sk_path)?;
+    let sk: pg_core::ibs::gg::SecretKey = bincode::deserialize(&sk_bytes)
+        .map_err(|e| PKGError::Setup(format!("could not deserialize ibs sk: {e}")))?;
+
+    Ok((pk, sk))
+}

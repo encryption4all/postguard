@@ -353,6 +353,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b645a089122eccb6111b4f81cbc1a49f5900ac4666bb93ac027feaecf15607bf"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1292,9 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "ibs"
-version = "0.4.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89db534e0bc5d1e22dcd9822341882043247d11c5ab100c79a188403e9e195ee"
+version = "0.4.0-rc.5"
 dependencies = [
  "curve25519-dalek",
  "rand_core",
@@ -1946,6 +1953,7 @@ dependencies = [
  "aead",
  "aes-gcm",
  "base64ct",
+ "bincode",
  "cipher 0.3.0",
  "criterion",
  "futures 0.3.26",
@@ -1956,7 +1964,6 @@ dependencies = [
  "irma",
  "js-sys",
  "rand",
- "rmp-serde",
  "serde",
  "serde-transcode",
  "serde-wasm-bindgen",
@@ -1981,6 +1988,7 @@ dependencies = [
  "actix-web-httpauth",
  "arrayref",
  "base64 0.13.1",
+ "bincode",
  "clap",
  "env_logger",
  "futures 0.3.26",
@@ -1994,7 +2002,6 @@ dependencies = [
  "prometheus",
  "rand",
  "reqwest 0.11.14",
- "rmp-serde",
  "serde",
  "serde_json",
  "subtle",
@@ -2360,28 +2367,6 @@ dependencies = [
  "untrusted",
  "web-sys",
  "winapi 0.3.9",
-]
-
-[[package]]
-name = "rmp"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44519172358fd6d58656c86ab8e7fbc9e1490c3e8f14d35ed78ca0dd07403c9f"
-dependencies = [
- "byteorder",
- "num-traits",
- "paste",
-]
-
-[[package]]
-name = "rmp-serde"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5b13be192e0220b8afb7222aa5813cb62cc269ebb5cac346ca6487681d2913e"
-dependencies = [
- "byteorder",
- "rmp",
- "serde",
 ]
 
 [[package]]

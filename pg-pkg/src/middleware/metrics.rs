@@ -60,8 +60,8 @@ mod tests {
     use actix_web::test;
     use irma::SessionStatus;
     use pg_core::api::{KeyResponse, Parameters};
-    use pg_core::artifacts::UserSecretKey;
-    use pg_core::identity::{Attribute, RecipientPolicy};
+    use pg_core::artifacts::{PublicKey, UserSecretKey};
+    use pg_core::identity::{Attribute, Policy};
     use pg_core::kem::cgw_kv::CGWKV;
 
     #[actix_web::test]
@@ -78,7 +78,7 @@ mod tests {
             .uri("/v2/parameters")
             .insert_header(header)
             .to_request();
-        let kr: Parameters<CGWKV> = test::call_and_read_body_json(&app, req).await;
+        let kr: Parameters<PublicKey<CGWKV>> = test::call_and_read_body_json(&app, req).await;
         assert_eq!(&kr.public_key.0, &pk);
 
         // Second request
@@ -90,7 +90,7 @@ mod tests {
             .uri("/v2/parameters")
             .insert_header(header)
             .to_request();
-        let kr: Parameters<CGWKV> = test::call_and_read_body_json(&app, req).await;
+        let kr: Parameters<PublicKey<CGWKV>> = test::call_and_read_body_json(&app, req).await;
         assert_eq!(&kr.public_key.0, &pk);
 
         // Third request (same as first)
@@ -102,7 +102,7 @@ mod tests {
             .uri("/v2/parameters")
             .insert_header(header)
             .to_request();
-        let kr: Parameters<CGWKV> = test::call_and_read_body_json(&app, req).await;
+        let kr: Parameters<PublicKey<CGWKV>> = test::call_and_read_body_json(&app, req).await;
         assert_eq!(&kr.public_key.0, &pk);
 
         // Fourth request
@@ -111,7 +111,7 @@ mod tests {
             HeaderValue::from_static("Outlook,1234.5678.90,pg4ol,0.0.1"),
         );
         let ts = crate::server::tests::now();
-        let pol = RecipientPolicy {
+        let pol = Policy {
             timestamp: ts,
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };

@@ -3,7 +3,7 @@ use actix_web::{HttpMessage, HttpRequest};
 
 use pg_core::api::KeyResponse;
 use pg_core::artifacts::UserSecretKey;
-use pg_core::identity::RecipientPolicy;
+use pg_core::identity::Policy;
 use pg_core::kem::IBKEM;
 
 use crate::middleware::irma::IrmaAuthResult;
@@ -54,7 +54,7 @@ where
 
     req.extensions_mut().clear();
 
-    let policy = RecipientPolicy { timestamp, con };
+    let policy = Policy { timestamp, con };
 
     let id = policy
         .derive_kem::<K>()

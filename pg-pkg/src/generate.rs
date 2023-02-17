@@ -23,10 +23,10 @@ pub fn exec(gen_opts: &GenOpts) -> Result<(), PKGError> {
 
     let GenOpts {
         scheme,
-        ibe_secret,
-        ibe_public,
-        ibs_secret,
-        ibs_public,
+        ibe_secret_path,
+        ibe_public_path,
+        ibs_secret_path,
+        ibs_public_path,
     } = gen_opts;
 
     match scheme.as_ref() {
@@ -34,15 +34,16 @@ pub fn exec(gen_opts: &GenOpts) -> Result<(), PKGError> {
             let (ibe_pk, ibe_sk) = CGWKV::setup(&mut rng);
             let (ibs_pk, ibs_sk) = gg::setup(&mut rng);
 
-            let ibs_pk_bytes = rmp_serde::to_vec(&ibs_pk).unwrap();
-            let ibs_sk_bytes = rmp_serde::to_vec(&ibs_sk).unwrap();
+            println!("Keys IBE and IBS key pairs generated.");
+            let ibs_pk_bytes = bincode::serialize(&ibs_pk).unwrap();
+            let ibs_sk_bytes = bincode::serialize(&ibs_sk).unwrap();
 
-            write_owned(ibe_public, ibe_pk.to_bytes().as_ref())?;
-            write_owned(ibe_secret, ibe_sk.to_bytes().as_ref())?;
-            write_owned(ibs_public, ibs_pk_bytes)?;
-            write_owned(ibs_secret, ibs_sk_bytes)?;
+            write_owned(ibe_public_path, ibe_pk.to_bytes().as_ref())?;
+            write_owned(ibe_secret_path, ibe_sk.to_bytes().as_ref())?;
+            write_owned(ibs_public_path, ibs_pk_bytes)?;
+            write_owned(ibs_secret_path, ibs_sk_bytes)?;
 
-            println!("The following keys were written:\n{ibe_public}\n{ibe_secret}\n{ibs_public}\n{ibs_secret}");
+            println!("The following keys were written:\n{ibe_public_path}\n{ibe_secret_path}\n{ibs_public_path}\n{ibs_secret_path}");
         }
         x => {
             return Err(PKGError::InvalidVersion(x.into()));

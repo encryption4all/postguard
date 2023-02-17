@@ -3,7 +3,7 @@
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::Policy;
+use crate::identity::EncryptionPolicy;
 
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use aead::KeyInit;
@@ -37,12 +37,12 @@ impl Sealer<SealerStreamConfig> {
     /// Construct a new [`Sealer`] that can process streaming payloads.
     pub fn new<Rng: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
-        policies: &Policy,
+        policies: &EncryptionPolicy,
         rng: &mut Rng,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(pk, policies, rng)?;
 
-        let (segment_size, _) = mode_checked(&header)?;
+        let (segment_size, _) = stream_mode_checked(&header)?;
         let Algorithm::Aes128Gcm(iv) = header.algo;
 
         let mut key = [0u8; KEY_SIZE];
@@ -155,7 +155,7 @@ where
 
         let header = Header::from_bytes(&*header_raw)?;
 
-        let (segment_size, _) = mode_checked(&header)?;
+        let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
             version,

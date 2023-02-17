@@ -1,23 +1,18 @@
 //! Definitions of the PostGuard protocol REST API.
 
-use crate::artifacts::PublicKey;
 use crate::identity::Attribute;
-use ibe::kem::IBKEM;
 use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
 
 /// The public parameters of the Private Key Generator (PKG).
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[serde(bound(
-    serialize = "PublicKey<K>: Serialize",
-    deserialize = "PublicKey<K>: Deserialize<'de>"
-))]
-pub struct Parameters<K: IBKEM> {
+pub struct Parameters<T> {
     /// The formatting version of the Master Public Key.
     pub format_version: u8,
+
     /// The Master Public Key.
-    pub public_key: PublicKey<K>,
+    pub public_key: T,
 }
 
 /// An authentication request for a IRMA identity.

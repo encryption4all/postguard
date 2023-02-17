@@ -16,8 +16,8 @@ pub enum Error {
     },
     /// Serde JSON error.
     Json(serde_json::Error),
-    /// MessagePack serialization/deserialization error.
-    MessagePack(Box<dyn std::error::Error>),
+    /// Bincode serialization/deserialization error.
+    Bincode(Box<dyn std::error::Error>),
     /// The recipient identifier was not found in the policies.
     UnknownIdentifier(String),
     /// Incorrect scheme version.
@@ -54,8 +54,8 @@ impl core::fmt::Display for Error {
             }
             Self::UnknownIdentifier(ident) => write!(f, "recipient unknown: {ident}"),
             Self::FormatViolation(s) => write!(f, "{s} not (correctly) found in format"),
-            Self::MessagePack(e) => {
-                write!(f, "MessagePack error: {e}")
+            Self::Bincode(e) => {
+                write!(f, "Bincode error: {e}")
             }
             Self::Json(e) => write!(f, "JSON error: {e}"),
             Self::IncorrectSchemeVersion => write!(f, "incorrect scheme version"),

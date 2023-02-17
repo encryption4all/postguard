@@ -90,7 +90,7 @@
 //!
 //! ```
 //! use std::time::SystemTime;
-//! use pg_core::identity::{Attribute, Policy, RecipientPolicy};
+//! use pg_core::identity::{Attribute, Policy, EncryptionPolicy};
 //!
 //! let timestamp = SystemTime::now()
 //!     .duration_since(SystemTime::UNIX_EPOCH)
@@ -100,7 +100,7 @@
 //! let id1 = String::from("j.doe@example.com");
 //! let id2 = String::from("john.doe@example.com");
 //!
-//! let p1 = RecipientPolicy {
+//! let p1 = Policy {
 //!     timestamp,
 //!     con: vec![Attribute::new(
 //!         "pbdf.gemeente.personalData.bsn",
@@ -108,7 +108,7 @@
 //!     )],
 //! };
 //!
-//! let p2 = RecipientPolicy {
+//! let p2 = Policy {
 //!     timestamp,
 //!     con: vec![
 //!         Attribute::new("pbdf.gemeente.personalData.name", Some("john")),
@@ -116,7 +116,7 @@
 //!     ],
 //! };
 //!
-//! let policies = Policy::from([(id1, p1), (id2, p2)]);
+//! let policies = EncryptionPolicy::from([(id1, p1), (id2, p2)]);
 //! ```
 //!
 //! This will specify two recipients who can decrypt, in this case identified by their e-mail

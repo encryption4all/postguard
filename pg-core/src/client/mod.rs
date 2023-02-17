@@ -138,7 +138,8 @@ impl PostGuardPacket {
     }
 }
 
-pub(self) fn mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), Error> {
+#[cfg(any(feature = "rust_stream", feature = "web_stream"))]
+pub(self) fn stream_mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), Error> {
     let (segment_size, size_hint) = match h {
         Header {
             mode:
@@ -155,5 +156,5 @@ pub(self) fn mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), Error
         return Err(Error::ConstraintViolation);
     }
 
-    Ok((*segment_size, size_hint.clone()))
+    Ok((*segment_size, *size_hint))
 }
