@@ -10,7 +10,7 @@ use pg_core::ibs::gg::{keygen, Identity, SecretKey, IDENTITY_BYTES};
 use crate::middleware::irma::IrmaAuthResult;
 use crate::util::current_time_u64;
 
-pub async fn request_signing_key(
+pub async fn signing_key(
     req: HttpRequest,
     msk: Data<SecretKey>,
 ) -> Result<HttpResponse, crate::Error> {

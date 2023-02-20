@@ -4,10 +4,8 @@
 //!
 //! # Notes
 //!
-//! MPK serialization does not have to be constant-time, but this way we only require one
-//! dependency.
-
-// TODO: separate signing/encryption artifacts/tests.
+//! Some artifacts do no require serialization to be constant-time, but we want to limit the
+//! dependency graph.
 
 use crate::identity::Policy;
 use crate::util::open_ct;
@@ -30,26 +28,6 @@ const fn b64len(raw_len: usize) -> usize {
     // making this function "safe" for all input.
     (((raw_len - 1) / 3) + 1) * 4
 }
-
-/// Wrapper type for master public keys.
-#[derive(Debug, Clone, Copy)]
-pub struct PublicKey<K: IBKEM>(pub K::Pk);
-
-/// Wrapper type for secret keys.
-#[derive(Debug, Clone, Copy)]
-pub struct SecretKey<K: IBKEM>(pub K::Sk);
-
-/// Wrapper type for user secret keys.
-#[derive(Debug, Clone)]
-pub struct UserSecretKey<K: IBKEM>(pub K::Usk);
-
-/// Wrapper type for ciphertexts.
-#[derive(Debug, Clone)]
-pub struct Ciphertext<K: IBKEM>(pub K::Ct);
-
-/// Wrapper type for multi-recipient ciphertexts.
-#[derive(Debug, Clone)]
-pub struct MultiRecipientCiphertext<K: IBKEM>(pub MkemCt<K>);
 
 pub(crate) fn serialize_bin_or_b64<S, T>(val: &T, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -130,13 +108,33 @@ pub(crate) fn deserialize_bin_or_b64<'de, D: Deserializer<'de>>(
     }
 }
 
+/// Wrapper type for master public keys.
+#[derive(Debug, Clone, Copy)]
+pub struct PublicKey<K: IBKEM>(pub K::Pk);
+
+/// Wrapper type for secret keys.
+#[derive(Debug, Clone, Copy)]
+pub struct SecretKey<K: IBKEM>(pub K::Sk);
+
+/// Wrapper type for user secret keys.
+#[derive(Debug, Clone)]
+pub struct UserSecretKey<K: IBKEM>(pub K::Usk);
+
+/// Wrapper type for ciphertexts.
+#[derive(Debug, Clone)]
+pub struct Ciphertext<K: IBKEM>(pub K::Ct);
+
+/// Wrapper type for multi-recipient ciphertexts.
+#[derive(Debug, Clone)]
+pub struct MultiRecipientCiphertext<K: IBKEM>(pub MkemCt<K>);
+
 // Note:
 // We cannot make these implementations generic over the scheme parameter because of a constant
 // expression depending on a generic parameter, see https://github.com/rust-lang/rust/issues/68436.
 // For now, the solutions are these deserialize impl macros, creating encoding/decoding buffer for
 // each scheme specifically.
 
-/// Implements [`serde::ser::Serialize`] and [`serde::de::Deserialize`] for wrapper types.
+/// Implements [`serde::ser::Serialize`] and [`serde::de::Deserialize`] for encapsulation wrapper types.
 macro_rules! impl_serialize {
     ($type: ty, $inner: ty) => {
         impl Serialize for $type {
@@ -180,7 +178,6 @@ pub struct SigningKeyExt {
 }
 
 /// Wrapper type for identity-based signing keys.
-#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct SigningKey(pub ibs::gg::UserSecretKey);
 
@@ -215,9 +212,9 @@ impl<'de> Deserialize<'de> for SigningKey {
 /// Wrapper type for identity-based public master key (signing).
 #[doc(hidden)]
 #[derive(Debug, Clone)]
-pub struct SigningPublicKey(pub ibs::gg::PublicKey);
+pub struct VerifyingKey(pub ibs::gg::PublicKey);
 
-impl Serialize for SigningPublicKey {
+impl Serialize for VerifyingKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -232,7 +229,7 @@ impl Serialize for SigningPublicKey {
     }
 }
 
-impl<'de> Deserialize<'de> for SigningPublicKey {
+impl<'de> Deserialize<'de> for VerifyingKey {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut buf = [0u8; ibs::gg::PK_BYTES];
         deserialize_bin_or_b64(&mut buf, deserializer)?;
@@ -241,41 +238,55 @@ impl<'de> Deserialize<'de> for SigningPublicKey {
             serde::de::Error::custom(format!("could not deserialize public key: {e}"))
         })?;
 
-        Ok(SigningPublicKey(pk))
+        Ok(VerifyingKey(pk))
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    mod encryption {
+    mod kem {
         use super::super::*;
         use ibe::kem::mkem::MultiRecipient;
         use ibe::Derive;
 
-        fn default_encryption_setup<K>() -> (K::Pk, K::Sk, K::Ct, K::Usk, MkemCt<K>)
+        struct KEMSetup<K: IBKEM> {
+            pk: K::Pk,
+            sk: K::Sk,
+            ct: K::Ct,
+            usk: K::Usk,
+            mct: MkemCt<K>,
+        }
+
+        fn default_encryption_setup<K>() -> KEMSetup<K>
         where
             K: IBKEM,
             K: MultiRecipient,
         {
             let mut rng = rand::thread_rng();
-            let (mpk, msk) = K::setup(&mut rng);
+            let (pk, sk) = K::setup(&mut rng);
             let id1 = <K as IBKEM>::Id::derive_str("test1");
             let id2 = <K as IBKEM>::Id::derive_str("test2");
-            let usk = K::extract_usk(Some(&mpk), &msk, &id1, &mut rng);
-            let (ct, _) = K::encaps(&mpk, &id1, &mut rng);
+            let usk = K::extract_usk(Some(&pk), &sk, &id1, &mut rng);
+            let (ct, _) = K::encaps(&pk, &id1, &mut rng);
             let ids = [id1, id2];
-            let (cts, _) = K::multi_encaps(&mpk, &ids, &mut rng);
-            let mct: Vec<MkemCt<K>> = cts.collect();
+            let (cts, _) = K::multi_encaps(&pk, &ids, &mut rng);
+            let mcts: Vec<MkemCt<K>> = cts.collect();
+            let mct = mcts[0].clone();
 
-            (mpk, msk, ct, usk, mct[0].clone())
+            KEMSetup {
+                pk,
+                sk,
+                ct,
+                usk,
+                mct,
+            }
         }
 
         #[test]
-        fn test_serialize_pk_human_readable() {
-            let (mpk, _, _, _, _) = default_encryption_setup::<CGWKV>();
+        fn test_serialize_pk_json() {
+            let KEMSetup { pk, .. } = default_encryption_setup::<CGWKV>();
 
-            let wrapped_pk = PublicKey::<CGWKV>(mpk);
+            let wrapped_pk = PublicKey::<CGWKV>(pk);
             let pk_encoded = serde_json::to_string(&wrapped_pk).unwrap();
             let pk_decoded: PublicKey<CGWKV> = serde_json::from_str(&pk_encoded).unwrap();
 
@@ -283,10 +294,10 @@ mod tests {
         }
 
         #[test]
-        fn test_serialize_sk_human_readable() {
-            let (_, msk, _, _, _) = default_encryption_setup::<CGWKV>();
+        fn test_serialize_sk_json() {
+            let KEMSetup { sk, .. } = default_encryption_setup::<CGWKV>();
 
-            let wrapped_sk = SecretKey::<CGWKV>(msk);
+            let wrapped_sk = SecretKey::<CGWKV>(sk);
             let sk_encoded = serde_json::to_string(&wrapped_sk).unwrap();
             let sk_decoded: SecretKey<CGWKV> = serde_json::from_str(&sk_encoded).unwrap();
 
@@ -294,8 +305,8 @@ mod tests {
         }
 
         #[test]
-        fn test_serialize_usk_human_readable() {
-            let (_, _, _, usk, _) = default_encryption_setup::<CGWKV>();
+        fn test_serialize_usk_json() {
+            let KEMSetup { usk, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_usk = UserSecretKey::<CGWKV>(usk);
             let usk_encoded = serde_json::to_string(&wrapped_usk).unwrap();
@@ -305,8 +316,8 @@ mod tests {
         }
 
         #[test]
-        fn test_serialize_ct_human_readable() {
-            let (_, _, ct, _, _) = default_encryption_setup::<CGWKV>();
+        fn test_serialize_ct_json() {
+            let KEMSetup { ct, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_ct = Ciphertext::<CGWKV>(ct);
             let ct_encoded = serde_json::to_string(&wrapped_ct).unwrap();
@@ -316,8 +327,8 @@ mod tests {
         }
 
         #[test]
-        fn test_serialize_mkemct_human_readable() {
-            let (_, _, _, _, mct) = default_encryption_setup::<CGWKV>();
+        fn test_serialize_mkemct_json() {
+            let KEMSetup { mct, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_mct = MultiRecipientCiphertext::<CGWKV>(mct);
             let mct_encoded = serde_json::to_string(&wrapped_mct).unwrap();
@@ -329,9 +340,9 @@ mod tests {
 
         #[test]
         fn test_serialize_pk_bin() {
-            let (mpk, _, _, _, _) = default_encryption_setup::<CGWKV>();
+            let KEMSetup { pk, .. } = default_encryption_setup::<CGWKV>();
 
-            let wrapped_pk = PublicKey::<CGWKV>(mpk);
+            let wrapped_pk = PublicKey::<CGWKV>(pk);
             let pk_encoded = bincode::serialize(&wrapped_pk).unwrap();
             let pk_decoded: PublicKey<CGWKV> = bincode::deserialize(&pk_encoded[..]).unwrap();
 
@@ -340,9 +351,9 @@ mod tests {
 
         #[test]
         fn test_serialize_sk_bin() {
-            let (_, msk, _, _, _) = default_encryption_setup::<CGWKV>();
+            let KEMSetup { sk, .. } = default_encryption_setup::<CGWKV>();
 
-            let wrapped_sk = SecretKey::<CGWKV>(msk);
+            let wrapped_sk = SecretKey::<CGWKV>(sk);
             let sk_encoded = bincode::serialize(&wrapped_sk).unwrap();
             let sk_decoded: SecretKey<CGWKV> = bincode::deserialize(&sk_encoded[..]).unwrap();
 
@@ -351,7 +362,7 @@ mod tests {
 
         #[test]
         fn test_serialize_usk_bin() {
-            let (_, _, _, usk, _) = default_encryption_setup::<CGWKV>();
+            let KEMSetup { usk, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_usk = UserSecretKey::<CGWKV>(usk);
             let usk_encoded = bincode::serialize(&wrapped_usk).unwrap();
@@ -362,7 +373,7 @@ mod tests {
 
         #[test]
         fn test_serialize_ct_bin() {
-            let (_, _, ct, _, _) = default_encryption_setup::<CGWKV>();
+            let KEMSetup { ct, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_ct = Ciphertext::<CGWKV>(ct);
             let ct_encoded = bincode::serialize(&wrapped_ct).unwrap();
@@ -373,7 +384,7 @@ mod tests {
 
         #[test]
         fn test_serialize_mkemct_bin() {
-            let (_, _, _, _, mct) = default_encryption_setup::<CGWKV>();
+            let KEMSetup { mct, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_mct = MultiRecipientCiphertext::<CGWKV>(mct);
             let mct_encoded = bincode::serialize(&wrapped_mct).unwrap();
@@ -384,7 +395,7 @@ mod tests {
         }
 
         #[test]
-        fn test_regression_human_readable() {
+        fn test_regression_json() {
             let pk ="\"o21LkWDqpJUA5R0YQC37XyU2MR/xMxiG3BoQaVpcByFDsfoPEMLp5QHIIwRjeB4yif39ELXVPoeU4q5a1Ia/FHWGnPeoA0hJskhzm4Tf2kIzGwfIpULL1WtLn1DQUkjFsYcJDOnoAxOvjBRqiGWnf+vq3h1mGf2n2iiAJsbdSFN2vorHJh+f0031jMWYSkQWpCHW/XBB8uyNZaWKIQJ4x3tGjVJbsbh0leY5p330TS0sg+ePlfrNTZAEGr2FuTDuudcY4vz4BJQq9j9cI5lkPY/kbDdpP0dTQH+JD38aaCUYEqfTbornbenHhCBB8wzzpkK1I/DVS4yVfpPSOkKq52/xZy1xiT++C0aUGXbq/AgoNmmrTMeGVYTJzS217N2vgkCDYC7g0UESpv80JLkf7NgXaNkrrmQr2JVr6yTMBfB8hjvvMPuD8yPtLHIt1z1uo7a/NeJZbFboGTdbdsjJN0lJpE+8OHzBmcEk3RntikMLL/8Wr/L44FkUPn05nvu/2MnDBfH0m++FOVJNyMA2VKLABeTrhdeq0yowQRLZD+6IoVRLe6qrt4okOE3HlhUSFYi9vpwJzZ0JbJHBU5aCdE7wwEbE4dtm85Iirdh/KJ1vdcSwaJOt9uOzkt4k+C/KE0wDvnjudYYU668NVR1oZ99GgfteFy8B96hEKzy/1tvDEOvAhDq4adbxrRmRieQZCvyRt/EF74Z7mX08Or6PSUzESiK7VweRdc1dvE8qyDwavBNCADzcAYu9+GxPW4ogEKoQSmUO1d46FSXgBfZwYJV6hX7NgL/Ugl5CSAwjL/md+E5Da3S0P5sr/qdvMe63Ew3QIQXcyrG4DS/V8rCFZ+9XgYppGUBRX9L53hf5ER5CDHb6k35Xn8T/gtX3+kPq\"";
             let sk = "\"hyk9sQ/tPDIgu8bYXu9mjb6El/3edmT4b+OurPyveUozLU86NPyQYcT7RocWiyENFaDUxXbuq1SYU/bTGxkkTFA+vDPwNU/LAF5GgbKlxivyJLqFNOX5oBFnFM6T0CNtuuVUr4ApivAZUj/suuJ6EKMfZLCGOvxHyszp0kKVSQnAZzTIymklAqgvKNziBCWP8+p4PKTIphJbJrQ6j5l2MN4yT0Pc8DoGGo2wo8SSTR2QgxtdOn37ZcOIldJaL3Q/epBc+JBO7emohcvjo57oDxPVc1o/183Qm7phBKKH30ygDOAUHZJB6+Bs19te6mzW4xPtdZrNFBKfLfT3Bq8bJ9RUIeQmIPHUOiHoC2kCl7i4GsRMBl2qId1ePvnh2lwzLEVnWGF19k1DixnZCiJRjMQX6X6DB25VSqB32mdfbEbgbEFD8oHdnMcFQN+j1e2O1Qufd3SJXJtl1BKsEJpoFcbSdPs2l+jpclw5gGd4xQ8H3SJ+ycIazKYskPLIGthvKzXsolUWgZgwmgbRK0eBteOujwlf8ydPdI5asr7Tvxceh3JxLTuUsIbMuD2ULl6WpD2im4tzA8rKBZ1NJ3prXAMituEUaTRgoCOwPCcs5AV7oYYIRIMkn1xsoQnUAN8aEIduaWjg5CU1voYMFsQq935BPraRvptkPsEquT3B6CI=\"";
             let ct = "\"grncB2oxHUi47TwgaffDmzqvWwd2hI5mI2tXnNOCEH/OqN+0ITWVxrFhLWa5a+ePr0f++z7hHl+4mTDEMUDJ3joP0xBUV1xrn0TJum6QF1fe6godMjyukLAVcr61NhFsgdaWcK5wDL/jRWeMJ+WkY29O1s00rMnq0jiQ3KAEYbiz3+dFG8FFJJRk4xds4tG8jv6IhitdhWIXlyU9JF+eMIC9nqSpUBBtmC4M3zhV4OAqmTfLULRjZcLSJrNrbeDWlnzr4MVvw8w4aJTebum3wdjPprzg/QcbtKzLUKOUU7Q=\"";
@@ -399,64 +410,75 @@ mod tests {
         }
     }
 
-    mod signing {
-        use super::super::*;
-        use ibs::gg::IDENTITY_BYTES;
+    mod sign {
+        use super::super::{SigningKey, VerifyingKey};
+        use ibs::gg::*;
+        use rand::Rng;
 
-        fn default_signing_setup() -> (ibs::gg::PublicKey, ibs::gg::UserSecretKey) {
+        struct SignSetup {
+            pk: PublicKey,
+            usk: UserSecretKey,
+        }
+
+        fn default_signing_setup() -> SignSetup {
             let mut rng = rand::thread_rng();
             let (pk, sk) = ibs::gg::setup(&mut rng);
 
-            let id = ibs::gg::Identity::from([0u8; IDENTITY_BYTES]);
+            let id = Identity::from(rng.gen::<[u8; IDENTITY_BYTES]>());
             let usk = ibs::gg::keygen(&sk, &id, &mut rng);
 
-            (pk, usk)
+            SignSetup { pk, usk }
         }
 
-        #[test]
-        fn test_serialize_sign_pk_bin() {
-            let (pk, _) = default_signing_setup();
+        macro_rules! test_serialize {
+            ($name: ident, $setup: ident, $type: tt, $ser: path, $de: path, $member: tt) => {
+                #[test]
+                fn $name() {
+                    let setup = $setup();
 
-            let wrapped_pk = SigningPublicKey(pk);
-            let pk_encoded = bincode::serialize(&wrapped_pk).unwrap();
-            let pk_decoded: SigningPublicKey = bincode::deserialize(&pk_encoded).unwrap();
+                    let wrapped = $type(setup.$member.clone());
+                    let serialized = $ser(&wrapped).unwrap();
+                    let deserialized: $type = $de(&serialized).unwrap();
 
-            assert_eq!(&wrapped_pk.0, &pk_decoded.0);
+                    assert_eq!(&setup.$member, &deserialized.0);
+                }
+            };
         }
 
-        #[test]
-        fn test_serialize_sign_pk_human_readable() {
-            let (pk, _) = default_signing_setup();
+        test_serialize!(
+            test_serialize_verifying_key_bin,
+            default_signing_setup,
+            VerifyingKey,
+            bincode::serialize,
+            bincode::deserialize,
+            pk
+        );
 
-            let wrapped_pk = SigningPublicKey(pk);
-            let pk_encoded = serde_json::to_string(&wrapped_pk).unwrap();
-            let pk_decoded: SigningPublicKey = serde_json::from_str(&pk_encoded).unwrap();
+        test_serialize!(
+            test_serialize_signing_key_bin,
+            default_signing_setup,
+            SigningKey,
+            bincode::serialize,
+            bincode::deserialize,
+            usk
+        );
 
-            assert_eq!(&wrapped_pk.0, &pk_decoded.0);
-        }
+        test_serialize!(
+            test_serialize_verifying_key_json,
+            default_signing_setup,
+            VerifyingKey,
+            serde_json::to_string,
+            serde_json::from_str,
+            pk
+        );
 
-        #[test]
-        fn test_serialize_sign_usk_bin() {
-            let (_, usk) = default_signing_setup();
-
-            let wrapped_usk = SigningKey(usk);
-            let usk_encoded = bincode::serialize(&wrapped_usk).unwrap();
-
-            dbg! {&usk_encoded.len()};
-            let usk_decoded: SigningKey = bincode::deserialize(&usk_encoded).unwrap();
-
-            assert_eq!(&wrapped_usk.0, &usk_decoded.0);
-        }
-
-        #[test]
-        fn test_serialize_sign_usk_human_readable() {
-            let (_, usk) = default_signing_setup();
-
-            let wrapped_usk = SigningKey(usk);
-            let usk_encoded = serde_json::to_string(&wrapped_usk).unwrap();
-            let usk_decoded: SigningKey = serde_json::from_str(&usk_encoded).unwrap();
-
-            assert_eq!(&wrapped_usk.0, &usk_decoded.0);
-        }
+        test_serialize!(
+            test_serialize_signing_key_json,
+            default_signing_setup,
+            SigningKey,
+            serde_json::to_string,
+            serde_json::from_str,
+            usk
+        );
     }
 }

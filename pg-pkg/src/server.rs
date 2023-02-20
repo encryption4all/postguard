@@ -75,9 +75,9 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     )?;
 
     let ibs_pd = ParametersData::new(
-        &Parameters::<SigningPublicKey> {
+        &Parameters::<VerifyingKey> {
             format_version: 0x00,
-            public_key: SigningPublicKey(ibs_pk),
+            public_key: VerifyingKey(ibs_pk),
         },
         Some(&ibs_public_path),
     )?;
@@ -125,24 +125,24 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             .service(
                                 resource("/start")
                                     .app_data(Data::new(irma.clone()))
-                                    .route(web::post().to(handlers::request)),
+                                    .route(web::post().to(handlers::start)),
                             )
                             .service(
                                 resource("/jwt/{token}")
                                     .app_data(Data::new(irma.clone()))
-                                    .route(web::get().to(handlers::request_jwt)),
+                                    .route(web::get().to(handlers::jwt)),
                             )
                             .service(
                                 resource("/key/{timestamp}")
                                     .app_data(Data::new(ibe_sk))
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
-                                    .route(web::get().to(handlers::request_key::<CGWKV>)),
+                                    .route(web::get().to(handlers::key::<CGWKV>)),
                             )
                             .service(
                                 resource("/sign/key")
                                     .app_data(Data::new(ibs_sk))
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
-                                    .route(web::get().to(handlers::request_signing_key)),
+                                    .route(web::get().to(handlers::signing_key)),
                             ),
                     ),
             )
@@ -203,9 +203,9 @@ pub(crate) mod tests {
         .unwrap();
 
         let pds = ParametersData::new(
-            &Parameters::<SigningPublicKey> {
+            &Parameters::<VerifyingKey> {
                 format_version: 0x00,
-                public_key: SigningPublicKey(ibs_pk),
+                public_key: VerifyingKey(ibs_pk),
             },
             None,
         )
@@ -232,13 +232,13 @@ pub(crate) mod tests {
                             resource("/key/{timestamp}")
                                 .app_data(Data::new(ibe_sk))
                                 .wrap(NoAuth::new())
-                                .route(web::get().to(handlers::request_key::<CGWKV>)),
+                                .route(web::get().to(handlers::key::<CGWKV>)),
                         )
                         .service(
                             resource("/sign/key")
                                 .app_data(Data::new(ibs_sk))
                                 .wrap(NoAuth::new())
-                                .route(web::get().to(handlers::request_signing_key)),
+                                .route(web::get().to(handlers::signing_key)),
                         ),
                 ),
         )
@@ -278,7 +278,7 @@ pub(crate) mod tests {
         assert!(resp.headers().contains_key("cache-control"));
         assert!(resp.headers().contains_key("etag"));
 
-        let params: Parameters<SigningPublicKey> = test::read_body_json(resp).await;
+        let params: Parameters<VerifyingKey> = test::read_body_json(resp).await;
         assert_eq!(&params.public_key.0, &pk);
         assert_eq!(params.format_version, 0x00);
     }

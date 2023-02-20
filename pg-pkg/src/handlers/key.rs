@@ -11,10 +11,7 @@ use crate::util::current_time_u64;
 
 use serde::Serialize;
 
-pub async fn request_key<K>(
-    req: HttpRequest,
-    msk: Data<K::Sk>,
-) -> Result<HttpResponse, crate::Error>
+pub async fn key<K>(req: HttpRequest, msk: Data<K::Sk>) -> Result<HttpResponse, crate::Error>
 where
     K: IBKEM + 'static,
     UserSecretKey<K>: Serialize,

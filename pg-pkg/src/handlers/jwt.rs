@@ -2,10 +2,7 @@ use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{web::Data, HttpResponse};
 
-pub async fn request_jwt(
-    irma: Data<String>,
-    req: HttpRequest,
-) -> Result<HttpResponse, crate::Error> {
+pub async fn jwt(irma: Data<String>, req: HttpRequest) -> Result<HttpResponse, crate::Error> {
     let token = req.match_info().query("token");
     let irma_url = irma.get_ref().clone();
 

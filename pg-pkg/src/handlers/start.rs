@@ -9,7 +9,7 @@ const MAX_VALIDITY: u64 = 60 * 60 * 24;
 /// Default validity if no validity is specified (5 min).
 const DEFAULT_VALIDITY: u64 = 60 * 5;
 
-pub async fn request(
+pub async fn start(
     url: Data<String>,
     value: Json<IrmaAuthRequest>,
 ) -> Result<HttpResponse, crate::Error> {
