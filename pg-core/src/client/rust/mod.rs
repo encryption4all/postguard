@@ -1,5 +1,8 @@
 //! Implementation for Rust, backed by [Rust Crypto](https://github.com/RustCrypto).
 
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 use crate::artifacts::{PublicKey, UserSecretKey, VerifyingKey};
 use crate::client::*;
 use crate::error::Error;
@@ -13,12 +16,6 @@ use rand::{CryptoRng, RngCore};
 
 #[cfg(feature = "rust_stream")]
 pub mod stream;
-
-impl From<std::io::Error> for crate::error::Error {
-    fn from(e: std::io::Error) -> Self {
-        crate::error::Error::StdIO(e)
-    }
-}
 
 /// In-memory configuration for a [`Sealer`].
 #[derive(Debug)]
@@ -88,8 +85,7 @@ impl Sealer<SealerMemoryConfig> {
                 .map_err(|_| Error::ConstraintViolation)?,
         });
 
-        let mut header_buf = Vec::new();
-        self.header.into_bytes(&mut header_buf)?;
+        let header_buf = self.header.into_bytes()?;
         out.extend_from_slice(
             &u32::try_from(header_buf.len())
                 .map_err(|_| Error::ConstraintViolation)?
@@ -128,7 +124,6 @@ impl Sealer<SealerMemoryConfig> {
             },
         })
         .unwrap();
-        dbg! {&enc_input.len()};
 
         let ciphertext = aead
             .encrypt(nonce, enc_input.as_ref())

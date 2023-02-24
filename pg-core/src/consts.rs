@@ -28,13 +28,13 @@ pub const PRELUDE_SIZE: usize = 4;
 pub const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
 
 /// The size of the version identifier.
-pub const VERSION_SIZE: usize = std::mem::size_of::<u16>();
+pub const VERSION_SIZE: usize = core::mem::size_of::<u16>();
 
 /// The size of the header size.
-pub const HEADER_SIZE_SIZE: usize = std::mem::size_of::<u32>();
+pub const HEADER_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 
 /// The size of the signature size.
-pub const SIG_SIZE_SIZE: usize = std::mem::size_of::<u32>();
+pub const SIG_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 
 /// The maximum size of the header (4 MiB).
 pub const MAX_HEADER_SIZE: usize = 1024 * 1024 * 4;

@@ -11,7 +11,6 @@ use crate::identity::Policy;
 use crate::util::open_ct;
 use base64ct::{Base64, Encoding};
 use core::fmt;
-use core::stringify;
 use ibe::{
     kem::{cgw_kv::CGWKV, mkem::MultiRecipientCiphertext as MkemCt, IBKEM},
     Compress,
@@ -246,6 +245,7 @@ impl<'de> Deserialize<'de> for VerifyingKey {
 mod tests {
     mod kem {
         use super::super::*;
+        use alloc::vec::Vec;
         use ibe::kem::mkem::MultiRecipient;
         use ibe::Derive;
 

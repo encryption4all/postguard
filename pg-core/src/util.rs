@@ -1,5 +1,6 @@
 use crate::consts::*;
 use crate::error::Error;
+use alloc::string::String;
 
 pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {

@@ -1,4 +1,5 @@
 //! # PostGuard core library
+#![no_std]
 #![doc(
     html_favicon_url = "https://postguard.eu/favicon.ico",
     html_logo_url = "https://postguard.eu/pg_logo_no_text.svg"
@@ -207,6 +208,10 @@
 //! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
 //! Yew/Dioxus/Leptos).
 
+#[cfg(test)]
+extern crate std;
+
+#[macro_use]
 extern crate alloc;
 
 pub mod api;

@@ -6,6 +6,8 @@ use ibe::kem::IBKEM;
 use ibs::gg::IDENTITY_BYTES as IBS_ID_BYTES;
 use rand::{CryptoRng, Rng};
 
+use alloc::string::String;
+
 #[derive(Debug)]
 pub struct TestSetup {
     pub mpk: PublicKey<CGWKV>,

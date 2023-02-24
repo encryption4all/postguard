@@ -1,7 +1,11 @@
 //! Identity definitions and utilities.
 
-use crate::error::Error;
 use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
+use crate::error::Error;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
@@ -159,7 +163,7 @@ impl Attribute {
     /// Construct a new attribute request.
     pub fn new(atype: &str, value: Option<&str>) -> Self {
         let atype = atype.to_string();
-        let value = value.map(|s| s.to_owned());
+        let value = value.map(|s| s.to_string());
 
         Attribute { atype, value }
     }
@@ -169,6 +173,8 @@ impl Attribute {
 mod tests {
     use crate::identity::{Attribute, Policy};
     use crate::test::TestSetup;
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
     use ibe::kem::cgw_kv::CGWKV;
 
     #[test]

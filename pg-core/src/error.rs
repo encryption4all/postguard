@@ -1,6 +1,7 @@
 //! PostGuard errors.
 
 use crate::client::{Algorithm, Mode};
+use alloc::string::String;
 
 /// An PostGuard error.
 #[derive(Debug)]
@@ -38,15 +39,13 @@ pub enum Error {
     KEM,
     /// The identity-based signature did not verify.
     IncorrectSignature,
-    /// Synchronous IO error from the standard library.
-    StdIO(std::io::Error),
     /// Asynchronous IO error from the futures crate.
     #[cfg(any(feature = "rust_stream", feature = "web_stream"))]
     FuturesIO(futures::io::Error),
 }
 
 impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut alloc::fmt::Formatter<'_>) -> alloc::fmt::Result {
         match self {
             Self::NotPostGuard => {
                 write!(f, "the bytestream does not start with the expected prelude")
@@ -68,7 +67,6 @@ impl core::fmt::Display for Error {
             Self::ModeNotSupported(m) => write!(f, "mode is not supported: {m:?}"),
             Self::KEM => write!(f, "KEM error"),
             Self::IncorrectSignature => write!(f, "incorrect signature"),
-            Self::StdIO(e) => write!(f, "standard library IO error: {e}"),
             #[cfg(any(feature = "rust_stream", feature = "web_stream"))]
             Self::FuturesIO(e) => write!(f, "futures IO error: {e}"),
         }

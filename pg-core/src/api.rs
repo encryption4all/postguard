@@ -1,6 +1,7 @@
 //! Definitions of the PostGuard protocol REST API.
 
 use crate::identity::Attribute;
+use alloc::vec::Vec;
 use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
 

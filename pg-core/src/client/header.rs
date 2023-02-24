@@ -13,10 +13,12 @@ use ibe::kem::{SharedSecret, IBKEM};
 use ibs::gg::Signature;
 
 use alloc::collections::BTreeMap;
+use alloc::fmt::Debug;
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-use std::io::{Read, Write};
 
 /// Possible encryption modes.
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
@@ -185,14 +187,14 @@ impl Header {
         self
     }
 
-    /// Serializes the [`Header`] as compact binary format into a [`Write`].
-    pub fn into_bytes<W: Write>(self, w: &mut W) -> Result<(), Error> {
-        bincode::serialize_into(w, &self).map_err(|e| Error::Bincode(e))
+    /// Serializes the [`Header`] as compact binary format.
+    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
+        bincode::serialize(&self).map_err(|e| Error::Bincode(e))
     }
 
-    /// Deserialize the header from binary format from a [`Read`].
-    pub fn from_bytes<R: Read>(r: R) -> Result<Self, Error> {
-        bincode::deserialize_from(r).map_err(|e| Error::Bincode(e))
+    /// Deserialize the header from binary format.
+    pub fn from_bytes(b: impl AsRef<[u8]>) -> Result<Self, Error> {
+        bincode::deserialize(b.as_ref()).map_err(|e| Error::Bincode(e))
     }
 
     /// Serializes the header to a JSON string.
@@ -248,8 +250,6 @@ mod tests {
 
     #[test]
     fn test_enc_dec_binary() {
-        use std::io::Cursor;
-
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
         let ids: Vec<String> = setup.policies.keys().cloned().collect();
@@ -257,10 +257,8 @@ mod tests {
         let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         let header2 = header.clone();
 
-        let mut v = Vec::new();
-        header.into_bytes(&mut v).unwrap();
-
-        let decoded = Header::from_bytes(Cursor::new(v)).unwrap();
+        let v = header.into_bytes().unwrap();
+        let decoded = Header::from_bytes(v).unwrap();
 
         assert_eq!(decoded.policies.len(), 3);
         assert_eq!(
@@ -274,7 +272,6 @@ mod tests {
     #[test]
     fn test_round() {
         // This test tests that both encoding methods derive the same keys as the sender.
-        use std::io::Cursor;
 
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
@@ -287,13 +284,12 @@ mod tests {
         let header2 = header.clone();
         let header3 = header.clone();
 
-        let mut v = Vec::new();
-        header.into_bytes(&mut v).unwrap();
+        let v = header.into_bytes().unwrap();
 
         // Encode to JSON string.
         let json = header2.to_json().unwrap();
 
-        let decoded1 = Header::from_bytes(Cursor::new(v)).unwrap();
+        let decoded1 = Header::from_bytes(v).unwrap();
         let ss2 = decoded1
             .policies
             .get(test_id)
