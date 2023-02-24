@@ -6,6 +6,7 @@
 
 mod header;
 pub use header::{Algorithm, Header, Mode, RecipientHeader};
+use ibs::gg::Verifier;
 
 #[cfg(feature = "rust")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rust")))]
@@ -15,9 +16,10 @@ pub mod rust;
 #[cfg_attr(docsrs, doc(cfg(feature = "web")))]
 pub mod web;
 
-use crate::consts::*;
-use crate::error::Error;
+use crate::artifacts::VerifyingKey;
 use crate::util::*;
+use crate::{artifacts::SigningKeyExt, consts::*};
+use header::SignatureExt;
 use serde::{Deserialize, Serialize};
 
 /// A Sealer is used to encrypt and sign data using PostGuard.
@@ -28,6 +30,24 @@ pub struct Sealer<C: SealerConfig> {
 
     // The flavor-specific configuration.
     config: C,
+
+    // The public signing key. Used to sign public data, such as the header.
+    // The signature and claims are visible to outsiders.
+    pub_sign_key: SigningKeyExt,
+
+    // An optional private signing key.
+    // The signature and claims are encrypted and not visible to outsiders.
+    priv_sign_key: Option<SigningKeyExt>,
+}
+
+impl<C: SealerConfig> Sealer<C> {
+    /// Add a private signing key and policy.
+    ///
+    /// This policy is safe to include private data as it is encrypted after signing.
+    pub fn with_priv_signing_key(mut self, priv_sign_key: &SigningKeyExt) -> Self {
+        self.priv_sign_key = Some(priv_sign_key.clone());
+        self
+    }
 }
 
 /// An Unsealer is used to decrypt and verify data using PostGuard.
@@ -52,6 +72,12 @@ pub struct Unsealer<R, C: UnsealerConfig> {
 
     // The implementation-specific configuration.
     config: C,
+
+    // The message verifier.
+    verifier: Verifier,
+
+    // The message verifier key.
+    vk: VerifyingKey,
 }
 
 /// Sealer configuration.
@@ -69,74 +95,77 @@ pub(crate) mod sealed {
     pub trait SealerConfig {}
 }
 
-/// A PostGuard in-memory sealed packet.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PostGuardPacket {
-    /// The version of the header.
-    pub version: u16,
+///// A PostGuard in-memory sealed packet.
+//#[derive(Serialize, Deserialize, Debug, Clone)]
+//pub struct PostGuardPacket {
+//    /// The version of the header.
+//    pub version: u16,
+//
+//    /// The header of the PostGuard packet.
+//    pub header: Header,
+//
+//    /// The header signature.
+//    pub header_sig: SignatureExt,
+//
+//    /// The symmetric ciphertext.
+//    pub ciphertext: Vec<u8>,
+//}
 
-    /// The header of the PostGuard packet.
-    pub header: Header,
-
-    /// The symmetric ciphertext.
-    pub ciphertext: Vec<u8>,
-}
-
-impl PostGuardPacket {
-    /// Serialize to a JSON string.
-    pub fn into_json(self) -> Result<String, Error> {
-        serde_json::to_string(&self).map_err(Error::Json)
-    }
-
-    /// Deserialize from a JSON string.
-    pub fn from_json(s: &str) -> Result<Self, Error> {
-        serde_json::from_str(s).map_err(Error::Json)
-    }
-
-    /// Serialize to binary format.
-    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
-        let mut header_buf = Vec::new();
-        self.header.into_bytes(&mut header_buf)?;
-
-        let mut out = Vec::new();
-        out.extend_from_slice(&PRELUDE);
-        out.extend_from_slice(&self.version.to_be_bytes());
-        out.extend_from_slice(
-            &u32::try_from(header_buf.len())
-                .map_err(|_| Error::ConstraintViolation)?
-                .to_be_bytes(),
-        );
-        out.extend_from_slice(&header_buf);
-        out.extend_from_slice(&self.ciphertext);
-
-        Ok(out)
-    }
-
-    /// Deserialize from binary format.
-    pub fn from_bytes(b: impl AsRef<[u8]>) -> Result<Self, Error> {
-        let b = b.as_ref();
-
-        let (version, header_len) = preamble_checked(&b[..PREAMBLE_SIZE])?;
-
-        let len = b.len();
-        let header_bytes = &b[PREAMBLE_SIZE..PREAMBLE_SIZE + header_len];
-        let header = Header::from_bytes(header_bytes)?;
-
-        let payload_len = match header.mode {
-            Mode::InMemory { size } => size,
-            _ => return Err(Error::ModeNotSupported(header.mode)),
-        };
-
-        let ct_len = payload_len as usize + TAG_SIZE;
-        let ciphertext = b[len - ct_len..].to_vec();
-
-        Ok(PostGuardPacket {
-            version,
-            header,
-            ciphertext,
-        })
-    }
-}
+//impl PostGuardPacket {
+//    /// Serialize to a JSON string.
+//    pub fn into_json(self) -> Result<String, Error> {
+//        serde_json::to_string(&self).map_err(Error::Json)
+//    }
+//
+//    /// Deserialize from a JSON string.
+//    pub fn from_json(s: &str) -> Result<Self, Error> {
+//        serde_json::from_str(s).map_err(Error::Json)
+//    }
+//
+//    /// Serialize to binary format.
+//    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
+//        let mut header_buf = Vec::new();
+//        self.header.into_bytes(&mut header_buf)?;
+//
+//        let mut out = Vec::new();
+//        out.extend_from_slice(&PRELUDE);
+//        out.extend_from_slice(&self.version.to_be_bytes());
+//        out.extend_from_slice(
+//            &u32::try_from(header_buf.len())
+//                .map_err(|_| Error::ConstraintViolation)?
+//                .to_be_bytes(),
+//        );
+//        out.extend_from_slice(&header_buf);
+//        out.extend_from_slice(&self.ciphertext);
+//
+//        Ok(out)
+//    }
+//
+//    /// Deserialize from binary format.
+//    pub fn from_bytes(b: impl AsRef<[u8]>) -> Result<Self, Error> {
+//        let b = b.as_ref();
+//
+//        let (version, header_len) = preamble_checked(&b[..PREAMBLE_SIZE])?;
+//
+//        let len = b.len();
+//        let header_bytes = &b[PREAMBLE_SIZE..PREAMBLE_SIZE + header_len];
+//        let header = Header::from_bytes(header_bytes)?;
+//
+//        let payload_len = match header.mode {
+//            Mode::InMemory { size } => size,
+//            _ => return Err(Error::ModeNotSupported(header.mode)),
+//        };
+//
+//        let ct_len = payload_len as usize + TAG_SIZE;
+//        let ciphertext = b[len - ct_len..].to_vec();
+//
+//        Ok(PostGuardPacket {
+//            version,
+//            header,
+//            ciphertext,
+//        })
+//    }
+//}
 
 #[cfg(any(feature = "rust_stream", feature = "web_stream"))]
 pub(self) fn stream_mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), Error> {

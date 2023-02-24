@@ -17,7 +17,7 @@ pub enum Error {
     /// Serde JSON error.
     Json(serde_json::Error),
     /// Bincode serialization/deserialization error.
-    Bincode(Box<dyn std::error::Error>),
+    Bincode(bincode::Error),
     /// The recipient identifier was not found in the policies.
     UnknownIdentifier(String),
     /// Incorrect scheme version.
@@ -36,6 +36,8 @@ pub enum Error {
     ModeNotSupported(Mode),
     /// Opaque key encapsulation error.
     KEM,
+    /// The identity-based signature did not verify.
+    IncorrectSignature,
     /// Synchronous IO error from the standard library.
     StdIO(std::io::Error),
     /// Asynchronous IO error from the futures crate.
@@ -65,6 +67,7 @@ impl core::fmt::Display for Error {
             Self::AlgorithmNotSupported(a) => write!(f, "algorithm is not supported: {a:?}"),
             Self::ModeNotSupported(m) => write!(f, "mode is not supported: {m:?}"),
             Self::KEM => write!(f, "KEM error"),
+            Self::IncorrectSignature => write!(f, "incorrect signature"),
             Self::StdIO(e) => write!(f, "standard library IO error: {e}"),
             #[cfg(any(feature = "rust_stream", feature = "web_stream"))]
             Self::FuturesIO(e) => write!(f, "futures IO error: {e}"),

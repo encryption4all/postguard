@@ -163,6 +163,8 @@ fn aead_nonce(nonce: &[u8], counter: u32, last_block: bool) -> [u8; IV_SIZE] {
     iv
 }
 
+// TODO: read_exact
+
 impl<R> Unsealer<R, StreamUnsealerConfig>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
@@ -174,9 +176,7 @@ where
     /// Errors if the bytestream is not a legitimate PostGuard bytestream.
     /// Also errors if the items (of type [`JsValue`]) cannot be cast into [`Uint8Array`].
     pub async fn new(mut r: R) -> Result<Self, JsValue> {
-        let preamble_len: u32 = PREAMBLE_SIZE
-            .try_into()
-            .map_err(|_| Error::ConstraintViolation)?;
+        let preamble_len: u32 = PREAMBLE_SIZE as u32;
         let mut read: u32 = 0;
 
         let mut preamble = Vec::new();

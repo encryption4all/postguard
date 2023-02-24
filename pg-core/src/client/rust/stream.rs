@@ -1,9 +1,11 @@
 //! Streaming mode.
 
-use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use crate::client::*;
 use crate::error::Error;
 use crate::identity::EncryptionPolicy;
+use ibe::kem::cgw_kv::CGWKV;
+use ibs::gg::{Identity, Signature, Signer, Verifier, IDENTITY_BYTES, SIG_BYTES};
 
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use aead::KeyInit;
@@ -11,14 +13,16 @@ use aes_gcm::Aes128Gcm;
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::TryFutureExt;
-use ibe::kem::cgw_kv::CGWKV;
 use rand::{CryptoRng, RngCore};
 
 /// Configures an [`Sealer`] to process a payload stream.
 #[derive(Debug)]
 pub struct SealerStreamConfig {
+    /// Segment size.
     segment_size: u32,
+    /// AEAD key.
     key: [u8; KEY_SIZE],
+    /// AEAD nonce.
     nonce: [u8; STREAM_NONCE_SIZE],
 }
 
@@ -38,6 +42,7 @@ impl Sealer<SealerStreamConfig> {
     pub fn new<Rng: RngCore + CryptoRng>(
         pk: &PublicKey<CGWKV>,
         policies: &EncryptionPolicy,
+        pub_sign_key: &SigningKeyExt,
         rng: &mut Rng,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(pk, policies, rng)?;
@@ -53,6 +58,8 @@ impl Sealer<SealerStreamConfig> {
 
         Ok(Sealer {
             header,
+            pub_sign_key: pub_sign_key.clone(),
+            priv_sign_key: None,
             config: SealerStreamConfig {
                 segment_size,
                 key,
@@ -74,10 +81,11 @@ impl Sealer<SealerStreamConfig> {
     }
 
     /// Seals payload data from an [`AsyncRead`] into an [`AsyncWrite`].
-    pub async fn seal<R, W>(self, mut r: R, mut w: W) -> Result<(), Error>
+    pub async fn seal<R, W, RNG>(self, mut r: R, mut w: W, rng: &mut RNG) -> Result<(), Error>
     where
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
+        RNG: RngCore + CryptoRng,
     {
         w.write_all(&PRELUDE).await?;
         w.write_all(&VERSION_V2.to_be_bytes()).await?;
@@ -94,8 +102,29 @@ impl Sealer<SealerStreamConfig> {
 
         w.write_all(&header_vec[..]).await?;
 
+        // Sign the header using the public signing key.
+        let header_signer = Signer::default().chain(&header_vec);
+
+        // Signs the header and message.
+        let mut signer = header_signer.clone();
+        let header_sig = header_signer.sign(&self.pub_sign_key.key.0, rng);
+        let header_sig_ext = SignatureExt {
+            sig: header_sig,
+            pol: self.pub_sign_key.policy.clone(),
+        };
+
+        let header_sig_bytes =
+            bincode::serialize(&header_sig_ext).map_err(|e| Error::Bincode(e))?;
+
+        w.write_all(&u32::try_from(header_sig_bytes.len()).unwrap().to_be_bytes())
+            .await?;
+        w.write_all(&header_sig_bytes).await?;
+
         let aead = Aes128Gcm::new_from_slice(&self.config.key).map_err(|_e| Error::KeyError)?;
         let mut enc = EncryptorBE32::from_aead(aead, &self.config.nonce.into());
+
+        // Check for a private signing key, otherwise fall back to the public one.
+        let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
         let mut buf = vec![0; self.config.segment_size as usize];
         let mut buf_tail: usize = 0;
@@ -110,12 +139,14 @@ impl Sealer<SealerStreamConfig> {
 
             if buf_tail == self.config.segment_size as usize {
                 buf.truncate(buf_tail);
+                signer.update(&buf);
                 enc.encrypt_next_in_place(b"", &mut buf)
                     .map_err(|_e| Error::Symmetric)?;
                 w.write_all(&buf[..]).await?;
                 buf_tail = 0;
             } else if read == 0 {
                 buf.truncate(buf_tail);
+                signer.update(&buf);
                 enc.encrypt_last_in_place(b"", &mut buf)
                     .map_err(|_e| Error::Symmetric)?;
                 w.write_all(&buf[..]).await?;
@@ -123,6 +154,18 @@ impl Sealer<SealerStreamConfig> {
             }
         }
 
+        // FIXME: dont write this unencrypted
+        let sig_ext = SignatureExt {
+            sig: signer.sign(&signing_key.key.0, rng),
+            pol: signing_key.policy,
+        };
+        let sign_bytes = bincode::serialize(&sig_ext).unwrap();
+
+        w.write_all(&sign_bytes).await?;
+        w.write_all(&u32::try_from(sign_bytes.len()).unwrap().to_be_bytes())
+            .await;
+
+        w.flush().await?;
         w.close().await?;
 
         Ok(())
@@ -136,7 +179,7 @@ where
     /// Create a new [`Unsealer`] that starts reading from an [`AsyncRead`].
     ///
     /// Errors if the bytestream is not a legitimate PostGuard bytestream.
-    pub async fn new(mut r: R) -> Result<Self, Error> {
+    pub async fn new(mut r: R, pk: &VerifyingKey) -> Result<Self, Error> {
         let mut preamble = [0u8; PREAMBLE_SIZE];
         r.read_exact(&mut preamble)
             .map_err(|_e| Error::NotPostGuard)
@@ -144,6 +187,7 @@ where
 
         let (version, header_len) = preamble_checked(&preamble)?;
 
+        //
         let mut header_raw = Vec::with_capacity(header_len);
 
         // Limit reader to not read past header
@@ -153,8 +197,27 @@ where
             .map_err(|_e| Error::ConstraintViolation)
             .await?;
 
-        let header = Header::from_bytes(&*header_raw)?;
+        let mut r = r.into_inner();
 
+        let mut header_sig_len_bytes = [0u8; SIG_SIZE_SIZE];
+        r.read_exact(&mut header_sig_len_bytes)
+            .map_err(|_e| Error::FormatViolation("no header signature length".to_string()))
+            .await?;
+        let header_sig_len = u32::from_be_bytes(header_sig_len_bytes);
+
+        let mut header_sig_raw = Vec::with_capacity(header_sig_len as usize);
+        let mut r = r.take(header_sig_len as u64);
+
+        r.read_to_end(&mut header_sig_raw).await?;
+
+        let header_sig: SignatureExt = bincode::deserialize(&header_sig_raw).unwrap();
+
+        let header_verifier = Verifier::default().chain(&header_raw);
+        let verifier = header_verifier.clone();
+        let id = Identity::from(header_sig.pol.derive::<IDENTITY_BYTES>().unwrap());
+        header_verifier.verify(&pk.0, &header_sig.sig, &id);
+
+        let header = Header::from_bytes(&*header_raw)?;
         let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
@@ -162,12 +225,13 @@ where
             header,
             config: UnsealerStreamConfig { segment_size },
             r: r.into_inner(), // This (new) reader is locked to the payload.
+            verifier,
         })
     }
 
     /// Unseal the remaining data (which is now only payload) into an [`AsyncWrite`].
     pub async fn unseal<W: AsyncWrite + Unpin>(
-        &mut self,
+        mut self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
@@ -212,6 +276,7 @@ where
         }
 
         w.close().await?;
+
         Ok(())
     }
 }

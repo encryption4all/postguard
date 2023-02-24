@@ -10,6 +10,8 @@ use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::mkem::MultiRecipient;
 use ibe::kem::{SharedSecret, IBKEM};
 
+use ibs::gg::Signature;
+
 use alloc::collections::BTreeMap;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -113,7 +115,7 @@ pub struct Header {
 /// Contains header data specific to _one_ recipient.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientHeader {
-    /// The [`HiddenRecipientPolicy`] associated with this identifier.
+    /// The [`HiddenPolicy`] associated with this identifier.
     #[serde(rename = "p")]
     pub policy: HiddenPolicy,
 
@@ -185,12 +187,12 @@ impl Header {
 
     /// Serializes the [`Header`] as compact binary format into a [`Write`].
     pub fn into_bytes<W: Write>(self, w: &mut W) -> Result<(), Error> {
-        bincode::serialize_into(w, &self).map_err(|e| Error::Bincode(Box::new(e)))
+        bincode::serialize_into(w, &self).map_err(|e| Error::Bincode(e))
     }
 
-    /// Deserialize the header from binary format from an [`Read`].
+    /// Deserialize the header from binary format from a [`Read`].
     pub fn from_bytes<R: Read>(r: R) -> Result<Self, Error> {
-        bincode::deserialize_from(r).map_err(|e| Error::Bincode(Box::new(e)))
+        bincode::deserialize_from(r).map_err(|e| Error::Bincode(e))
     }
 
     /// Serializes the header to a JSON string.
@@ -207,6 +209,16 @@ impl Header {
     }
 }
 
+/// An IBS signature, extended with the identity claims.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignatureExt {
+    /// The identity-based signature.
+    pub sig: Signature,
+
+    /// The claimed identity as a [`Policy`] associated with this signature.
+    pub pol: Policy,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,17 +229,17 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
-        let ids: Vec<String> = setup.policy.keys().cloned().collect();
-        let (header, _ss) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
+        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         let header2 = header.clone();
 
         let s = header.to_json().unwrap();
         let decoded = Header::from_json(&s).unwrap();
 
-        assert_eq!(decoded.policies.len(), 2);
+        assert_eq!(decoded.policies.len(), 3);
         assert_eq!(
             &decoded.policies.get(&ids[0]).unwrap().policy,
-            &setup.policy.get(&ids[0]).unwrap().to_hidden()
+            &setup.policies.get(&ids[0]).unwrap().to_hidden()
         );
 
         assert_eq!(&decoded.algo, &header2.algo);
@@ -240,9 +252,9 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
-        let ids: Vec<String> = setup.policy.keys().cloned().collect();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
 
-        let (header, _ss) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
+        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         let header2 = header.clone();
 
         let mut v = Vec::new();
@@ -250,10 +262,10 @@ mod tests {
 
         let decoded = Header::from_bytes(Cursor::new(v)).unwrap();
 
-        assert_eq!(decoded.policies.len(), 2);
+        assert_eq!(decoded.policies.len(), 3);
         assert_eq!(
             &decoded.policies.get(&ids[0]).unwrap().policy,
-            &setup.policy.get(&ids[0]).unwrap().to_hidden()
+            &setup.policies.get(&ids[0]).unwrap().to_hidden()
         );
         assert_eq!(&decoded.algo, &header2.algo);
         assert_eq!(&decoded.mode, &header2.mode);
@@ -266,12 +278,12 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
-        let ids: Vec<String> = setup.policy.keys().cloned().collect();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
 
         let test_id = &ids[1];
         let test_usk = &setup.usks.get(test_id).unwrap();
 
-        let (header, ss1) = Header::new(&setup.mpk, &setup.policy, &mut rng).unwrap();
+        let (header, ss1) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         let header2 = header.clone();
         let header3 = header.clone();
 

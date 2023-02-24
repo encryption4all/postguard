@@ -177,7 +177,7 @@ mod tests {
         // Test that symantically equivalent policies map to the same IBE identity.
         let setup = TestSetup::new(&mut rng);
 
-        let policies: Vec<Policy> = setup.policy.into_values().collect();
+        let policies: Vec<Policy> = setup.policies.into_values().collect();
         let p1_derived = policies[1].derive_kem::<CGWKV>().unwrap();
 
         let mut reversed = policies[1].clone();

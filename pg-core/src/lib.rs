@@ -23,7 +23,7 @@
 //! Encryption`][`ibe::kem::mkem`].
 //!
 //! * Sign: The ciphertext(s) and all information that is required for decryption is available in the
-//! [header][`crate::client::Header`]. The header is publicly visible and therefore all sensitive
+//! [header][`client::Header`]. The header is publicly visible and therefore all sensitive
 //! content is purged. The header, ciphertexts and arbitrary-long message is signed using a
 //! identity-based signature under the identity of the sender.
 //!
@@ -38,9 +38,14 @@
 //!
 //! ```text
 //!                  PREAMBLE (10)                ||
-//! PRELUDE (4) || VERSION (2) || HEADER SIZE (4) || HEADER (*) || PAYLOAD (*)
-//! ```
+//! = PRELUDE (4) || VERSION (2) || HEADER LEN (4)
 //!
+//!                  HEADER (*)                   ||
+//! = HEADER (*) || HEADER SIG LEN (4) || HEADER SIG (*)
+//!
+//!                  PAYLOAD  (*)                 ||
+//! = DEM.Enc(M (*) || STREAM SIG (*) || STREAM SIG LEN (4))
+//! ```
 //!
 //! ## Symmetric Crypto Backends
 //!

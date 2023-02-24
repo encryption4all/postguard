@@ -1,6 +1,6 @@
 //! Implementation for the web, backed by [Web Crypto](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API).
 
-// FIXME
+// FIXME: go by architecture, but enable both implementations in tests/docs.
 //#[cfg(all(not(target_arch = "wasm32-unknown-unknown"), not(docsrs)))]
 //compile_error!("feature \"web\" can only be used for wasm targets");
 

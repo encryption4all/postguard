@@ -6,13 +6,20 @@
 /// The header format was defined by Postcard, but is no longer supported.
 pub const VERSION_V1: u16 = 0;
 
-/// Version 1.
+/// Version 1 (legacy).
 ///
 /// This version uses the CGW anonymous IBE scheme to construct a KEM variant. This scheme can
 /// encapsulate the same shared secret for multiple recipients. This version also supports
 /// conjunctions. For this version we required the header to be dynamic.
 /// The header format is defined by MessagePack.
 pub const VERSION_V2: u16 = 1;
+
+/// Version 2.
+///
+/// This version uses the CGW anonymous IBE scheme to construct a KEM variant.
+/// The scheme supports a Sign-then-Encrypt composition using the GG-IBS scheme.
+/// The binary header format is defined by Bincode.
+pub const VERSION_V3: u16 = 2;
 
 /// The size of the tag with which all PostGuard bytestreams begin.
 pub const PRELUDE_SIZE: usize = 4;
@@ -25,6 +32,9 @@ pub const VERSION_SIZE: usize = std::mem::size_of::<u16>();
 
 /// The size of the header size.
 pub const HEADER_SIZE_SIZE: usize = std::mem::size_of::<u32>();
+
+/// The size of the signature size.
+pub const SIG_SIZE_SIZE: usize = std::mem::size_of::<u32>();
 
 /// The maximum size of the header (4 MiB).
 pub const MAX_HEADER_SIZE: usize = 1024 * 1024 * 4;
