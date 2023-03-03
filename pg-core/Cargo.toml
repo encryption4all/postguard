@@ -62,7 +62,7 @@ stream = ["futures"]
 [[bench]]
 name = "main"
 harness = false
-required-features = ["rust", "rust_stream"]
+required-features = ["stream"]
 
 [package.metadata.docs.rs]
 all-features = true
