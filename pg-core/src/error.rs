@@ -1,5 +1,7 @@
 //! PostGuard errors.
 
+use core::{array::TryFromSliceError, num::TryFromIntError};
+
 use crate::client::{Algorithm, Mode};
 use alloc::string::String;
 
@@ -29,8 +31,6 @@ pub enum Error {
     FormatViolation(String),
     /// Opaque symmetric encryption error.
     Symmetric,
-    /// The symmetric key cannot be initialized using the byte slice.
-    KeyError,
     /// The symmetric encryption algorithm is not supported.
     AlgorithmNotSupported(Algorithm),
     /// The encryption mode is not supported.
@@ -39,9 +39,39 @@ pub enum Error {
     KEM,
     /// The identity-based signature did not verify.
     IncorrectSignature,
-    /// Asynchronous IO error from the futures crate.
-    #[cfg(any(feature = "rust_stream", feature = "web_stream"))]
+    /// Opaque asynchronous IO error from the futures crate.
+    #[cfg(any(feature = "stream", target_arch = "wasm32"))]
     FuturesIO(futures::io::Error),
+}
+
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Self::Bincode(e)
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(_: TryFromIntError) -> Self {
+        Self::ConstraintViolation
+    }
+}
+
+impl From<aead::Error> for Error {
+    fn from(_: aead::Error) -> Self {
+        Self::Symmetric
+    }
+}
+
+impl From<TryFromSliceError> for Error {
+    fn from(_: TryFromSliceError) -> Self {
+        Self::ConstraintViolation
+    }
+}
+
+impl From<aes_gcm::aes::cipher::InvalidLength> for Error {
+    fn from(_: aes_gcm::aes::cipher::InvalidLength) -> Self {
+        Error::Symmetric
+    }
 }
 
 impl core::fmt::Display for Error {
@@ -62,12 +92,11 @@ impl core::fmt::Display for Error {
             Self::IncorrectSchemeVersion => write!(f, "incorrect scheme version"),
             Self::ConstraintViolation => write!(f, "constraint violation"),
             Self::Symmetric => write!(f, "symmetric encryption operation error"),
-            Self::KeyError => write!(f, "error importing the key"),
             Self::AlgorithmNotSupported(a) => write!(f, "algorithm is not supported: {a:?}"),
             Self::ModeNotSupported(m) => write!(f, "mode is not supported: {m:?}"),
             Self::KEM => write!(f, "KEM error"),
             Self::IncorrectSignature => write!(f, "incorrect signature"),
-            #[cfg(any(feature = "rust_stream", feature = "web_stream"))]
+            #[cfg(any(feature = "stream", target_arch = "wasm32"))]
             Self::FuturesIO(e) => write!(f, "futures IO error: {e}"),
         }
     }

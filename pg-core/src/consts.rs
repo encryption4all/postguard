@@ -36,6 +36,9 @@ pub const HEADER_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 /// The size of the signature size.
 pub const SIG_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 
+/// The size of the signature size.
+pub const POL_SIZE_SIZE: usize = core::mem::size_of::<u32>();
+
 /// The maximum size of the header (4 MiB).
 pub const MAX_HEADER_SIZE: usize = 1024 * 1024 * 4;
 

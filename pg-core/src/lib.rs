@@ -33,66 +33,26 @@
 //! as described in  the paper [Online Authenticated-Encryption and its Nonce-Reuse
 //! Misuse-Resistance][1].
 //!
-//! ### Wire format
-//!
-//! The wire format consists of the following segments, followed by their length in bytes:
-//!
-//! ```text
-//!                  PREAMBLE (10)                ||
-//! = PRELUDE (4) || VERSION (2) || HEADER LEN (4)
-//!
-//!                  HEADER (*)                   ||
-//! = HEADER (*) || HEADER SIG LEN (4) || HEADER SIG (*)
-//!
-//!                  PAYLOAD  (*)                 ||
-//! = DEM.Enc(M (*) || STREAM SIG (*) || STREAM SIG LEN (4))
-//! ```
+//! [1]: https://eprint.iacr.org/2015/189.pdf
 //!
 //! ## Symmetric Crypto Backends
 //!
-//! This library offers two symmetric cryptography providers, as listed below.
-//!
-//! ### Rust Crypto
-//!
-//! This module utilizes the symmetric primitives provided by [`Rust
-//! Crypto`](https://github.com/RustCrypto). The streaming interface, enabled using the feature
-//! `"rust_stream"` is a small wrapper around [`aead::stream`]. This feature enables an interface
-//! to encrypt data using asynchronous byte streams, specifically from an
-//! [AsyncRead][`futures::io::AsyncRead`] into an [AsyncWrite][`futures::io::AsyncWrite`].
-//!
-//! ### Web Crypto
-//!
-//! This module utilizes the symmetric primitives provided by [Web
-//! Crypto](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API). The streaming
-//! interface, enabled using the feature `"web_stream"` enables an interface to encrypt data from a
-//! [`Stream<Item = Result<Uint8Array, JsValue>>`][`futures::stream::Stream`] into a
-//! [`Sink<Uint8Array, Error = JsValue>`][`futures::sink::Sink`]. These can easily interact with
-//! [Web Streams](https://developer.mozilla.org/en-US/docs/Web/API/Streams_API) using the
-//! [wasm-streams](https://docs.rs/wasm-streams/latest/wasm_streams/index.html) crate.
-//!
-//! This module is only available on the `target_arch = "wasm32-unknown-unknown"` and the output
-//! _should_ be used in browser environments. This also greatly reduces the bundle size.
-//!
-//! This module can largely be simplified when [the AEAD crate][`aead`] will support async, see
-//! [the relevant issue](https://github.com/RustCrypto/traits/issues/304).
-//!
-//! [1]: https://eprint.iacr.org/2015/189.pdf
+//! This library offers two symmetric cryptography providers, Rust Crypto and Web Crypto.
+//! The backend is automatically chosen based on the target architecture.
 //!
 //! ## Streaming vs In-memory
 //!
-//! For large or arbitrary sized data streams, enable either the `rust_stream` or `web_stream`
-//! feature. In this mode, during decryption, each segment of the payload is seperately
-//! authenticated, this makes the data safe for downstream consumers before the stream has been
-//! exhausted. Note that it is up to the developer to choose which is suitable for their
-//! application. Only use the in-memory variant if you are absolutely sure that you are
-//! _exclusively_ encrypting small messages.
+//! For large or arbitrary sized data streams, enable `stream` feature. In this mode, during
+//! decryption, each segment of the payload is seperately authenticated, this makes the data safe
+//! for downstream consumers before the stream has been exhausted. Note that it is up to the
+//! developer to choose which is suitable for their application. Only use the in-memory variant if
+//! you are absolutely sure that you are _exclusively_ encrypting small messages.
 //!
 //! ## Examples
 //!
 //! ### Setting up the encryption parameters
 //!
-//! The public key should be retrieved from the Private Key Generator (PKG).
-//! The encryption policy can be initialized as follows:
+//! The public key and user secret keys for encryption can be retrieved from the Private Key Generator (PKG).
 //!
 //! ```
 //! use std::time::SystemTime;
@@ -103,8 +63,8 @@
 //!     .unwrap()
 //!     .as_secs();
 //!
-//! let id1 = String::from("j.doe@example.com");
-//! let id2 = String::from("john.doe@example.com");
+//! let id1 = String::from("Alice");
+//! let id2 = String::from("Bob");
 //!
 //! let p1 = Policy {
 //!     timestamp,
@@ -117,8 +77,8 @@
 //! let p2 = Policy {
 //!     timestamp,
 //!     con: vec![
-//!         Attribute::new("pbdf.gemeente.personalData.name", Some("john")),
-//!         Attribute::new("pbdf.sidn-pbdf.email.email", Some("john.doe@example.com")),
+//!         Attribute::new("pbdf.gemeente.personalData.name", Some("Bob")),
+//!         Attribute::new("pbdf.sidn-pbdf.email.email", Some("bob@example.com")),
 //!     ],
 //! };
 //!
@@ -130,47 +90,47 @@
 //! recipients are only able to decrypt if they are able to prove the that they own the attributes
 //! specified in the `con` field.
 //!
-//! ### Seal a slice using the Rust Crypto backend
+//! ### Seal a slice using the Rust Crypto backend.
 //!
 //! ```
-//! use pg_core::client::{PostGuardPacket, Sealer, Unsealer};
-//! use pg_core::client::rust::{SealerMemoryConfig, UnsealerMemoryConfig};
-//! use pg_core::test::TestSetup;
+//! use pg_core::client::{Sealer, Unsealer};
+//! # use pg_core::test::TestSetup;
 //! # use pg_core::error::Error;
 //!
 //! # fn main() -> Result<(), Error> {
 //! let mut rng = rand::thread_rng();
-//! let setup = TestSetup::new(&mut rng);
+//! # let TestSetup {
+//! #     mpk,
+//! #     ibs_pk,
+//! #     policies,
+//! #     usks,
+//! #     signing_keys,
+//! #     ..
+//! # } = TestSetup::new(&mut rng);
+//! # let signing_key = signing_keys.get("Alice").unwrap();
+//! # let id = "Bob";
+//! # let usk = usks.get("Bob").unwrap();
 //!
-//! // Encryption & serialization.
+//! // Retrieve public keys, usks, policies, etc.
+//!
 //! let input = b"SECRET DATA";
-//!
-//! // Specifying the configuration is only required when there
-//! // are multiple options in scope.
-//! let packet: PostGuardPacket =
-//!     Sealer::<SealerMemoryConfig>::new(&setup.mpk, &setup.policy, &mut rng)?.seal(input)?;
-//! let out_bin = packet.into_bytes()?;
-//!
-//! println!("out: {:?}", &out_bin);
-//!
-//! // Deserialization & decryption.
-//! let packet2 = PostGuardPacket::from_bytes(&out_bin)?;
-//! let id = "john.doe@example.com";
-//! let usk = &setup.usks[id];
-//! let original = Unsealer::<_, UnsealerMemoryConfig>::new(packet2).unseal(id, usk)?;
-//!
+//! let sealed = Sealer::new(&mpk, &policies, &signing_key, &mut rng)?
+//!     .seal(input)?;
+//!                                                                                             
+//! let (original, verified_sender_policy) = Unsealer::new(sealed, &ibs_pk)?
+//!     .unseal(id, &usk)?;
+//!                                                                                                
 //! assert_eq!(&input.to_vec(), &original);
-//!
+//! assert_eq!(&verified_sender_policy, policies.get("Alice").unwrap());
 //! # Ok(())
 //! # }
 //! ```
 #![cfg_attr(
-    feature = "rust_stream",
+    feature = "stream",
     doc = r##"
  ### Seal a bytestream using the Rust Crypto backend
 
  ```
- use pg_core::client::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
  use pg_core::client::{Sealer, Unsealer};
  use pg_core::test::TestSetup;
  use futures::io::Cursor;
@@ -184,14 +144,14 @@
  let mut input = Cursor::new(b"SECRET DATA");
  let mut sealed = Vec::new();
                                                                          
- Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+ Sealer::new(&setup.mpk, &setup.policy, &mut rng)?
      .seal(&mut input, &mut sealed)
      .await?;
                                                                          
  let mut original = Vec::new();
  let id = "john.doe@example.com";
  let usk = &setup.usks[id];
- Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(sealed))
+ Unsealer::new(&mut Cursor::new(sealed))
      .await?
      .unseal(id, usk, &mut original)
      .await?;
@@ -207,10 +167,26 @@
 //!
 //! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
 //! Yew/Dioxus/Leptos).
+//!
+//! ### Wire format
+//!
+//! The wire format consists of the following segments, followed by their length in bytes:
+//!
+//! ```text
+//!                  PREAMBLE (10)
+//! = PRELUDE (4) || VERSION (2) || HEADER LEN (4)
+//!
+//!                  HEADER (*)
+//! = HEADER (*) || HEADER SIG LEN (4) || HEADER SIG (*)
+//!
+//!                  PAYLOAD  (*)
+//! = DEM.Enc(M (*) || STREAM SIG (*) || STREAM SIG LEN (4))
+//! ```
 
 #[cfg(test)]
 extern crate std;
 
+// We depend on alloc for String, Vec and BTreeMap/HashMap.
 #[macro_use]
 extern crate alloc;
 
@@ -220,7 +196,7 @@ pub mod consts;
 pub mod error;
 pub mod identity;
 
-#[cfg(any(feature = "rust", feature = "web"))]
+// TODO: maybe introduce this feature if it actually uses a lot less dependencies.
 pub mod client;
 
 #[doc(hidden)]

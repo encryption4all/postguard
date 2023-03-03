@@ -1,15 +1,18 @@
 //! Streaming mode.
 
+use alloc::string::ToString;
+
 use crate::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::EncryptionPolicy;
+use crate::identity::{EncryptionPolicy, Policy};
 use ibe::kem::cgw_kv::CGWKV;
 use ibs::gg::{Identity, Signature, Signer, Verifier, IDENTITY_BYTES, SIG_BYTES};
 
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use aead::KeyInit;
 use aes_gcm::Aes128Gcm;
+use alloc::vec::Vec;
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::TryFutureExt;
@@ -37,13 +40,19 @@ impl UnsealerConfig for UnsealerStreamConfig {}
 impl crate::client::sealed::SealerConfig for SealerStreamConfig {}
 impl crate::client::sealed::UnsealerConfig for UnsealerStreamConfig {}
 
-impl Sealer<SealerStreamConfig> {
+impl From<futures::io::Error> for Error {
+    fn from(e: futures::io::Error) -> Self {
+        Error::FuturesIO(e)
+    }
+}
+
+impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
     /// Construct a new [`Sealer`] that can process streaming payloads.
-    pub fn new<Rng: RngCore + CryptoRng>(
+    pub fn new(
         pk: &PublicKey<CGWKV>,
         policies: &EncryptionPolicy,
         pub_sign_key: &SigningKeyExt,
-        rng: &mut Rng,
+        rng: &'r mut Rng,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(pk, policies, rng)?;
 
@@ -57,6 +66,7 @@ impl Sealer<SealerStreamConfig> {
         nonce.copy_from_slice(&iv.0[..STREAM_NONCE_SIZE]);
 
         Ok(Sealer {
+            rng,
             header,
             pub_sign_key: pub_sign_key.clone(),
             priv_sign_key: None,
@@ -81,55 +91,52 @@ impl Sealer<SealerStreamConfig> {
     }
 
     /// Seals payload data from an [`AsyncRead`] into an [`AsyncWrite`].
-    pub async fn seal<R, W, RNG>(self, mut r: R, mut w: W, rng: &mut RNG) -> Result<(), Error>
+    pub async fn seal<R, W>(self, mut r: R, mut w: W) -> Result<(), Error>
     where
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
-        RNG: RngCore + CryptoRng,
     {
         w.write_all(&PRELUDE).await?;
-        w.write_all(&VERSION_V2.to_be_bytes()).await?;
+        w.write_all(&VERSION_V3.to_be_bytes()).await?;
+        let header_vec = self.header.into_bytes()?;
 
-        let mut header_vec = Vec::with_capacity(MAX_HEADER_SIZE);
-        self.header.into_bytes(&mut header_vec)?;
-
-        w.write_all(
-            &u32::try_from(header_vec.len())
-                .map_err(|_e| Error::ConstraintViolation)?
-                .to_be_bytes(),
-        )
-        .await?;
+        w.write_all(&u32::try_from(header_vec.len())?.to_be_bytes())
+            .await?;
 
         w.write_all(&header_vec[..]).await?;
 
-        // Sign the header using the public signing key.
-        let header_signer = Signer::default().chain(&header_vec);
-
-        // Signs the header and message.
-        let mut signer = header_signer.clone();
-        let header_sig = header_signer.sign(&self.pub_sign_key.key.0, rng);
+        let mut signer = Signer::default().chain(&header_vec);
+        let header_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
         let header_sig_ext = SignatureExt {
             sig: header_sig,
             pol: self.pub_sign_key.policy.clone(),
         };
+        let header_sig_bytes = bincode::serialize(&header_sig_ext)?;
 
-        let header_sig_bytes =
-            bincode::serialize(&header_sig_ext).map_err(|e| Error::Bincode(e))?;
-
-        w.write_all(&u32::try_from(header_sig_bytes.len()).unwrap().to_be_bytes())
+        w.write_all(&u32::try_from(header_sig_bytes.len())?.to_be_bytes())
             .await?;
         w.write_all(&header_sig_bytes).await?;
 
-        let aead = Aes128Gcm::new_from_slice(&self.config.key).map_err(|_e| Error::KeyError)?;
+        let aead = Aes128Gcm::new_from_slice(&self.config.key)?;
         let mut enc = EncryptorBE32::from_aead(aead, &self.config.nonce.into());
 
         // Check for a private signing key, otherwise fall back to the public one.
         let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
-        let mut buf = vec![0; self.config.segment_size as usize];
-        let mut buf_tail: usize = 0;
+        let policy_bytes = bincode::serialize(&signing_key.policy)?;
+        let policy_len = policy_bytes.len();
 
-        buf.reserve(TAG_SIZE);
+        if policy_len + POL_SIZE_SIZE > self.config.segment_size as usize {
+            return Err(Error::ConstraintViolation);
+        }
+
+        let mut buf = vec![0; self.config.segment_size as usize + TAG_SIZE + SIG_BYTES];
+
+        buf[..POL_SIZE_SIZE].copy_from_slice(&u32::try_from(policy_len)?.to_be_bytes());
+        buf[POL_SIZE_SIZE..POL_SIZE_SIZE + policy_len].copy_from_slice(&policy_bytes);
+
+        let mut buf_tail = POL_SIZE_SIZE + policy_len;
+        let mut segment_idx = 0;
 
         loop {
             let read = r
@@ -139,31 +146,36 @@ impl Sealer<SealerStreamConfig> {
 
             if buf_tail == self.config.segment_size as usize {
                 buf.truncate(buf_tail);
-                signer.update(&buf);
-                enc.encrypt_next_in_place(b"", &mut buf)
-                    .map_err(|_e| Error::Symmetric)?;
-                w.write_all(&buf[..]).await?;
+
+                let start = if segment_idx == 0 { 4 + policy_len } else { 0 };
+                signer.update(&buf[start..]);
+
+                let segment_sig = signer.clone().sign(&signing_key.key.0, self.rng);
+                let segment_sig_bytes = bincode::serialize(&segment_sig)?;
+                buf.extend_from_slice(&segment_sig_bytes);
+
+                enc.encrypt_next_in_place(b"", &mut buf)?;
+
+                w.write_all(&buf).await?;
+
                 buf_tail = 0;
+                segment_idx += 1;
             } else if read == 0 {
                 buf.truncate(buf_tail);
-                signer.update(&buf);
-                enc.encrypt_last_in_place(b"", &mut buf)
-                    .map_err(|_e| Error::Symmetric)?;
-                w.write_all(&buf[..]).await?;
+
+                let start = if segment_idx == 0 { 4 + policy_len } else { 0 };
+                signer.update(&buf[start..]);
+
+                let complete_sig = signer.sign(&signing_key.key.0, self.rng);
+                let complete_sig_bytes = bincode::serialize(&complete_sig)?;
+                buf.extend_from_slice(&complete_sig_bytes);
+
+                enc.encrypt_last_in_place(b"", &mut buf)?;
+
+                w.write_all(&buf).await?;
                 break;
             }
         }
-
-        // FIXME: dont write this unencrypted
-        let sig_ext = SignatureExt {
-            sig: signer.sign(&signing_key.key.0, rng),
-            pol: signing_key.policy,
-        };
-        let sign_bytes = bincode::serialize(&sig_ext).unwrap();
-
-        w.write_all(&sign_bytes).await?;
-        w.write_all(&u32::try_from(sign_bytes.len()).unwrap().to_be_bytes())
-            .await;
 
         w.flush().await?;
         w.close().await?;
@@ -186,8 +198,6 @@ where
             .await?;
 
         let (version, header_len) = preamble_checked(&preamble)?;
-
-        //
         let mut header_raw = Vec::with_capacity(header_len);
 
         // Limit reader to not read past header
@@ -210,12 +220,14 @@ where
 
         r.read_to_end(&mut header_sig_raw).await?;
 
-        let header_sig: SignatureExt = bincode::deserialize(&header_sig_raw).unwrap();
+        let header_sig: SignatureExt = bincode::deserialize(&header_sig_raw)?;
 
-        let header_verifier = Verifier::default().chain(&header_raw);
-        let verifier = header_verifier.clone();
-        let id = Identity::from(header_sig.pol.derive::<IDENTITY_BYTES>().unwrap());
-        header_verifier.verify(&pk.0, &header_sig.sig, &id);
+        let verifier = Verifier::default().chain(&header_raw);
+        let pub_id = Identity::from(header_sig.pol.derive::<IDENTITY_BYTES>()?);
+
+        if !verifier.clone().verify(&pk.0, &header_sig.sig, &pub_id) {
+            return Err(Error::IncorrectSignature);
+        }
 
         let header = Header::from_bytes(&*header_raw)?;
         let (segment_size, _) = stream_mode_checked(&header)?;
@@ -226,6 +238,7 @@ where
             config: UnsealerStreamConfig { segment_size },
             r: r.into_inner(), // This (new) reader is locked to the payload.
             verifier,
+            vk: pk.clone(),
         })
     }
 
@@ -235,7 +248,7 @@ where
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
-    ) -> Result<(), Error> {
+    ) -> Result<Policy, Error> {
         let rec_info = self
             .header
             .policies
@@ -244,40 +257,94 @@ where
 
         let ss = rec_info.decaps(usk)?;
         let key = &ss.0[..KEY_SIZE];
-        let aead = Aes128Gcm::new_from_slice(key).map_err(|_e| Error::KeyError)?;
+        let aead = Aes128Gcm::new_from_slice(key)?;
 
         let Algorithm::Aes128Gcm(iv) = self.header.algo;
         let nonce = &iv.0[..STREAM_NONCE_SIZE];
 
         let mut dec = DecryptorBE32::from_aead(aead, nonce.into());
 
-        let bufsize: usize = self.config.segment_size as usize + TAG_SIZE;
+        let bufsize: usize = self.config.segment_size as usize + SIG_BYTES + TAG_SIZE;
         let mut buf = vec![0u8; bufsize];
         let mut buf_tail = 0;
+        let mut segment_idx = 0;
+        let mut pol_id: Option<(Policy, Identity)> = None;
+
+        fn extract_policy(buf: &mut Vec<u8>) -> Result<Option<(Policy, Identity)>, Error> {
+            let pol_len = u32::from_be_bytes(buf[..POL_SIZE_SIZE].try_into()?) as usize;
+            let pol_bytes = &buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len];
+            let pol: Policy = bincode::deserialize(pol_bytes)?;
+            let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
+
+            buf.drain(..POL_SIZE_SIZE + pol_len);
+
+            Ok(Some((pol, id)))
+        }
+
+        fn verify_segment<'a>(
+            seg: &'a [u8],
+            verifier: &mut Verifier,
+            vk: &VerifyingKey,
+            id: &Identity,
+        ) -> Result<&'a [u8], Error> {
+            let (m, sig_bytes) = seg.split_at(seg.len() - SIG_BYTES);
+            let sig: Signature = bincode::deserialize(sig_bytes)?;
+            verifier.update(m);
+
+            if !verifier.clone().verify(&vk.0, &sig, id) {
+                return Err(Error::IncorrectSignature);
+            }
+
+            Ok(m)
+        }
 
         loop {
             let read = self.r.read(&mut buf[buf_tail..bufsize]).await?;
             buf_tail += read;
 
             if buf_tail == bufsize {
-                dec.decrypt_next_in_place(b"", &mut buf)
-                    .map_err(|_e| Error::Symmetric)?;
-                w.write_all(&buf[..]).await?;
+                dec.decrypt_next_in_place(b"", &mut buf)?;
+
+                if segment_idx == 0 {
+                    pol_id = extract_policy(&mut buf)?;
+                }
+
+                let m = verify_segment(
+                    &buf,
+                    &mut self.verifier,
+                    &self.vk,
+                    &pol_id.as_ref().unwrap().1,
+                )?;
+
+                w.write_all(m).await?;
 
                 buf_tail = 0;
                 buf.resize(bufsize, 0);
+                segment_idx += 1;
             } else if read == 0 {
                 buf.truncate(buf_tail);
-                dec.decrypt_last_in_place(b"", &mut buf)
-                    .map_err(|_e| Error::Symmetric)?;
-                w.write_all(&buf[..]).await?;
+                dec.decrypt_last_in_place(b"", &mut buf)?;
+
+                if segment_idx == 0 {
+                    pol_id = extract_policy(&mut buf)?;
+                }
+
+                let m = verify_segment(
+                    &buf,
+                    &mut self.verifier,
+                    &self.vk,
+                    &pol_id.as_ref().unwrap().1,
+                )?;
+
+                w.write_all(m).await?;
+
                 break;
             }
         }
 
         w.close().await?;
 
-        Ok(())
+        Ok(pol_id.unwrap().0)
     }
 }
 
@@ -286,7 +353,9 @@ mod tests {
     use super::{Sealer, SealerStreamConfig, Unsealer, UnsealerStreamConfig};
     use crate::error::Error;
     use crate::test::TestSetup;
-    use crate::{SYMMETRIC_CRYPTO_DEFAULT_CHUNK, TAG_SIZE};
+    use crate::{PREAMBLE_SIZE, SYMMETRIC_CRYPTO_DEFAULT_CHUNK, TAG_SIZE};
+    use alloc::string::String;
+    use alloc::vec::Vec;
     use futures::{executor::block_on, io::AllowStdIo};
     use rand::RngCore;
     use std::io::Cursor;
@@ -309,12 +378,19 @@ mod tests {
         let mut input = AllowStdIo::new(Cursor::new(plain));
         let mut output = AllowStdIo::new(Vec::new());
 
+        let signing_key = setup.signing_keys.get("Alice").unwrap();
+
         block_on(async {
-            Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)
-                .unwrap()
-                .seal(&mut input, &mut output)
-                .await
-                .unwrap();
+            Sealer::<_, SealerStreamConfig>::new(
+                &setup.mpk,
+                &setup.policies,
+                signing_key,
+                &mut rng,
+            )
+            .unwrap()
+            .seal(&mut input, &mut output)
+            .await
+            .unwrap();
         });
 
         output.into_inner()
@@ -324,12 +400,12 @@ mod tests {
         let mut input = AllowStdIo::new(Cursor::new(ct));
         let mut output = AllowStdIo::new(Vec::new());
 
-        let ids: Vec<String> = setup.policy.keys().cloned().collect();
+        let ids: Vec<String> = setup.policies.keys().cloned().collect();
         let id = &ids[recipient_idx];
         let usk_id = setup.usks.get(id).unwrap();
 
         block_on(async {
-            let mut unsealer = Unsealer::<_, UnsealerStreamConfig>::new(&mut input)
+            let unsealer = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk)
                 .await
                 .unwrap();
 
@@ -366,7 +442,23 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_corrupt_body() {
+    fn test_corrupt_header() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let plain = rand_vec(100);
+        let mut ct = seal_helper(&setup, &plain);
+
+        // Flip a byte that is guaranteed to be in the header.
+        ct[PREAMBLE_SIZE + 2] = !ct[PREAMBLE_SIZE + 2];
+
+        // This should panic, because of the header signature.
+        let _plain2 = unseal_helper(&setup, &ct, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_corrupt_payload() {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
@@ -377,7 +469,7 @@ mod tests {
         let ct_len = ct.len();
         ct[ct_len - TAG_SIZE - 5] = !ct[ct_len - TAG_SIZE - 5];
 
-        // This should panic.
+        // This should panic, because of the AEAD.
         let _plain2 = unseal_helper(&setup, &ct, 1);
     }
 
@@ -406,6 +498,8 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
+        let signing_key = setup.signing_keys.get("Alice").unwrap();
+
         let in_name = std::env::temp_dir().join("foo.txt");
         let out_name = std::env::temp_dir().join("foo.enc");
         let orig_name = std::env::temp_dir().join("foo2.txt");
@@ -430,7 +524,7 @@ mod tests {
             .await?
             .compat();
 
-        Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+        Sealer::<_, SealerStreamConfig>::new(&setup.mpk, &setup.policies, signing_key, &mut rng)?
             .seal(&mut in_file, &mut out_file)
             .await?;
 
@@ -446,9 +540,9 @@ mod tests {
             .await?
             .compat();
 
-        let id = "john.doe@example.com";
+        let id = "Bob";
         let usk = &setup.usks[id];
-        Unsealer::<_, UnsealerStreamConfig>::new(&mut out_file)
+        Unsealer::<_, UnsealerStreamConfig>::new(&mut out_file, &setup.ibs_pk)
             .await?
             .unseal(id, usk, &mut orig_file)
             .await?;
@@ -474,17 +568,19 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
+        let signing_key = setup.signing_keys.get("Alice").unwrap();
+
         let mut input = Cursor::new(b"SECRET DATA");
         let mut encrypted = Vec::new();
 
-        Sealer::<SealerStreamConfig>::new(&setup.mpk, &setup.policy, &mut rng)?
+        Sealer::<_, SealerStreamConfig>::new(&setup.mpk, &setup.policies, signing_key, &mut rng)?
             .seal(&mut input, &mut encrypted)
             .await?;
 
         let mut original = Vec::new();
-        let id = "john.doe@example.com";
+        let id = "Bob";
         let usk = &setup.usks[id];
-        Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(encrypted))
+        Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(encrypted), &setup.ibs_pk)
             .await?
             .unseal(id, usk, &mut original)
             .await?;

@@ -1,32 +1,35 @@
-//! PostGuard client functionality.
+//! PostGuard client API.
 //!
 //! Used for:
 //! - Encrypting, signing, packing metadata (*sealing*),
 //! - Decrypting, verifying, unpacking metdata (*unsealing*).
 
 mod header;
-pub use header::{Algorithm, Header, Mode, RecipientHeader};
-use ibs::gg::Verifier;
 
-#[cfg(feature = "rust")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rust")))]
+pub use header::{Algorithm, Header, Mode, RecipientHeader};
+
+#[cfg(any(not(target_arch = "wasm32"), all(target_arch = "wasm32", test)))]
 pub mod rust;
 
-#[cfg(feature = "web")]
-#[cfg_attr(docsrs, doc(cfg(feature = "web")))]
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(docsrs, doc(cfg(target_arch = "wasm32")))]
 pub mod web;
 
 use crate::artifacts::VerifyingKey;
 use crate::util::*;
 use crate::{artifacts::SigningKeyExt, consts::*};
 use header::SignatureExt;
+use ibs::gg::Verifier;
 use serde::{Deserialize, Serialize};
 
 /// A Sealer is used to encrypt and sign data using PostGuard.
 #[derive(Debug)]
-pub struct Sealer<C: SealerConfig> {
+pub struct Sealer<'r, R, C> {
     // The prebuilt header.
     header: Header,
+
+    // An exclusive reference to a random number generator.
+    rng: &'r mut R,
 
     // The flavor-specific configuration.
     config: C,
@@ -40,7 +43,7 @@ pub struct Sealer<C: SealerConfig> {
     priv_sign_key: Option<SigningKeyExt>,
 }
 
-impl<C: SealerConfig> Sealer<C> {
+impl<'r, R, C> Sealer<'r, R, C> {
     /// Add a private signing key and policy.
     ///
     /// This policy is safe to include private data as it is encrypted after signing.
@@ -95,80 +98,10 @@ pub(crate) mod sealed {
     pub trait SealerConfig {}
 }
 
-///// A PostGuard in-memory sealed packet.
-//#[derive(Serialize, Deserialize, Debug, Clone)]
-//pub struct PostGuardPacket {
-//    /// The version of the header.
-//    pub version: u16,
-//
-//    /// The header of the PostGuard packet.
-//    pub header: Header,
-//
-//    /// The header signature.
-//    pub header_sig: SignatureExt,
-//
-//    /// The symmetric ciphertext.
-//    pub ciphertext: Vec<u8>,
-//}
-
-//impl PostGuardPacket {
-//    /// Serialize to a JSON string.
-//    pub fn into_json(self) -> Result<String, Error> {
-//        serde_json::to_string(&self).map_err(Error::Json)
-//    }
-//
-//    /// Deserialize from a JSON string.
-//    pub fn from_json(s: &str) -> Result<Self, Error> {
-//        serde_json::from_str(s).map_err(Error::Json)
-//    }
-//
-//    /// Serialize to binary format.
-//    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
-//        let mut header_buf = Vec::new();
-//        self.header.into_bytes(&mut header_buf)?;
-//
-//        let mut out = Vec::new();
-//        out.extend_from_slice(&PRELUDE);
-//        out.extend_from_slice(&self.version.to_be_bytes());
-//        out.extend_from_slice(
-//            &u32::try_from(header_buf.len())
-//                .map_err(|_| Error::ConstraintViolation)?
-//                .to_be_bytes(),
-//        );
-//        out.extend_from_slice(&header_buf);
-//        out.extend_from_slice(&self.ciphertext);
-//
-//        Ok(out)
-//    }
-//
-//    /// Deserialize from binary format.
-//    pub fn from_bytes(b: impl AsRef<[u8]>) -> Result<Self, Error> {
-//        let b = b.as_ref();
-//
-//        let (version, header_len) = preamble_checked(&b[..PREAMBLE_SIZE])?;
-//
-//        let len = b.len();
-//        let header_bytes = &b[PREAMBLE_SIZE..PREAMBLE_SIZE + header_len];
-//        let header = Header::from_bytes(header_bytes)?;
-//
-//        let payload_len = match header.mode {
-//            Mode::InMemory { size } => size,
-//            _ => return Err(Error::ModeNotSupported(header.mode)),
-//        };
-//
-//        let ct_len = payload_len as usize + TAG_SIZE;
-//        let ciphertext = b[len - ct_len..].to_vec();
-//
-//        Ok(PostGuardPacket {
-//            version,
-//            header,
-//            ciphertext,
-//        })
-//    }
-//}
-
-#[cfg(any(feature = "rust_stream", feature = "web_stream"))]
-pub(self) fn stream_mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), Error> {
+#[cfg(feature = "stream")]
+pub(self) fn stream_mode_checked(
+    h: &Header,
+) -> Result<(u32, (u64, Option<u64>)), crate::error::Error> {
     let (segment_size, size_hint) = match h {
         Header {
             mode:
@@ -178,11 +111,11 @@ pub(self) fn stream_mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>))
                 },
             ..
         } => (segment_size, size_hint),
-        _ => return Err(Error::ModeNotSupported(h.mode)),
+        _ => return Err(crate::error::Error::ModeNotSupported(h.mode)),
     };
 
     if *segment_size > MAX_SYMMETRIC_CHUNK_SIZE {
-        return Err(Error::ConstraintViolation);
+        return Err(crate::error::Error::ConstraintViolation);
     }
 
     Ok((*segment_size, *size_hint))

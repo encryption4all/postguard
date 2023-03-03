@@ -10,7 +10,7 @@ name = "pg-cli"
 version = "0.3.0-rc.0"
 
 [dependencies]
-pg-core = { path = "../pg-core", features = ["rust", "rust_stream"] }
+pg-core = { path = "../pg-core", features = ["stream"] }
 futures = "0.3.4"
 rand = "0.8.4"
 arrayvec = { version = "0.7.1", features = ["serde"] }

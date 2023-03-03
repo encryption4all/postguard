@@ -13,9 +13,9 @@ homepage = "https://github.com/encryption4all/postguard/tree/main/pg-core"
 categories = ["cryptography"]
 
 [dependencies]
-irma = "0.2.1"
-ibe = { version = "0.2.3", features = ["cgwkv", "mkem"] }
+ibe = { path = "./../../ibe", features = ["cgwkv", "mkem"] }
 ibs = { path = "./../../ibs" }
+irma = "0.2.1"
 rand = { version = "0.8", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -28,22 +28,23 @@ bincode = "1.3.3"
 futures = { version = "0.3", optional = true }
 
 # For the Rust Crypto backend.
-aead = { version = "0.5", features = ["stream", "alloc"], optional = true }
-aes-gcm = { version = "0.10", optional = true }
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+aead = { version = "0.5", features = ["stream", "alloc"] }
+aes-gcm = { version = "0.10" }
 
-# For the Web Crypto backend ("web" feature).
-getrandom = { version = "0.2", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
-js-sys = { version = "0.3", optional = true }
-cipher = { version = "0.3", optional = true }
-wasm-bindgen-futures = { version = "0.4", optional = true }
-serde-wasm-bindgen = { version = "0.4", optional = true }
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+wasm-bindgen = { version = "0.2" }
+js-sys = { version = "0.3" }
+cipher = { version = "0.3" }
+wasm-bindgen-futures = { version = "0.4" }
+serde-wasm-bindgen = { version = "0.4" }
 web-sys = { version = "0.3", features = [
   "SubtleCrypto",
   "AesGcmParams",
   "Crypto",
   "CryptoKey",
-], optional = true }
+] }
 
 [dev-dependencies]
 tokio = { version = "1.24.2", features = ["full"] }
@@ -55,11 +56,8 @@ futures = { version = "0.3", features = ["io-compat"]}
 futures-util = "0.3.25"
 
 [features]
-default = ["rust"]
-rust = ["aead", "aes-gcm"]
-rust_stream = ["futures", "aead/stream", "aes-gcm"]
-web = ["getrandom/js", "wasm-bindgen", "js-sys", "futures", "wasm-bindgen-futures", "web-sys/SubtleCrypto", "web-sys/AesGcmParams", "web-sys/Crypto", "web-sys/CryptoKey"]
-web_stream = []
+default = []
+stream = ["futures"]
 
 [[bench]]
 name = "main"

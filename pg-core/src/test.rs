@@ -81,7 +81,7 @@ impl TestSetup {
 
         TestSetup {
             mpk: ibe_pk,
-            policies: policies,
+            policies,
             usks,
             ibs_pk,
             signing_keys,
