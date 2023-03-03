@@ -1,12 +1,9 @@
-use pg_core::artifacts::PublicKey;
 use pg_core::client::rust::stream::SealerStreamConfig;
-use pg_core::identity::{Attribute, Policy, RecipientPolicy};
-use pg_core::Sealer;
+use pg_core::client::Sealer;
 
 use futures::executor::block_on;
 use futures::io::AllowStdIo;
-use ibe::kem::cgw_kv::CGWKV;
-use ibe::kem::IBKEM;
+use pg_core::test::TestSetup;
 use rand::{CryptoRng, RngCore};
 use std::io::Cursor;
 
@@ -14,23 +11,15 @@ use criterion::*;
 
 // Keep in mind that for small payloads the cost of IBE will outweigh the cost of symmetric
 // encryption. Also, large conjunctions will also take longer to derive an identity from.
-fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], mpk: &PublicKey<CGWKV>, rng: &mut Rng) {
+fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], rng: &mut Rng) {
     let mut input = AllowStdIo::new(Cursor::new(plain));
     let mut output = futures::io::sink();
 
-    let policies = Policy::from([(
-        String::from("test id"),
-        RecipientPolicy {
-            timestamp: 0,
-            con: vec![Attribute {
-                atype: "test type".to_owned(),
-                value: Some("test value".to_owned()),
-            }],
-        },
-    )]);
+    let setup = TestSetup::new(rng);
+    let signing_key = setup.signing_keys.get("Alice").unwrap();
 
     block_on(async {
-        Sealer::<SealerStreamConfig>::new(mpk, &policies, rng)
+        Sealer::<_, SealerStreamConfig>::new(&setup.mpk, &setup.policies, signing_key, rng)
             .unwrap()
             .seal(&mut input, &mut output)
             .await
@@ -45,9 +34,6 @@ fn rand_vec(length: usize) -> Vec<u8> {
 fn bench(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
 
-    let (tmpk, _) = ibe::kem::cgw_kv::CGWKV::setup(&mut rng);
-    let mpk = PublicKey::<CGWKV>(tmpk);
-
     let mut group = c.benchmark_group("throughput-seal");
     group.sample_size(10);
 
@@ -55,7 +41,7 @@ fn bench(c: &mut Criterion) {
         let input = rand_vec(1 << blen);
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_function(format!("seal {} KiB", input.len() / 1024), |b| {
-            b.iter(|| bench_seal(&input, &mpk, &mut rng))
+            b.iter(|| bench_seal(&input, &mut rng))
         });
     }
 
