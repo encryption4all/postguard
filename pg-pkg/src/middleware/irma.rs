@@ -129,38 +129,34 @@ where
             };
 
             // Validate the session result. Purge attributes that were not present.
-            let validated: Option<Vec<Attribute>> = match session_result {
+            let validated: Vec<Attribute> = match session_result {
                 SessionResult {
                     status: SessionStatus::Done,
                     proof_status: Some(ProofStatus::Valid),
                     sessiontype: SessionType::Disclosing,
                     ref disclosed,
                     ..
-                } => Some(
-                    disclosed
-                        .iter()
-                        .flatten()
-                        .filter_map(|att| match att {
-                            DisclosedAttribute {
-                                raw_value: val,
-                                identifier,
-                                status: AttributeStatus::Present,
-                                ..
-                            } => Some(Attribute {
-                                atype: identifier.to_string(),
-                                value: val.clone(),
-                            }),
-                            _ => None,
-                        })
-                        .collect(),
-                ),
-                _ => None,
+                } => disclosed
+                    .iter()
+                    .flatten()
+                    .filter_map(|att| match att {
+                        DisclosedAttribute {
+                            raw_value: val,
+                            identifier,
+                            status: AttributeStatus::Present,
+                            ..
+                        } => Some(Attribute {
+                            atype: identifier.to_string(),
+                            value: val.clone(),
+                        }),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => vec![],
             };
 
-            let con = validated.ok_or(crate::Error::NoAttributesError)?;
-
             req.extensions_mut().insert(IrmaAuthResult {
-                con,
+                con: validated,
                 exp,
                 status: session_result.status,
                 proof_status: session_result.proof_status,

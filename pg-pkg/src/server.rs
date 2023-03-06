@@ -140,7 +140,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             )
                             .service(
                                 resource("/sign/key")
-                                    .app_data(Data::new(ibs_sk))
+                                    .app_data(Data::new(ibs_sk.clone()))
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::get().to(handlers::signing_key)),
                             ),
