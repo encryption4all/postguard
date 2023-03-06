@@ -178,7 +178,7 @@ pub struct SigningKeyExt {
 
 /// Wrapper type for identity-based signing keys.
 #[derive(Debug, Clone)]
-pub struct SigningKey(pub(crate) ibs::gg::UserSecretKey);
+pub struct SigningKey(pub ibs::gg::UserSecretKey);
 
 impl Serialize for SigningKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

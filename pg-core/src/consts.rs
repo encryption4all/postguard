@@ -24,7 +24,8 @@ pub const VERSION_V3: u16 = 2;
 /// The size of the tag with which all PostGuard bytestreams begin.
 pub const PRELUDE_SIZE: usize = 4;
 
-/// The tag bytes ith which all PostGuard bytestreams begin.
+/// The tag bytes with which all PostGuard bytestreams begin.
+// TODO: change?
 pub const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
 
 /// The size of the version identifier.
