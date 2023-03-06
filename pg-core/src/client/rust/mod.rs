@@ -84,13 +84,12 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
             size: message.as_ref().len().try_into()?,
         });
 
-        let header_buf = self.header.into_bytes()?;
+        let header_buf = bincode::serialize(&self.header)?;
         out.extend_from_slice(&u32::try_from(header_buf.len())?.to_be_bytes());
         out.extend_from_slice(&header_buf);
 
-        let h_signer = Signer::new().chain(header_buf);
-        let m_signer = h_signer.clone();
-        let h_sig = h_signer.sign(&self.pub_sign_key.key.0, self.rng);
+        let signer = Signer::new().chain(header_buf);
+        let h_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
 
         let h_sig_ext = SignatureExt {
             sig: h_sig,
@@ -102,7 +101,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         out.extend_from_slice(&h_sig_ext_bytes);
 
         let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
-        let m_sig = m_signer.chain(&message).sign(&m_sig_key.key.0, self.rng);
+        let m_sig = signer.chain(&message).sign(&m_sig_key.key.0, self.rng);
 
         let aead = Aes128Gcm::new_from_slice(&self.config.key)?;
         let nonce = Nonce::from_slice(&self.config.nonce);
@@ -138,14 +137,13 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
         let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
         let id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
 
-        let h_verifier = Verifier::default().chain(header_bytes);
-        let m_verifier = h_verifier.clone();
+        let verifier = Verifier::default().chain(header_bytes);
 
-        if !h_verifier.verify(&vk.0, &h_sig_ext.sig, &id) {
+        if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &id) {
             return Err(Error::IncorrectSignature);
         }
 
-        let header = Header::from_bytes(header_bytes)?;
+        let header: Header = bincode::deserialize(header_bytes)?;
         let message_len = match header.mode {
             Mode::InMemory { size } => size as usize,
             _ => return Err(Error::ModeNotSupported(header.mode)),
@@ -155,7 +153,7 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
             version,
             header,
             r: ct.to_vec(),
-            verifier: m_verifier,
+            verifier,
             vk: vk.clone(),
             config: UnsealerMemoryConfig { message_len },
         })

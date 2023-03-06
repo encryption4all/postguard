@@ -186,29 +186,6 @@ impl Header {
         self.algo = algo;
         self
     }
-
-    /// Serializes the [`Header`] as compact binary format.
-    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
-        bincode::serialize(&self).map_err(|e| Error::Bincode(e))
-    }
-
-    /// Deserialize the header from binary format.
-    pub fn from_bytes(b: impl AsRef<[u8]>) -> Result<Self, Error> {
-        bincode::deserialize(b.as_ref()).map_err(|e| Error::Bincode(e))
-    }
-
-    /// Serializes the header to a JSON string.
-    ///
-    /// Should only be used for small header or development purposes,
-    /// or when compactness is not required.
-    pub fn to_json(self) -> Result<String, Error> {
-        serde_json::to_string(&self).map_err(Error::Json)
-    }
-
-    /// Deserialize the header from a JSON string.
-    pub fn from_json(s: &str) -> Result<Self, Error> {
-        serde_json::from_str(s).map_err(Error::Json)
-    }
 }
 
 /// An IBS signature, extended with the identity claims.
@@ -235,8 +212,8 @@ mod tests {
         let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         let header2 = header.clone();
 
-        let s = header.to_json().unwrap();
-        let decoded = Header::from_json(&s).unwrap();
+        let s = serde_json::to_string(&header).unwrap();
+        let decoded: Header = serde_json::from_str(&s).unwrap();
 
         assert_eq!(decoded.policies.len(), 3);
         assert_eq!(
@@ -257,8 +234,8 @@ mod tests {
         let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
         let header2 = header.clone();
 
-        let v = header.into_bytes().unwrap();
-        let decoded = Header::from_bytes(v).unwrap();
+        let v = bincode::serialize(&header).unwrap();
+        let decoded: Header = bincode::deserialize(&v).unwrap();
 
         assert_eq!(decoded.policies.len(), 3);
         assert_eq!(
@@ -284,12 +261,12 @@ mod tests {
         let header2 = header.clone();
         let header3 = header.clone();
 
-        let v = header.into_bytes().unwrap();
+        let v = bincode::serialize(&header).unwrap();
 
         // Encode to JSON string.
-        let json = header2.to_json().unwrap();
+        let json = serde_json::to_string(&header2).unwrap();
 
-        let decoded1 = Header::from_bytes(v).unwrap();
+        let decoded1: Header = bincode::deserialize(&v).unwrap();
         let ss2 = decoded1
             .policies
             .get(test_id)
@@ -297,7 +274,7 @@ mod tests {
             .decaps(test_usk)
             .unwrap();
 
-        let decoded2 = Header::from_json(&json).unwrap();
+        let decoded2: Header = serde_json::from_str(&json).unwrap();
         let ss3 = decoded2
             .policies
             .get(test_id)

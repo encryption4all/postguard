@@ -98,12 +98,11 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
     {
         w.write_all(&PRELUDE).await?;
         w.write_all(&VERSION_V3.to_be_bytes()).await?;
-        let header_vec = self.header.into_bytes()?;
 
+        let header_vec = bincode::serialize(&self.header)?;
         w.write_all(&u32::try_from(header_vec.len())?.to_be_bytes())
             .await?;
-
-        w.write_all(&header_vec[..]).await?;
+        w.write_all(&header_vec).await?;
 
         let mut signer = Signer::default().chain(&header_vec);
         let header_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
@@ -138,6 +137,9 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         let mut buf_tail = POL_SIZE_SIZE + policy_len;
         let mut segment_idx = 0;
 
+        // First segment: DEM.K (pol_len || pol || m_0 || sig_0 )
+        // Other segments: DEM.K (m_i || sig_0)
+
         loop {
             let read = r
                 .read(&mut buf[buf_tail..self.config.segment_size as usize])
@@ -147,12 +149,14 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
             if buf_tail == self.config.segment_size as usize {
                 buf.truncate(buf_tail);
 
-                let start = if segment_idx == 0 { 4 + policy_len } else { 0 };
+                let start = if segment_idx == 0 {
+                    POL_SIZE_SIZE + policy_len
+                } else {
+                    0
+                };
                 signer.update(&buf[start..]);
-
-                let segment_sig = signer.clone().sign(&signing_key.key.0, self.rng);
-                let segment_sig_bytes = bincode::serialize(&segment_sig)?;
-                buf.extend_from_slice(&segment_sig_bytes);
+                let sig_i = signer.clone().sign(&signing_key.key.0, self.rng);
+                bincode::serialize_into(&mut buf, &sig_i)?;
 
                 enc.encrypt_next_in_place(b"", &mut buf)?;
 
@@ -163,12 +167,14 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
             } else if read == 0 {
                 buf.truncate(buf_tail);
 
-                let start = if segment_idx == 0 { 4 + policy_len } else { 0 };
+                let start = if segment_idx == 0 {
+                    POL_SIZE_SIZE + policy_len
+                } else {
+                    0
+                };
                 signer.update(&buf[start..]);
-
-                let complete_sig = signer.sign(&signing_key.key.0, self.rng);
-                let complete_sig_bytes = bincode::serialize(&complete_sig)?;
-                buf.extend_from_slice(&complete_sig_bytes);
+                let sig_final = signer.sign(&signing_key.key.0, self.rng);
+                bincode::serialize_into(&mut buf, &sig_final)?;
 
                 enc.encrypt_last_in_place(b"", &mut buf)?;
 
@@ -229,7 +235,7 @@ where
             return Err(Error::IncorrectSignature);
         }
 
-        let header = Header::from_bytes(&*header_raw)?;
+        let header: Header = bincode::deserialize(&header_raw)?;
         let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
