@@ -1,11 +1,14 @@
 use pg_core::api::*;
-use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey};
+use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use pg_core::kem::IBKEM;
 
+use pg_core::kem::cgw_kv::CGWKV;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tokio::time::delay_for;
 
 use lazy_static::lazy_static;
 
@@ -56,7 +59,7 @@ impl<'a> Client<'a> {
         Url::parse(self.baseurl).unwrap().join(u).unwrap()
     }
 
-    pub async fn parameters<K>(&self) -> Result<Parameters<K>, ClientError>
+    pub async fn parameters<K>(&self) -> Result<Parameters<PublicKey<K>>, ClientError>
     where
         K: IBKEM,
         PublicKey<K>: DeserializeOwned,
@@ -68,13 +71,13 @@ impl<'a> Client<'a> {
             .send()
             .await?
             .error_for_status()?
-            .json::<Parameters<K>>()
+            .json::<Parameters<PublicKey<K>>>()
             .await?;
 
         Ok(res)
     }
 
-    pub async fn signing_parameters(&self) -> Result<Parameters<K>, ClientError> {
+    pub async fn signing_parameters(&self) -> Result<Parameters<VerifyingKey>, ClientError> {
         let res = self
             .client
             .get(self.create_url("v2/sign/parameters"))
@@ -82,7 +85,7 @@ impl<'a> Client<'a> {
             .send()
             .await?
             .error_for_status()?
-            .json::<Parameters<K>>()
+            .json::<Parameters<VerifyingKey>>()
             .await?;
 
         Ok(res)
@@ -146,11 +149,10 @@ impl<'a> Client<'a> {
     pub async fn request_signing_key(
         &self,
         auth: &str,
-    ) -> Result<KeyResponse<SigningKeyExt>, ClientError>
-where {
+    ) -> Result<KeyResponse<SigningKeyExt>, ClientError> {
         let res = self
             .client
-            .get(self.create_url(&format!("v2/irma/key/sign")))
+            .get(self.create_url("v2/irma/sign/key"))
             .bearer_auth(auth)
             .headers(HEADERS.clone())
             .send()
@@ -160,5 +162,50 @@ where {
             .await?;
 
         Ok(res)
+    }
+
+    pub async fn wait_on_decryption_key(
+        &self,
+        sp: &irma::SessionData,
+        timestamp: u64,
+    ) -> Result<KeyResponse<UserSecretKey<CGWKV>>, ClientError> {
+        for _ in 0..120 {
+            let jwt: String = self.request_jwt(&sp.token).await?;
+            let kr = self.request_decryption_key(timestamp, &jwt).await?;
+
+            match kr {
+                kr @ KeyResponse::<UserSecretKey<CGWKV>> {
+                    status: irma::SessionStatus::Done,
+                    ..
+                } => return Ok(kr),
+                _ => {
+                    delay_for(Duration::new(0, 500_000_000)).await;
+                }
+            };
+        }
+
+        Err(ClientError::Timeout)
+    }
+
+    pub async fn wait_on_signing_key(
+        &self,
+        sp: &irma::SessionData,
+    ) -> Result<KeyResponse<SigningKeyExt>, ClientError> {
+        for _ in 0..120 {
+            let jwt: String = self.request_jwt(&sp.token).await?;
+            let kr = self.request_signing_key(&jwt).await?;
+
+            match kr {
+                kr @ KeyResponse::<SigningKeyExt> {
+                    status: irma::SessionStatus::Done,
+                    ..
+                } => return Ok(kr),
+                _ => {
+                    delay_for(Duration::new(0, 500_000_000)).await;
+                }
+            };
+        }
+
+        Err(ClientError::Timeout)
     }
 }

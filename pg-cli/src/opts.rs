@@ -30,6 +30,14 @@ pub struct EncOpts {
     #[clap(short = 'I', long)]
     pub identity: String,
 
+    /// JSON representation of public signing identity.
+    #[clap(short = 'P', long)]
+    pub pub_sign_id: String,
+
+    /// JSON representation of private signing identity.
+    #[clap(short = 'S', long)]
+    pub priv_sign_id: Option<String>,
+
     /// Private key generator (PKG) server URL.
     #[clap(short, long, default_value = "https://stable.irmaseal-pkg.ihub.ru.nl", value_hint = ValueHint::Url)]
     pub pkg: String,
