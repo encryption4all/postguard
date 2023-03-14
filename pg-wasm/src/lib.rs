@@ -1,21 +1,46 @@
+#![deny(
+    missing_debug_implementations,
+    rust_2018_idioms,
+    missing_docs,
+    rustdoc::broken_intra_doc_links
+)]
+//! PostGuard wasm API.
+
 use std::collections::BTreeMap;
 
-use pg_core::artifacts::{PublicKey, UserSecretKey};
-use pg_core::identity::{HiddenRecipientPolicy, Policy};
+use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
+use pg_core::client::web::stream::{StreamSealerConfig, StreamUnsealerConfig};
+use pg_core::client::{Sealer, Unsealer};
+use pg_core::identity::{EncryptionPolicy, HiddenPolicy};
 use pg_core::kem::cgw_kv::CGWKV;
-use pg_core::kem::SS_BYTES;
-use pg_core::web::stream::{StreamSealerConfig, StreamUnsealerConfig};
-use pg_core::{Sealer, Unsealer};
 
-use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 use wasm_streams::readable::IntoStream;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
+use serde::{Deserialize, Serialize};
+
+/// An Unsealer is used to decrypt and verify data.
+#[derive(Debug)]
 #[wasm_bindgen(js_name = Unsealer)]
 pub struct JsUnsealer(Unsealer<IntoStream<'static>, StreamUnsealerConfig>);
+
+/// Seal options.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SealOptions {
+    /// The encryption policy.
+    pub policy: EncryptionPolicy,
+
+    /// The public signing key plus identity.
+    pub pub_sign_key: SigningKeyExt,
+
+    /// The private signing key plus identity.
+    ///
+    /// Only recipients specified by the `EncryptionPolicy` can see this.
+    pub priv_sign_key: Option<SigningKeyExt>,
+}
 
 /// Seals the contents of a `ReadableStream` into a `WritableStream` using
 /// the given master public key and policies.
@@ -23,7 +48,7 @@ pub struct JsUnsealer(Unsealer<IntoStream<'static>, StreamUnsealerConfig>);
 /// # Arguments
 ///
 /// * `mpk`      - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
-/// * `policies` - The policies to use for key encapsulation.
+/// * `options`  - The seal options [`SealOptions`].
 /// * `readable` - The plaintext `ReadableStream` for data encapsulation. Only chunks of type `Uint8Array` should be enqueued.
 /// * `writable` - The `WritableStream` to which the ciphertext is written. Writes chunks of type `Uint8Array`.
 ///
@@ -33,21 +58,31 @@ pub struct JsUnsealer(Unsealer<IntoStream<'static>, StreamUnsealerConfig>);
 #[wasm_bindgen(js_name = seal)]
 pub async fn js_seal(
     mpk: JsValue,
-    policies: JsValue,
+    options: JsValue,
     readable: RawReadableStream,
     writable: RawWritableStream,
 ) -> Result<(), JsValue> {
     let mut rng = rand::thread_rng();
+
     let mpk: PublicKey<CGWKV> = serde_wasm_bindgen::from_value(mpk)?;
-    let pol: Policy = serde_wasm_bindgen::from_value(policies)?;
+
+    let SealOptions {
+        policy,
+        pub_sign_key,
+        priv_sign_key,
+    } = serde_wasm_bindgen::from_value(options)?;
 
     let read = ReadableStream::from_raw(readable);
     let mut stream = read.into_stream();
     let mut sink = WritableStream::from_raw(writable).into_sink();
 
-    Sealer::<StreamSealerConfig>::new(&mpk, &pol, &mut rng)?
-        .seal(&mut stream, &mut sink)
-        .await?;
+    let mut sealer = Sealer::<_, StreamSealerConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)?;
+
+    if let Some(priv_sign_key) = priv_sign_key {
+        sealer = sealer.with_priv_signing_key(priv_sign_key);
+    }
+
+    sealer.seal(&mut stream, &mut sink).await?;
 
     Ok(())
 }
@@ -55,20 +90,20 @@ pub async fn js_seal(
 #[wasm_bindgen(js_class = Unsealer)]
 impl JsUnsealer {
     /// Constructs a new `Unsealer` from a Javascript `ReadableStream`.
-    /// The stream forwards up until the payload.
-    /// The decrypting party should then use `Unsealer::hidden_policies()`
-    /// to retrieve a user secret key for using in `unseal()` or `derive_key()`.
+    ///
+    /// The decrypting party should then use [`Unsealer::inspect_header]`
+    /// to retrieve a user secret key for using in [`Unsealer::unseal()`].
     ///
     /// Locks the ReadableStream until this Unsealer is dropped.`
-    pub async fn new(readable: RawReadableStream) -> Result<JsUnsealer, JsValue> {
+    pub async fn new(readable: RawReadableStream, vk: JsValue) -> Result<JsUnsealer, JsValue> {
+        let vk: VerifyingKey = serde_wasm_bindgen::from_value(vk)?;
         let read = ReadableStream::from_raw(readable).into_stream();
-        let unsealer = Unsealer::<_, StreamUnsealerConfig>::new(read).await?;
+        let unsealer = Unsealer::<_, StreamUnsealerConfig>::new(read, &vk).await?;
 
         Ok(Self(unsealer))
     }
 
-    /// Decrypts the remaining data in the `ReadableStream` (the payload)
-    /// into a `WritableStream`.
+    /// Decrypts the payload from the `ReadableStream` into a `WritableStream`.
     ///
     /// # Arguments
     ///
@@ -85,19 +120,21 @@ impl JsUnsealer {
         recipient_id: String,
         usk: JsValue,
         writable: RawWritableStream,
-    ) -> Result<(), JsValue> {
+    ) -> Result<JsValue, JsValue> {
         let usk: UserSecretKey<CGWKV> = serde_wasm_bindgen::from_value(usk)?;
+
         let mut write = WritableStream::from_raw(writable).into_sink();
+        let pol = self.0.unseal(&recipient_id, &usk, &mut write).await?;
+        let out = serde_wasm_bindgen::to_value(&pol)?;
 
-        self.0.unseal(&recipient_id, &usk, &mut write).await?;
-
-        Ok(())
+        Ok(out)
     }
 
-    /// Returns all hidden policies in the header.
-    /// The user should use this to retrieve a `UserSecretKey`.
-    pub fn hidden_policies(&self) -> Result<JsValue, JsValue> {
-        let policies: BTreeMap<String, HiddenRecipientPolicy> = self
+    /// Inspects the header for hidden policies in the header.
+    ///
+    /// The user should use this to retrieve a `UserSecretKey` via the PKG.
+    pub fn inspect_header(&self) -> Result<JsValue, JsValue> {
+        let policies: BTreeMap<String, HiddenPolicy> = self
             .0
             .header
             .policies
@@ -108,36 +145,5 @@ impl JsUnsealer {
         let pol = serde_wasm_bindgen::to_value(&policies)?;
 
         Ok(pol)
-    }
-
-    /// Returns the algorithm used during symmetric encryption.
-    pub fn algo(&self) -> Result<JsValue, JsValue> {
-        let algo = serde_wasm_bindgen::to_value(&self.0.header.algo)?;
-
-        Ok(algo)
-    }
-
-    /// Returns the mode used during symmetric encryption.
-    pub fn mode(&self) -> Result<JsValue, JsValue> {
-        let mode = serde_wasm_bindgen::to_value(&self.0.header.mode)?;
-
-        Ok(mode)
-    }
-
-    /// Returns the 32-byte shared secret derived from the unsealer and the usk/mpk.
-    pub fn derive_key(&self, id: &str, usk: JsValue) -> Result<Uint8Array, JsValue> {
-        let usk: UserSecretKey<CGWKV> = serde_wasm_bindgen::from_value(usk)?;
-        let ss = self
-            .0
-            .header
-            .policies
-            .get(id)
-            .ok_or_else(|| JsValue::from(JsError::new(&format!("unknown identifier: {}", id))))?
-            .decaps(&usk)?;
-
-        let ss_js = Uint8Array::new_with_length(SS_BYTES as u32);
-        ss_js.copy_from(&ss.0);
-
-        Ok(ss_js)
     }
 }
