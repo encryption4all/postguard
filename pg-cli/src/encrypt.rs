@@ -77,7 +77,6 @@ pub async fn exec(enc_opts: EncOpts) {
         Some(id) => {
             let priv_sign_id: Vec<Attribute> = serde_json::from_str(&id).unwrap();
 
-            dbg!(&priv_sign_id);
             let sd = client
                 .request_start(&IrmaAuthRequest {
                     con: priv_sign_id,
@@ -124,7 +123,7 @@ pub async fn exec(enc_opts: EncOpts) {
     .unwrap();
 
     if let Some(key) = priv_sign_key {
-        sealer = sealer.with_priv_signing_key(&key);
+        sealer = sealer.with_priv_signing_key(key);
     };
 
     sealer.seal(r, w).await.unwrap();
