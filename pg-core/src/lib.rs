@@ -11,22 +11,24 @@
     missing_debug_implementations,
     rust_2018_idioms,
     missing_docs,
-    rustdoc::broken_intra_doc_links
+    rustdoc::broken_intra_doc_links,
+    unsafe_code
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! PostGuard is cryptographic protocol that utilizes identity-based primitives (key
 //! encapsulation and signatures) to provide confidentiality, integrity and authenticity over
 //! messages.
 //!
-//! The library implements a hybrid Encrypt-then-Sign (EtS) approach:
+//! The library implements a hybrid Sign-then-Encrypt (StE) composition:
 //!
 //! * KEM: First, a shared secret is encapsulated for all recipients using [`Multi-User Identity-Based
-//! Encryption`][`ibe::kem::mkem`].
+//! Encryption`][`ibe::kem::mkem`]. The identity of the recipients is used in the encryption.
 //!
-//! * Sign: The ciphertext(s) and all information that is required for decryption is available in the
+//! * Sign: The KEM ciphertext(s) and all information that is required for decryption is available in the
 //! [header][`client::Header`]. The header is publicly visible and therefore all sensitive
 //! content is purged. The header, ciphertexts and arbitrary-long message is signed using a
-//! identity-based signature under the identity of the sender.
+//! identity-based signature under the identity of the sender. This identity is only visible to
+//! the receivers from the previous step.
 //!
 //! * DEM: The arbitrary-sized payload stream is written either at once (in memory) using an AEAD
 //! or in user-defined segments (streaming) and encrypted using the shared secret as symmetric key
@@ -37,8 +39,9 @@
 //!
 //! ## Symmetric Crypto Backends
 //!
-//! This library offers two symmetric cryptography providers, Rust Crypto and Web Crypto.
-//! The backend is automatically chosen based on the target architecture.
+//! This library offers two symmetric cryptography providers, Rust Crypto and Web Crypto. The Rust
+//! Crypto backend can be enabled by the `rust` feature. The Web Crypto backend can be enabled by
+//! the `web` feature (only when targeting the `wasm32-unknown-unknown` target).
 //!
 //! ## Streaming vs In-memory
 //!
@@ -52,7 +55,8 @@
 //!
 //! ### Setting up the encryption parameters
 //!
-//! The public key and user secret keys for encryption can be retrieved from the Private Key Generator (PKG).
+//! The public key and user secret keys for encryption can be retrieved from the Private Key
+//! Generator (PKG).
 //!
 //! ```
 //! use std::time::SystemTime;
@@ -82,7 +86,7 @@
 //!     ],
 //! };
 //!
-//! let policies = EncryptionPolicy::from([(id1, p1), (id2, p2)]);
+//! let policy = EncryptionPolicy::from([(id1, p1), (id2, p2)]);
 //! ```
 //!
 //! This will specify two recipients who can decrypt, in this case identified by their e-mail
@@ -93,9 +97,10 @@
 //! ### Seal a slice using the Rust Crypto backend.
 //!
 //! ```
+//! use pg_core::client::rust::{SealerMemoryConfig, UnsealerMemoryConfig};
 //! use pg_core::client::{Sealer, Unsealer};
-//! # use pg_core::test::TestSetup;
 //! # use pg_core::error::Error;
+//! use pg_core::test::TestSetup;
 //!
 //! # fn main() -> Result<(), Error> {
 //! let mut rng = rand::thread_rng();
@@ -110,18 +115,20 @@
 //! # let signing_key = signing_keys.get("Alice").unwrap();
 //! # let id = "Bob";
 //! # let usk = usks.get("Bob").unwrap();
-//!
-//! // Retrieve public keys, usks, policies, etc.
-//!
+//!                                                                                             
+//! // Sender: retrieve public key, setup policy and signing keys.
+//!                                                                                             
 //! let input = b"SECRET DATA";
-//! let sealed = Sealer::new(&mpk, &policies, &signing_key, &mut rng)?
+//! let sealed = Sealer::<_, SealerMemoryConfig>::new(&mpk, &policies, &signing_key, &mut rng)?
 //!     .seal(input)?;
 //!                                                                                             
-//! let (original, verified_sender_policy) = Unsealer::new(sealed, &ibs_pk)?
-//!     .unseal(id, &usk)?;
-//!                                                                                                
+//! // Receiver: retrieve USK and verifying key.
+//!                                                                                             
+//! let (original, verified_sender_id) =
+//!     Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &ibs_pk)?.unseal(id, &usk)?;
+//!                                                                                             
 //! assert_eq!(&input.to_vec(), &original);
-//! assert_eq!(&verified_sender_policy, policies.get("Alice").unwrap());
+//! assert_eq!(&verified_sender_id, policies.get("Alice").unwrap());
 //! # Ok(())
 //! # }
 //! ```
@@ -131,32 +138,40 @@
  ### Seal a bytestream using the Rust Crypto backend
 
  ```
+ use pg_core::client::rust::stream::{SealerStreamConfig, UnsealerStreamConfig};
  use pg_core::client::{Sealer, Unsealer};
- use pg_core::test::TestSetup;
- use futures::io::Cursor;
  # use pg_core::error::Error;
-
+ use pg_core::test::TestSetup;
+ 
+ use futures::io::Cursor;
+                                                                                          
  # #[tokio::main]
  # async fn main() -> Result<(), Error> {
  let mut rng = rand::thread_rng();
- let setup = TestSetup::new(&mut rng);
-                                                                         
+ # let setup = TestSetup::new(&mut rng);
+ # let signing_key = setup.signing_keys.get("Alice").unwrap().clone();
+ # let vk = setup.ibs_pk;
+ # let usk = setup.usks.get("Bob").unwrap();
  let mut input = Cursor::new(b"SECRET DATA");
  let mut sealed = Vec::new();
-                                                                         
- Sealer::new(&setup.mpk, &setup.policy, &mut rng)?
-     .seal(&mut input, &mut sealed)
-     .await?;
-                                                                         
+                                                                                      
+ Sealer::<_, SealerStreamConfig>::new(
+     &setup.mpk,
+     &setup.policies,
+     &signing_key,
+     &mut rng,
+ )?
+ .seal(&mut input, &mut sealed)
+ .await?;
+                                                                                      
  let mut original = Vec::new();
- let id = "john.doe@example.com";
- let usk = &setup.usks[id];
- Unsealer::new(&mut Cursor::new(sealed))
+ let policy = Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(sealed), &vk)
      .await?
-     .unseal(id, usk, &mut original)
+     .unseal("Bob", usk, &mut original)
      .await?;
-                                                                         
+                                                                                      
  assert_eq!(input.into_inner().to_vec(), original);
+ assert_eq!(&policy, &signing_key.policy);
  # Ok(())
  # }
  ```
@@ -166,7 +181,8 @@
 //! ### Using the Web Crypto backend
 //!
 //! Using the Web Crypto backend in Rust can be useful in Rust web frameworks (e.g.,
-//! Yew/Dioxus/Leptos).
+//! Yew/Dioxus/Leptos). For use in JavaScript/TypeScript, there is a seperate NPM package called
+//! [`pg-wasm`] which offers an FFI interface generated by `wasm-pack`.
 //!
 //! ### Wire format
 //!
@@ -196,7 +212,7 @@ pub mod consts;
 pub mod error;
 pub mod identity;
 
-// TODO: maybe introduce this feature if it actually uses a lot less dependencies.
+#[cfg(any(feature = "rust", feature = "web"))]
 pub mod client;
 
 #[doc(hidden)]
@@ -208,7 +224,7 @@ pub use ibs;
 #[doc(hidden)]
 pub use consts::*;
 
-#[doc(hidden)]
+#[cfg(feature = "test")]
 pub mod test;
 
 mod util;

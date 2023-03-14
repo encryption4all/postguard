@@ -5,6 +5,9 @@ use core::{array::TryFromSliceError, num::TryFromIntError};
 use crate::client::{Algorithm, Mode};
 use alloc::string::String;
 
+#[cfg(feature = "stream")]
+use futures::io::Error as FuturesIOError;
+
 /// An PostGuard error.
 #[derive(Debug)]
 pub enum Error {
@@ -40,38 +43,8 @@ pub enum Error {
     /// The identity-based signature did not verify.
     IncorrectSignature,
     /// Opaque asynchronous IO error from the futures crate.
-    #[cfg(any(feature = "stream", target_arch = "wasm32"))]
-    FuturesIO(futures::io::Error),
-}
-
-impl From<bincode::Error> for Error {
-    fn from(e: bincode::Error) -> Self {
-        Self::Bincode(e)
-    }
-}
-
-impl From<TryFromIntError> for Error {
-    fn from(_: TryFromIntError) -> Self {
-        Self::ConstraintViolation
-    }
-}
-
-impl From<aead::Error> for Error {
-    fn from(_: aead::Error) -> Self {
-        Self::Symmetric
-    }
-}
-
-impl From<TryFromSliceError> for Error {
-    fn from(_: TryFromSliceError) -> Self {
-        Self::ConstraintViolation
-    }
-}
-
-impl From<aes_gcm::aes::cipher::InvalidLength> for Error {
-    fn from(_: aes_gcm::aes::cipher::InvalidLength) -> Self {
-        Error::Symmetric
-    }
+    #[cfg(feature = "stream")]
+    FuturesIO(FuturesIOError),
 }
 
 impl core::fmt::Display for Error {
@@ -96,8 +69,26 @@ impl core::fmt::Display for Error {
             Self::ModeNotSupported(m) => write!(f, "mode is not supported: {m:?}"),
             Self::KEM => write!(f, "KEM error"),
             Self::IncorrectSignature => write!(f, "incorrect signature"),
-            #[cfg(any(feature = "stream", target_arch = "wasm32"))]
+            #[cfg(feature = "stream")]
             Self::FuturesIO(e) => write!(f, "futures IO error: {e}"),
         }
+    }
+}
+
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Self::Bincode(e)
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(_: TryFromIntError) -> Self {
+        Self::ConstraintViolation
+    }
+}
+
+impl From<TryFromSliceError> for Error {
+    fn from(_: TryFromSliceError) -> Self {
+        Self::ConstraintViolation
     }
 }

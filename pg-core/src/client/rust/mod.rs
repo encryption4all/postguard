@@ -1,5 +1,3 @@
-//! Implementation for Rust, backed by [Rust Crypto](https://github.com/RustCrypto).
-//!
 //! This module utilizes the symmetric primitives provided by [`Rust
 //! Crypto`](https://github.com/RustCrypto). The streaming interface, enabled using the feature
 //! `"stream"` is a small wrapper around [`aead::stream`]. This feature enables an interface
@@ -41,6 +39,18 @@ impl super::sealed::SealerConfig for SealerMemoryConfig {}
 
 impl UnsealerConfig for UnsealerMemoryConfig {}
 impl super::sealed::UnsealerConfig for UnsealerMemoryConfig {}
+
+impl From<aead::Error> for Error {
+    fn from(_: aead::Error) -> Self {
+        Self::Symmetric
+    }
+}
+
+impl From<aes_gcm::aes::cipher::InvalidLength> for Error {
+    fn from(_: aes_gcm::aes::cipher::InvalidLength) -> Self {
+        Self::Symmetric
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MessageAndSignature {

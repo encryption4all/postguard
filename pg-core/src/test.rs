@@ -1,3 +1,5 @@
+//! Test helpers.
+
 use crate::artifacts::{PublicKey, SigningKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use crate::identity::{Attribute, EncryptionPolicy, Policy};
 use alloc::collections::BTreeMap;
@@ -8,12 +10,18 @@ use rand::{CryptoRng, Rng};
 
 use alloc::string::String;
 
+/// A test setup.
 #[derive(Debug)]
 pub struct TestSetup {
+    /// The encryption public key.
     pub mpk: PublicKey<CGWKV>,
+    /// An example encryption policy.
     pub policies: BTreeMap<String, Policy>,
+    /// Users and their associated usk.
     pub usks: BTreeMap<String, UserSecretKey<CGWKV>>,
+    /// The IBS public key.
     pub ibs_pk: VerifyingKey,
+    /// Users and their associated signing keys.
     pub signing_keys: BTreeMap<String, SigningKeyExt>,
 }
 

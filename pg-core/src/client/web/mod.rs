@@ -14,8 +14,9 @@
 //! This module can largely be simplified when [the AEAD crate](https://docs.rs/aead/latest/aead/index.html) will support async, see
 //! [the relevant issue](https://github.com/RustCrypto/traits/issues/304).
 //!
-#[cfg(not(any(target_arch = "wasm32-unknown-unknown", docsrs)))]
-compile_error!("this module can only be used on wasm targets");
+
+#[cfg(not(target_arch = "wasm32"))]
+compile_error!("\"web\" feature should only be enabled on wasm32 targets");
 
 mod aesgcm;
 
@@ -31,18 +32,15 @@ use crate::error::Error;
 use crate::identity::{EncryptionPolicy, Policy};
 
 use ibe::kem::cgw_kv::CGWKV;
+use ibs::gg::{Identity, Signer, IDENTITY_BYTES};
+
 use js_sys::Error as JsError;
 use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use wasm_bindgen::JsValue;
 
+use alloc::string::ToString;
 use alloc::vec::Vec;
-
-impl From<Error> for JsValue {
-    fn from(err: Error) -> Self {
-        JsError::new(&err.to_string()).into()
-    }
-}
 
 /// In-memory configuration for a [`Sealer`].
 #[derive(Debug)]
@@ -69,13 +67,13 @@ struct MessageAndSignature {
     sig: SignatureExt,
 }
 
-impl Sealer<SealerMemoryConfig> {
+impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
     /// Create a new [`Sealer`].
-    pub fn new<R: RngCore + CryptoRng>(
+    pub fn new(
         mpk: &PublicKey<CGWKV>,
         policies: &EncryptionPolicy,
         pub_sign_key: &SigningKeyExt,
-        rng: &mut R,
+        rng: &'r mut R,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(mpk, policies, rng)?;
         let Algorithm::Aes128Gcm(iv) = header.algo;
@@ -86,6 +84,7 @@ impl Sealer<SealerMemoryConfig> {
         nonce.copy_from_slice(&iv.0[..IV_SIZE]);
 
         Ok(Self {
+            rng,
             header,
             pub_sign_key: pub_sign_key.clone(),
             priv_sign_key: None,
@@ -94,76 +93,55 @@ impl Sealer<SealerMemoryConfig> {
     }
 
     /// Seals the entire payload.
-    pub async fn seal<R: RngCore + CryptoRng>(
-        mut self,
-        message: &Uint8Array,
-        rng: &mut R,
-    ) -> Result<Uint8Array, Error> {
-        let mut out = Vec::with_capacity(message.byte_length() + 1024);
+    pub async fn seal(mut self, message: &Uint8Array) -> Result<Uint8Array, Error> {
+        let mut out = Vec::with_capacity(message.byte_length() as usize + 1024);
 
         out.extend_from_slice(&PRELUDE);
         out.extend_from_slice(&VERSION_V3.to_be_bytes());
         self.header = self.header.with_mode(Mode::InMemory {
-            size: message
-                .byte_length()
-                .as_ref()
-                .len()
-                .try_into()
-                .map_err(|_| Error::ConstraintViolation)?,
+            size: message.byte_length(),
         });
 
-        let header_buf = self.header.into_bytes()?;
-        out.extend_from_slice(
-            &u32::try_from(header_buf.len())
-                .map_err(|_| Error::ConstraintViolation)?
-                .to_be_bytes(),
-        );
+        let header_buf = bincode::serialize(&self.header)?;
+        out.extend_from_slice(&(header_buf.len() as u32).to_be_bytes());
         out.extend_from_slice(&header_buf);
 
-        let h_signer = Signer::new().chain(header_buf);
-        let m_signer = h_signer.clone();
-        let h_sig = h_signer.sign(&self.pub_sign_key.key.0, rng);
+        let signer = Signer::new().chain(header_buf);
+        let h_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
 
         let h_sig_ext = SignatureExt {
             sig: h_sig,
             pol: self.pub_sign_key.policy.clone(),
         };
 
-        let h_sig_ext_bytes = bincode::serialize(&h_sig_ext).unwrap();
-        out.extend_from_slice(
-            &u32::try_from(h_sig_ext_bytes.len())
-                .map_err(|_| Error::ConstraintViolation)?
-                .to_be_bytes(),
-        );
+        let h_sig_ext_bytes = bincode::serialize(&h_sig_ext)?;
+        out.extend_from_slice(&(h_sig_ext_bytes.len() as u32).to_be_bytes());
         out.extend_from_slice(&h_sig_ext_bytes);
 
+        let m = message.to_vec();
         let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
-        let m_sig = m_signer.chain(&message).sign(&m_sig_key.key.0, rng);
+        let m_sig = signer.chain(&m).sign(&m_sig_key.key.0, self.rng);
 
-        let enc_input = bincode::serialize(&MessageAndSignature {
-            message: message.as_ref().to_vec(),
+        let input = bincode::serialize(&MessageAndSignature {
+            message: m,
             sig: SignatureExt {
                 sig: m_sig,
                 pol: m_sig_key.policy.clone(),
             },
-        })
-        .unwrap();
+        })?;
 
         let key = get_key(&self.config.key).await?;
         let ciphertext = encrypt(
             &key,
             &self.config.nonce,
             &Uint8Array::new_with_length(0),
-            enc_input,
+            &Uint8Array::from(input.as_slice()),
         )
         .await?;
 
-        out.extend_from_slice(&ciphertext);
+        out.extend_from_slice(&ciphertext.to_vec());
 
-        let res = Uint8Array::new_with_length(out.len());
-        res.copy_from(&out[..]);
-
-        Ok(res)
+        Ok(Uint8Array::from(out.as_slice()))
     }
 }
 
@@ -176,30 +154,29 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
 
         let (header_bytes, b) = b.split_at(header_len);
         let (h_sig_len_bytes, b) = b.split_at(SIG_SIZE_SIZE);
-        let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into().unwrap());
+        let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into()?);
         let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);
 
-        let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes).unwrap();
-        let id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>().unwrap());
+        let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
+        let id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
 
-        let h_verifier = Verifier::default().chain(&header_bytes);
-        let m_verifier = h_verifier.clone();
+        let verifier = Verifier::default().chain(&header_bytes);
 
-        if !h_verifier.verify(&vk.0, &h_sig_ext.sig, &id) {
-            return Err(Error::IncorrectSignature);
+        if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &id) {
+            return Err(Error::IncorrectSignature.into());
         }
 
-        let header = Header::from_bytes(header_bytes)?;
+        let header: Header = bincode::deserialize(header_bytes)?;
         let message_len = match header.mode {
             Mode::InMemory { size } => size as usize,
-            _ => return Err(Error::ModeNotSupported(header.mode)),
+            _ => return Err(Error::ModeNotSupported(header.mode).into()),
         };
 
         Ok(Self {
             version,
             header,
-            r: ct.to_vec(),
-            verifier: m_verifier,
+            r: Uint8Array::from(ct),
+            verifier,
             vk: vk.clone(),
             config: UnsealerMemoryConfig { message_len },
         })
@@ -218,117 +195,35 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
             .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
 
         let ss = rec_info.decaps(usk)?;
-        let key = &ss.0[..KEY_SIZE];
+        let key = get_key(&ss.0[..KEY_SIZE]).await?;
 
         let Algorithm::Aes128Gcm(iv) = self.header.algo;
 
-        let ct = Uint8Array::new_with_length(
-            self.r
-                .ciphertext
-                .len()
-                .try_into()
-                .map_err(|_| Error::ConstraintViolation)?,
-        );
-        ct.copy_from(&self.r.ciphertext);
-
-        let plain = decrypt(&key, &iv.0[..], &Uint8Array::new_with_length(0), &ct)
+        let plain = decrypt(&key, &iv.0, &Uint8Array::new_with_length(0), &self.r)
             .await?
             .to_vec();
 
-        let msg: MessageAndSignature = bincode::deserialize(&plain).unwrap();
-        let id = Identity::from(msg.sig.pol.derive::<IDENTITY_BYTES>().unwrap());
+        let msg: MessageAndSignature = bincode::deserialize(&plain).map_err(Into::<Error>::into)?;
+        let id = Identity::from(msg.sig.pol.derive::<IDENTITY_BYTES>()?);
         let verified = self
             .verifier
             .chain(&msg.message)
             .verify(&self.vk.0, &msg.sig.sig, &id);
 
         if !verified {
-            return Err(Error::IncorrectSignature);
+            return Err(Error::IncorrectSignature.into());
         }
 
         debug_assert_eq!(self.config.message_len, msg.message.len());
 
-        let res = Uint8Array::new_with_length(msg.message.len());
-        res.copy_from(msg.message);
+        let res = Uint8Array::from(msg.message.as_slice());
 
         Ok((res, msg.sig.pol))
     }
 }
 
-//impl Sealer<SealerMemoryConfig> {
-//    /// Create a new [`Sealer`].
-//    pub fn new<R: RngCore + CryptoRng>(
-//        mpk: &PublicKey<CGWKV>,
-//        policies: &EncryptionPolicy,
-//        rng: &mut R,
-//    ) -> Result<Self, Error> {
-//        let (header, ss) = Header::new(mpk, policies, rng)?;
-//        let Algorithm::Aes128Gcm(iv) = header.algo;
-//
-//        let mut key = [0u8; KEY_SIZE];
-//        let mut nonce = [0u8; 12];
-//        key.copy_from_slice(&ss.0[..KEY_SIZE]);
-//        nonce.copy_from_slice(&iv.0[..12]);
-//
-//        Ok(Self {
-//            header,
-//            config: SealerMemoryConfig { key, nonce },
-//        })
-//    }
-//
-//    /// Seals the payload.
-//    ///
-//    /// See [`PostGuardPacket`] for serialization methods.
-//    pub async fn seal(mut self, input: &Uint8Array) -> Result<PostGuardPacket, JsValue> {
-//        self.header = self.header.with_mode(Mode::InMemory {
-//            size: input.byte_length(),
-//        });
-//
-//        let key = get_key(&self.config.key).await?;
-//        let ciphertext = encrypt(
-//            &key,
-//            &self.config.nonce,
-//            &Uint8Array::new_with_length(0),
-//            input,
-//        )
-//        .await?
-//        .to_vec();
-//
-//        Ok(PostGuardPacket {
-//            version: VERSION_V2,
-//            header: self.header,
-//            ciphertext,
-//        })
-//    }
-//}
-//
-//impl Unsealer<PostGuardPacket, UnsealerMemoryConfig> {
-//    /// Blabla
-//    pub async fn unseal(
-//        self,
-//        ident: &str,
-//        usk: &UserSecretKey<CGWKV>,
-//    ) -> Result<Uint8Array, JsValue> {
-//        let rec_info = self
-//            .header
-//            .policies
-//            .get(ident)
-//            .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
-//
-//        let ss = rec_info.decaps(usk)?;
-//        let key = get_key(&ss.0[..KEY_SIZE]).await?;
-//
-//        let Algorithm::Aes128Gcm(iv) = self.header.algo;
-//
-//        let ct = Uint8Array::new_with_length(
-//            self.r
-//                .ciphertext
-//                .len()
-//                .try_into()
-//                .map_err(|_| Error::ConstraintViolation)?,
-//        );
-//        ct.copy_from(&self.r.ciphertext);
-//
-//        decrypt(&key, &iv.0[..], &Uint8Array::new_with_length(0), &ct).await
-//    }
-//}
+impl From<Error> for JsValue {
+    fn from(err: Error) -> Self {
+        JsError::new(&err.to_string()).into()
+    }
+}

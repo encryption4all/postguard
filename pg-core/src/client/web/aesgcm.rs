@@ -1,4 +1,5 @@
 use crate::consts::*;
+use crate::error::Error;
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::{prelude::*, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -15,7 +16,14 @@ extern "C" {
     fn get_crypto() -> Crypto;
 }
 
-pub async fn get_key(key: &[u8]) -> Result<CryptoKey, JsValue> {
+// Any error that happens in this module is an opaque symmetric error.
+impl From<JsValue> for Error {
+    fn from(_: JsValue) -> Self {
+        Error::Symmetric
+    }
+}
+
+pub async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
     let subtle = get_crypto().subtle();
     let algorithm: JsValue = Object::new().into();
     Reflect::set(
@@ -34,7 +42,9 @@ pub async fn get_key(key: &[u8]) -> Result<CryptoKey, JsValue> {
         &key_usages,
     )?;
 
-    JsFuture::from(key_promise).await.map(|k| k.into())
+    let key = JsFuture::from(key_promise).await?;
+
+    Ok(key.into())
 }
 
 /// One-shot encryption function, using WebCrypto's AES-GCM128.
@@ -46,7 +56,7 @@ pub async fn encrypt(
     iv: &[u8],
     aad: &Uint8Array,
     data: &Uint8Array,
-) -> Result<Uint8Array, JsValue> {
+) -> Result<Uint8Array, Error> {
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
@@ -70,7 +80,7 @@ pub async fn decrypt(
     iv: &[u8],
     aad: &Uint8Array,
     data: &Uint8Array,
-) -> Result<Uint8Array, JsValue> {
+) -> Result<Uint8Array, Error> {
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));

@@ -2,17 +2,21 @@
 
 use super::aesgcm::{decrypt, encrypt, get_key};
 
-use crate::artifacts::{PublicKey, UserSecretKey};
+use crate::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::EncryptionPolicy;
+use crate::identity::{EncryptionPolicy, Policy};
 use crate::util::preamble_checked;
+use ibs::gg::{Identity, Signature, Signer, Verifier, IDENTITY_BYTES, SIG_BYTES};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
 use js_sys::Uint8Array;
 use rand::{CryptoRng, RngCore};
 use wasm_bindgen::{JsCast, JsValue};
+
+use alloc::string::ToString;
+use alloc::vec::Vec;
 
 /// Configures an [`Sealer`] to process a payload stream.
 #[derive(Debug)]
@@ -26,7 +30,7 @@ pub struct StreamSealerConfig {
 #[derive(Debug)]
 pub struct StreamUnsealerConfig {
     segment_size: u32,
-    payload: Vec<u8>,
+    spill: Vec<u8>,
 }
 
 impl SealerConfig for StreamSealerConfig {}
@@ -34,13 +38,14 @@ impl UnsealerConfig for StreamUnsealerConfig {}
 impl crate::client::sealed::SealerConfig for StreamSealerConfig {}
 impl crate::client::sealed::UnsealerConfig for StreamUnsealerConfig {}
 
-impl Sealer<StreamSealerConfig> {
+impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
     /// Construct a new [`Sealer`] that can process payloads streamingly.
-    pub fn new<Rng: RngCore + CryptoRng>(
+    pub fn new(
         pk: &PublicKey<CGWKV>,
         policies: &EncryptionPolicy,
-        rng: &mut Rng,
-    ) -> Result<Self, JsValue> {
+        pub_sign_key: &SigningKeyExt,
+        rng: &'r mut Rng,
+    ) -> Result<Self, Error> {
         let (header, ss) = Header::new(pk, policies, rng)?;
 
         let (segment_size, _) = stream_mode_checked(&header)?;
@@ -53,7 +58,10 @@ impl Sealer<StreamSealerConfig> {
         nonce.copy_from_slice(&iv.0[..STREAM_NONCE_SIZE]);
 
         Ok(Sealer {
+            rng,
             header,
+            pub_sign_key: pub_sign_key.clone(),
+            priv_sign_key: None,
             config: StreamSealerConfig {
                 segment_size,
                 key,
@@ -68,7 +76,7 @@ impl Sealer<StreamSealerConfig> {
     ///
     /// Make sure the [`JsValue`]s *can* dynamically be cast to [`Uint8Array`],
     /// otherwise this operation *will* error.
-    pub async fn seal<R, W>(mut self, mut r: R, mut w: W) -> Result<(), JsValue>
+    pub async fn seal<R, W>(mut self, mut r: R, mut w: W) -> Result<(), Error>
     where
         R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
         W: Sink<JsValue, Error = JsValue> + Unpin,
@@ -81,37 +89,63 @@ impl Sealer<StreamSealerConfig> {
             size_hint: new_hint,
         });
 
-        let key = get_key(&self.config.key).await?;
-        let mut counter: u32 = u32::default();
-
         w.feed(Uint8Array::from(&PRELUDE[..]).into()).await?;
-        w.feed(Uint8Array::from(&VERSION_V2.to_be_bytes()[..]).into())
+        w.feed(Uint8Array::from(&VERSION_V3.to_be_bytes()[..]).into())
             .await?;
 
-        let mut header_vec = Vec::with_capacity(MAX_HEADER_SIZE);
-        self.header.into_bytes(&mut header_vec)?;
+        let header_vec = bincode::serialize(&self.header)?;
 
-        w.feed(
-            Uint8Array::from(
-                &u32::try_from(header_vec.len())
-                    .map_err(|_e| Error::ConstraintViolation)?
-                    .to_be_bytes()[..],
-            )
-            .into(),
-        )
-        .await?;
+        w.feed(Uint8Array::from(&(header_vec.len() as u32).to_be_bytes()[..]).into())
+            .await?;
 
         w.feed(Uint8Array::from(&header_vec[..]).into()).await?;
 
-        let mut buf_tail: u32 = 0;
-        let buf = Uint8Array::new_with_length(self.config.segment_size);
+        let mut signer = Signer::default().chain(&header_vec);
+        let header_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
+        let header_sig_ext = SignatureExt {
+            sig: header_sig,
+            pol: self.pub_sign_key.policy.clone(),
+        };
+        let header_sig_bytes = bincode::serialize(&header_sig_ext)?;
+
+        w.feed(Uint8Array::from(&(header_sig_bytes.len() as u32).to_be_bytes()[..]).into())
+            .await?;
+        w.feed(Uint8Array::from(&header_sig_bytes[..]).into())
+            .await?;
+
+        let key = get_key(&self.config.key).await?;
+
+        // Check for a private signing key, otherwise fall back to the public one.
+        let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
+
+        let pol_bytes = bincode::serialize(&signing_key.policy)?;
+        let pol_len: u32 = pol_bytes.len() as u32;
+
+        if pol_len + POL_SIZE_SIZE as u32 > self.config.segment_size {
+            return Err(Error::ConstraintViolation.into());
+        }
+
+        let buf = Uint8Array::new_with_length(self.config.segment_size + SIG_BYTES as u32);
+
+        buf.set(
+            &Uint8Array::from(&(pol_len as u32).to_be_bytes()[..]).into(),
+            0,
+        );
+        buf.set(
+            &Uint8Array::from(&pol_bytes[..]).into(),
+            POL_SIZE_SIZE as u32,
+        );
+
+        let mut counter = 0u32;
+        let mut buf_tail: u32 = POL_SIZE_SIZE as u32 + pol_len;
+        let mut start: u32 = buf_tail;
 
         while let Some(Ok(data)) = r.next().await {
             let mut array: Uint8Array = data.dyn_into()?;
 
             while array.byte_length() != 0 {
                 let len = array.byte_length();
-                let rem = buf.byte_length() - buf_tail;
+                let rem = self.config.segment_size - buf_tail;
 
                 if len < rem {
                     buf.set(&array, buf_tail);
@@ -120,6 +154,13 @@ impl Sealer<StreamSealerConfig> {
                 } else {
                     buf.set(&array.slice(0, rem), buf_tail);
                     array = array.slice(rem, len);
+                    buf_tail += rem;
+
+                    signer.update(&buf.slice(start, buf_tail).to_vec());
+                    let sig = signer.clone().sign(&signing_key.key.0, self.rng);
+                    let sig_bytes = bincode::serialize(&sig)?;
+
+                    buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
 
                     let ct = encrypt(
                         &key,
@@ -133,9 +174,17 @@ impl Sealer<StreamSealerConfig> {
 
                     counter = counter.checked_add(1).ok_or(Error::Symmetric)?;
                     buf_tail = 0;
+                    start = 0;
                 }
             }
         }
+
+        signer.update(&buf.slice(start, buf_tail).to_vec());
+        let sig = signer.sign(&signing_key.key.0, self.rng);
+        let sig_bytes = bincode::serialize(&sig)?;
+
+        buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
+        buf_tail += SIG_BYTES as u32;
 
         let final_ct = encrypt(
             &key,
@@ -148,7 +197,9 @@ impl Sealer<StreamSealerConfig> {
         w.feed(final_ct.into()).await?;
 
         w.flush().await?;
-        w.close().await
+        w.close().await?;
+
+        Ok(())
     }
 }
 
@@ -163,7 +214,45 @@ fn aead_nonce(nonce: &[u8], counter: u32, last_block: bool) -> [u8; IV_SIZE] {
     iv
 }
 
-// TODO: read_exact
+async fn read_atleast<R>(mut r: R, buf: &mut [u8], spill: &mut Vec<u8>) -> Result<(), Error>
+where
+    R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
+{
+    let buf_len = buf.len();
+    let spill_len = spill.len();
+
+    if buf_len <= spill_len {
+        buf.copy_from_slice(&spill[..buf_len]);
+        spill.drain(..buf_len);
+
+        Ok(())
+    } else {
+        buf[..spill_len].copy_from_slice(&spill);
+        let mut rem = buf_len - spill_len;
+        spill.clear();
+
+        while let Some(Ok(data)) = r.next().await {
+            let arr: Uint8Array = data.dyn_into()?;
+            let len = arr.byte_length();
+
+            if len as usize >= rem {
+                buf[buf_len - rem..].copy_from_slice(&arr.slice(0, rem as u32).to_vec()[..]);
+                spill.extend_from_slice(&arr.slice(rem as u32, len).to_vec()[..]);
+                rem = 0;
+                break;
+            } else {
+                buf[buf_len - rem..buf_len - rem + len as usize].copy_from_slice(&arr.to_vec()[..]);
+                rem -= len as usize;
+            }
+        }
+
+        if rem == 0 {
+            Ok(())
+        } else {
+            Err(Error::FormatViolation("unexpected EOF".to_string()).into())
+        }
+    }
+}
 
 impl<R> Unsealer<R, StreamUnsealerConfig>
 where
@@ -175,78 +264,54 @@ where
     ///
     /// Errors if the bytestream is not a legitimate PostGuard bytestream.
     /// Also errors if the items (of type [`JsValue`]) cannot be cast into [`Uint8Array`].
-    pub async fn new(mut r: R) -> Result<Self, JsValue> {
-        let preamble_len: u32 = PREAMBLE_SIZE as u32;
-        let mut read: u32 = 0;
+    pub async fn new(mut r: R, vk: &VerifyingKey) -> Result<Self, Error> {
+        let mut spill = Vec::new();
 
-        let mut preamble = Vec::new();
-        let mut header_buf = Vec::new();
-        let mut payload = Vec::new();
+        let mut preamble = [0u8; PREAMBLE_SIZE];
+        read_atleast(&mut r, &mut preamble, &mut spill).await?;
+        let (version, header_len) = preamble_checked(&preamble)?;
 
-        while let Some(Ok(data)) = r.next().await {
-            let array: Uint8Array = data.dyn_into()?;
-            let len = array.byte_length();
-            let rem = preamble_len - read;
-            read += len;
+        let mut header_raw = vec![0u8; header_len];
+        read_atleast(&mut r, &mut header_raw, &mut spill).await?;
 
-            if len < rem {
-                preamble.extend_from_slice(array.to_vec().as_slice());
-            } else {
-                preamble.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
-                header_buf.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
-                break;
-            }
+        let mut header_sig_len_bytes = [0u8; SIG_SIZE_SIZE];
+        read_atleast(&mut r, &mut header_sig_len_bytes, &mut spill).await?;
+        let header_sig_len = u32::from_be_bytes(header_sig_len_bytes);
+
+        let mut header_sig_raw = vec![0u8; header_sig_len as usize];
+        read_atleast(&mut r, &mut header_sig_raw, &mut spill).await?;
+        let header_sig: SignatureExt = bincode::deserialize(&header_sig_raw)?;
+
+        let verifier = Verifier::default().chain(&header_raw);
+        let pub_id = Identity::from(header_sig.pol.derive::<IDENTITY_BYTES>()?);
+
+        if !verifier.clone().verify(&vk.0, &header_sig.sig, &pub_id) {
+            return Err(Error::IncorrectSignature.into());
         }
 
-        if read < preamble_len {
-            return Err(JsValue::from(Error::NotPostGuard));
-        }
-
-        let (version, header_len) = preamble_checked(&preamble[..PREAMBLE_SIZE])?;
-        let header_len = u32::try_from(header_len).map_err(|_| Error::ConstraintViolation)?;
-
-        if read > preamble_len + header_len {
-            // We read into the payload
-            payload.extend_from_slice(&header_buf[header_len as usize..]);
-            header_buf.truncate(header_len as usize);
-        } else {
-            while let Some(Ok(data)) = r.next().await {
-                let array: Uint8Array = data.dyn_into()?;
-                let len = array.byte_length();
-                let rem = preamble_len + header_len - read;
-                read += len;
-
-                if len < rem {
-                    header_buf.extend_from_slice(array.to_vec().as_slice());
-                } else {
-                    header_buf.extend_from_slice(array.slice(0, rem).to_vec().as_slice());
-                    payload.extend_from_slice(array.slice(rem, len).to_vec().as_slice());
-                    break;
-                }
-            }
-        }
-
-        let header = Header::from_bytes(&*header_buf)?;
+        let header: Header = bincode::deserialize(&header_raw)?;
         let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
             version,
             header,
+            verifier,
+            vk: vk.clone(),
+            r,
             config: StreamUnsealerConfig {
-                payload,
+                spill,
                 segment_size,
             },
-            r,
         })
     }
 
-    /// Unseal the remaining data (which is now only payload) into an [`Sink<Uint8Array, Error = JsValue>`][Sink].
+    /// Unseal into an [`Sink<Uint8Array, Error = JsValue>`][Sink].
     pub async fn unseal<W>(
         &mut self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
-    ) -> Result<(), JsValue>
+    ) -> Result<(), Error>
     where
         W: Sink<JsValue, Error = JsValue> + Unpin,
     {
@@ -261,25 +326,19 @@ where
 
         let Algorithm::Aes128Gcm(iv) = self.header.algo;
         let nonce = &iv.0[..STREAM_NONCE_SIZE];
-        let mut counter: u32 = u32::default();
 
-        let segment_size: u32 = (self.config.segment_size as usize + TAG_SIZE)
-            .try_into()
-            .unwrap();
+        let segment_size: u32 = self.config.segment_size + (SIG_BYTES + TAG_SIZE) as u32;
 
         let buf = Uint8Array::new_with_length(segment_size);
+        let mut counter = 0u32;
         let mut buf_tail = 0;
-
-        let mut payload = self.config.payload.clone();
+        let mut pol_id: Option<(Policy, Identity)> = None;
 
         loop {
-            // First exhaust whatever of the payload was already read,
-            // then, exhaust the rest of the stream.
-            let mut array: Uint8Array = if !payload.is_empty() {
-                let payload_len: u32 = payload.len().try_into().unwrap();
-                let arr = Uint8Array::new_with_length(payload_len);
-                arr.copy_from(&payload[..]);
-                payload.clear();
+            // First exhaust the spillage, then the rest of the stream.
+            let mut array: Uint8Array = if !self.config.spill.is_empty() {
+                let arr = Uint8Array::from(&self.config.spill[..]);
+                self.config.spill.clear();
                 arr
             } else if let Some(Ok(data)) = self.r.next().await {
                 data.dyn_into()?
@@ -299,7 +358,7 @@ where
                     buf.set(&array.slice(0, rem), buf_tail);
                     array = array.slice(rem, len);
 
-                    let plain = decrypt(
+                    let mut plain = decrypt(
                         &key,
                         &aead_nonce(nonce, counter, false),
                         &Uint8Array::new_with_length(0),
@@ -307,7 +366,36 @@ where
                     )
                     .await?;
 
-                    w.feed(plain.into()).await?;
+                    if counter == 0 {
+                        let pol_len = u32::from_be_bytes(
+                            plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?,
+                        );
+                        let pol_bytes =
+                            plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
+                        let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
+                        let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
+                        plain = plain.slice(POL_SIZE_SIZE as u32 + pol_len, plain.byte_length());
+                        pol_id = Some((pol, id));
+                    }
+
+                    debug_assert!(plain.byte_length() > SIG_BYTES as u32);
+
+                    let m = plain.slice(0, plain.byte_length() - SIG_BYTES as u32);
+                    let sig =
+                        plain.slice(plain.byte_length() - SIG_BYTES as u32, plain.byte_length());
+                    let sig: Signature = bincode::deserialize(&sig.to_vec())?;
+
+                    self.verifier.update(&m.to_vec());
+
+                    if !self
+                        .verifier
+                        .clone()
+                        .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
+                    {
+                        return Err(Error::IncorrectSignature.into());
+                    }
+
+                    w.feed(m.into()).await?;
 
                     counter = counter.checked_add(1).ok_or(Error::Symmetric)?;
                     buf_tail = 0;
@@ -315,7 +403,7 @@ where
             }
         }
 
-        let final_plain = decrypt(
+        let mut final_plain = decrypt(
             &key,
             &aead_nonce(nonce, counter, true),
             &Uint8Array::new_with_length(0),
@@ -323,9 +411,42 @@ where
         )
         .await?;
 
-        w.feed(final_plain.into()).await?;
+        if counter == 0 {
+            let pol_len = u32::from_be_bytes(
+                final_plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?,
+            );
+            let pol_bytes = final_plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
+            let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
+            let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
+            final_plain =
+                final_plain.slice(POL_SIZE_SIZE as u32 + pol_len, final_plain.byte_length());
+            pol_id = Some((pol, id));
+        }
+
+        debug_assert!(final_plain.byte_length() > SIG_BYTES as u32);
+        let m = final_plain.slice(0, final_plain.byte_length() - SIG_BYTES as u32);
+        let sig = final_plain.slice(
+            final_plain.byte_length() - SIG_BYTES as u32,
+            final_plain.byte_length(),
+        );
+
+        let sig: Signature = bincode::deserialize(&sig.to_vec())?;
+
+        self.verifier.update(&m.to_vec());
+
+        if !self
+            .verifier
+            .clone()
+            .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
+        {
+            return Err(Error::IncorrectSignature.into());
+        }
+
+        w.feed(m.into()).await?;
 
         w.flush().await?;
-        w.close().await
+        w.close().await?;
+
+        Ok(())
     }
 }

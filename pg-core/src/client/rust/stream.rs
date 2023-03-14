@@ -40,12 +40,6 @@ impl UnsealerConfig for UnsealerStreamConfig {}
 impl crate::client::sealed::SealerConfig for SealerStreamConfig {}
 impl crate::client::sealed::UnsealerConfig for UnsealerStreamConfig {}
 
-impl From<futures::io::Error> for Error {
-    fn from(e: futures::io::Error) -> Self {
-        Error::FuturesIO(e)
-    }
-}
-
 impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
     /// Construct a new [`Sealer`] that can process streaming payloads.
     pub fn new(
@@ -122,20 +116,20 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         // Check for a private signing key, otherwise fall back to the public one.
         let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
-        let policy_bytes = bincode::serialize(&signing_key.policy)?;
-        let policy_len = policy_bytes.len();
+        let pol_bytes = bincode::serialize(&signing_key.policy)?;
+        let pol_len = pol_bytes.len();
 
-        if policy_len + POL_SIZE_SIZE > self.config.segment_size as usize {
+        if pol_len + POL_SIZE_SIZE > self.config.segment_size as usize {
             return Err(Error::ConstraintViolation);
         }
 
-        let mut buf = vec![0; self.config.segment_size as usize + TAG_SIZE + SIG_BYTES];
+        let mut buf = vec![0; self.config.segment_size as usize + TAG_SIZE];
 
-        buf[..POL_SIZE_SIZE].copy_from_slice(&u32::try_from(policy_len)?.to_be_bytes());
-        buf[POL_SIZE_SIZE..POL_SIZE_SIZE + policy_len].copy_from_slice(&policy_bytes);
+        buf[..POL_SIZE_SIZE].copy_from_slice(&u32::try_from(pol_len)?.to_be_bytes());
+        buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len].copy_from_slice(&pol_bytes);
 
-        let mut buf_tail = POL_SIZE_SIZE + policy_len;
-        let mut segment_idx = 0;
+        let mut buf_tail = POL_SIZE_SIZE + pol_len;
+        let mut start = buf_tail;
 
         // First segment: DEM.K (pol_len || pol || m_0 || sig_0 )
         // Other segments: DEM.K (m_i || sig_0)
@@ -149,29 +143,19 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
             if buf_tail == self.config.segment_size as usize {
                 buf.truncate(buf_tail);
 
-                let start = if segment_idx == 0 {
-                    POL_SIZE_SIZE + policy_len
-                } else {
-                    0
-                };
                 signer.update(&buf[start..]);
-                let sig_i = signer.clone().sign(&signing_key.key.0, self.rng);
-                bincode::serialize_into(&mut buf, &sig_i)?;
+                let sig = signer.clone().sign(&signing_key.key.0, self.rng);
+                bincode::serialize_into(&mut buf, &sig)?;
 
                 enc.encrypt_next_in_place(b"", &mut buf)?;
 
                 w.write_all(&buf).await?;
 
                 buf_tail = 0;
-                segment_idx += 1;
+                start = 0;
             } else if read == 0 {
                 buf.truncate(buf_tail);
 
-                let start = if segment_idx == 0 {
-                    POL_SIZE_SIZE + policy_len
-                } else {
-                    0
-                };
                 signer.update(&buf[start..]);
                 let sig_final = signer.sign(&signing_key.key.0, self.rng);
                 bincode::serialize_into(&mut buf, &sig_final)?;
@@ -273,7 +257,7 @@ where
         let bufsize: usize = self.config.segment_size as usize + SIG_BYTES + TAG_SIZE;
         let mut buf = vec![0u8; bufsize];
         let mut buf_tail = 0;
-        let mut segment_idx = 0;
+        let mut counter = 0;
         let mut pol_id: Option<(Policy, Identity)> = None;
 
         fn extract_policy(buf: &mut Vec<u8>) -> Result<Option<(Policy, Identity)>, Error> {
@@ -293,6 +277,8 @@ where
             vk: &VerifyingKey,
             id: &Identity,
         ) -> Result<&'a [u8], Error> {
+            debug_assert!(seg.len() > SIG_BYTES);
+
             let (m, sig_bytes) = seg.split_at(seg.len() - SIG_BYTES);
             let sig: Signature = bincode::deserialize(sig_bytes)?;
             verifier.update(m);
@@ -311,7 +297,7 @@ where
             if buf_tail == bufsize {
                 dec.decrypt_next_in_place(b"", &mut buf)?;
 
-                if segment_idx == 0 {
+                if counter == 0 {
                     pol_id = extract_policy(&mut buf)?;
                 }
 
@@ -326,12 +312,12 @@ where
 
                 buf_tail = 0;
                 buf.resize(bufsize, 0);
-                segment_idx += 1;
+                counter += 1;
             } else if read == 0 {
                 buf.truncate(buf_tail);
                 dec.decrypt_last_in_place(b"", &mut buf)?;
 
-                if segment_idx == 0 {
+                if counter == 0 {
                     pol_id = extract_policy(&mut buf)?;
                 }
 

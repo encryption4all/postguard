@@ -2,17 +2,16 @@
 //!
 //! Used for:
 //! - Encrypting, signing, packing metadata (*sealing*),
-//! - Decrypting, verifying, unpacking metdata (*unsealing*).
+//! - Decrypting, verifying, unpacking metadata (*unsealing*).
 
 mod header;
 
 pub use header::{Algorithm, Header, Mode, RecipientHeader};
 
-#[cfg(any(not(target_arch = "wasm32"), all(target_arch = "wasm32", test)))]
+#[cfg(feature = "rust")]
 pub mod rust;
 
-#[cfg(target_arch = "wasm32")]
-#[cfg_attr(docsrs, doc(cfg(target_arch = "wasm32")))]
+#[cfg(feature = "web")]
 pub mod web;
 
 use crate::artifacts::VerifyingKey;
@@ -47,8 +46,8 @@ impl<'r, R, C> Sealer<'r, R, C> {
     /// Add a private signing key and policy.
     ///
     /// This policy is safe to include private data as it is encrypted after signing.
-    pub fn with_priv_signing_key(mut self, priv_sign_key: &SigningKeyExt) -> Self {
-        self.priv_sign_key = Some(priv_sign_key.clone());
+    pub fn with_priv_signing_key(mut self, priv_sign_key: SigningKeyExt) -> Self {
+        self.priv_sign_key = Some(priv_sign_key);
         self
     }
 }
@@ -96,6 +95,13 @@ pub trait UnsealerConfig: sealed::UnsealerConfig {}
 pub(crate) mod sealed {
     pub trait UnsealerConfig {}
     pub trait SealerConfig {}
+}
+
+#[cfg(any(feature = "stream", target_arch = "wasm32"))]
+impl From<futures::io::Error> for crate::error::Error {
+    fn from(e: futures::io::Error) -> Self {
+        Self::FuturesIO(e)
+    }
 }
 
 #[cfg(feature = "stream")]
