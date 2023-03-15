@@ -39,13 +39,15 @@
 //!
 //! ## Symmetric Crypto Backends
 //!
-//! This library offers two symmetric cryptography providers, Rust Crypto and Web Crypto. The Rust
-//! Crypto backend can be enabled by the `rust` feature. The Web Crypto backend can be enabled by
-//! the `web` feature (only when targeting the `wasm32-unknown-unknown` target).
+//! This library offers two symmetric cryptography providers, [`Rust
+//! Crypto`](https://github.com/RustCrypto) and [`Web
+//! Crypto`](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API). The Rust Crypto
+//! backend is by default enabled using the `rust` feature. The Web Crypto backend can be enabled
+//! by the `web` feature, but only when targeting `wasm32-unknown-unknown`.
 //!
 //! ## Streaming vs In-memory
 //!
-//! For large or arbitrary sized data streams, enable `stream` feature. In this mode, during
+//! For large or arbitrary sized data streams, enable the `stream` feature. In this mode, during
 //! decryption, each segment of the payload is seperately authenticated, this makes the data safe
 //! for downstream consumers before the stream has been exhausted. Note that it is up to the
 //! developer to choose which is suitable for their application. Only use the in-memory variant if

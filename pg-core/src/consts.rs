@@ -25,7 +25,6 @@ pub const VERSION_V3: u16 = 2;
 pub const PRELUDE_SIZE: usize = 4;
 
 /// The tag bytes with which all PostGuard bytestreams begin.
-// TODO: change?
 pub const PRELUDE: [u8; PRELUDE_SIZE] = [0x14, 0x8A, 0x8E, 0xA7];
 
 /// The size of the version identifier.
@@ -37,11 +36,11 @@ pub const HEADER_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 /// The size of the signature size.
 pub const SIG_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 
-/// The size of the signature size.
+/// The size of the policy size.
 pub const POL_SIZE_SIZE: usize = core::mem::size_of::<u32>();
 
-/// The maximum size of the header (4 MiB).
-pub const MAX_HEADER_SIZE: usize = 1024 * 1024 * 4;
+/// The maximum size of the header (1 MiB).
+pub const MAX_HEADER_SIZE: usize = 1024 * 1024;
 
 /// The maximum size of symmetric segments (4 MiB).
 pub const MAX_SYMMETRIC_CHUNK_SIZE: u32 = 1024 * 1024 * 4;
