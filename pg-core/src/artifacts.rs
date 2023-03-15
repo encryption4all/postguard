@@ -107,23 +107,23 @@ pub(crate) fn deserialize_bin_or_b64<'de, D: Deserializer<'de>>(
     }
 }
 
-/// Wrapper type for master public keys.
+/// Master public keys.
 #[derive(Debug, Clone, Copy)]
 pub struct PublicKey<K: IBKEM>(pub K::Pk);
 
-/// Wrapper type for secret keys.
+/// Secret keys.
 #[derive(Debug, Clone, Copy)]
 pub struct SecretKey<K: IBKEM>(pub K::Sk);
 
-/// Wrapper type for user secret keys.
+/// User secret keys.
 #[derive(Debug, Clone)]
 pub struct UserSecretKey<K: IBKEM>(pub K::Usk);
 
-/// Wrapper type for ciphertexts.
+/// Ciphertexts.
 #[derive(Debug, Clone)]
 pub struct Ciphertext<K: IBKEM>(pub K::Ct);
 
-/// Wrapper type for multi-recipient ciphertexts.
+/// Multi-recipient ciphertexts.
 #[derive(Debug, Clone)]
 pub struct MultiRecipientCiphertext<K: IBKEM>(pub MkemCt<K>);
 
@@ -163,7 +163,7 @@ impl_serialize!(UserSecretKey<CGWKV>, <CGWKV as IBKEM>::Usk);
 impl_serialize!(Ciphertext<CGWKV>, <CGWKV as IBKEM>::Ct);
 impl_serialize!(MultiRecipientCiphertext<CGWKV>, MkemCt<CGWKV>);
 
-/// An extended identity-based signing key.
+/// Identity-based signing key including its claims.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SigningKeyExt {
     /// The signing key.
@@ -176,7 +176,7 @@ pub struct SigningKeyExt {
     pub policy: Policy,
 }
 
-/// Wrapper type for identity-based signing keys.
+/// Identity-based signing keys.
 #[derive(Debug, Clone)]
 pub struct SigningKey(pub ibs::gg::UserSecretKey);
 
@@ -208,7 +208,7 @@ impl<'de> Deserialize<'de> for SigningKey {
     }
 }
 
-/// Wrapper type for identity-based public master key (signing).
+/// Identity-based public master key (signing).
 #[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct VerifyingKey(pub ibs::gg::PublicKey);
@@ -394,20 +394,20 @@ mod tests {
             assert_eq!(&wrapped_mct.0.to_bytes(), &mct_decoded.0.to_bytes());
         }
 
-        //#[test]
-        //fn test_regression_json() {
-        //    let pk ="\"o21LkWDqpJUA5R0YQC37XyU2MR/xMxiG3BoQaVpcByFDsfoPEMLp5QHIIwRjeB4yif39ELXVPoeU4q5a1Ia/FHWGnPeoA0hJskhzm4Tf2kIzGwfIpULL1WtLn1DQUkjFsYcJDOnoAxOvjBRqiGWnf+vq3h1mGf2n2iiAJsbdSFN2vorHJh+f0031jMWYSkQWpCHW/XBB8uyNZaWKIQJ4x3tGjVJbsbh0leY5p330TS0sg+ePlfrNTZAEGr2FuTDuudcY4vz4BJQq9j9cI5lkPY/kbDdpP0dTQH+JD38aaCUYEqfTbornbenHhCBB8wzzpkK1I/DVS4yVfpPSOkKq52/xZy1xiT++C0aUGXbq/AgoNmmrTMeGVYTJzS217N2vgkCDYC7g0UESpv80JLkf7NgXaNkrrmQr2JVr6yTMBfB8hjvvMPuD8yPtLHIt1z1uo7a/NeJZbFboGTdbdsjJN0lJpE+8OHzBmcEk3RntikMLL/8Wr/L44FkUPn05nvu/2MnDBfH0m++FOVJNyMA2VKLABeTrhdeq0yowQRLZD+6IoVRLe6qrt4okOE3HlhUSFYi9vpwJzZ0JbJHBU5aCdE7wwEbE4dtm85Iirdh/KJ1vdcSwaJOt9uOzkt4k+C/KE0wDvnjudYYU668NVR1oZ99GgfteFy8B96hEKzy/1tvDEOvAhDq4adbxrRmRieQZCvyRt/EF74Z7mX08Or6PSUzESiK7VweRdc1dvE8qyDwavBNCADzcAYu9+GxPW4ogEKoQSmUO1d46FSXgBfZwYJV6hX7NgL/Ugl5CSAwjL/md+E5Da3S0P5sr/qdvMe63Ew3QIQXcyrG4DS/V8rCFZ+9XgYppGUBRX9L53hf5ER5CDHb6k35Xn8T/gtX3+kPq\"";
-        //    let sk = "\"hyk9sQ/tPDIgu8bYXu9mjb6El/3edmT4b+OurPyveUozLU86NPyQYcT7RocWiyENFaDUxXbuq1SYU/bTGxkkTFA+vDPwNU/LAF5GgbKlxivyJLqFNOX5oBFnFM6T0CNtuuVUr4ApivAZUj/suuJ6EKMfZLCGOvxHyszp0kKVSQnAZzTIymklAqgvKNziBCWP8+p4PKTIphJbJrQ6j5l2MN4yT0Pc8DoGGo2wo8SSTR2QgxtdOn37ZcOIldJaL3Q/epBc+JBO7emohcvjo57oDxPVc1o/183Qm7phBKKH30ygDOAUHZJB6+Bs19te6mzW4xPtdZrNFBKfLfT3Bq8bJ9RUIeQmIPHUOiHoC2kCl7i4GsRMBl2qId1ePvnh2lwzLEVnWGF19k1DixnZCiJRjMQX6X6DB25VSqB32mdfbEbgbEFD8oHdnMcFQN+j1e2O1Qufd3SJXJtl1BKsEJpoFcbSdPs2l+jpclw5gGd4xQ8H3SJ+ycIazKYskPLIGthvKzXsolUWgZgwmgbRK0eBteOujwlf8ydPdI5asr7Tvxceh3JxLTuUsIbMuD2ULl6WpD2im4tzA8rKBZ1NJ3prXAMituEUaTRgoCOwPCcs5AV7oYYIRIMkn1xsoQnUAN8aEIduaWjg5CU1voYMFsQq935BPraRvptkPsEquT3B6CI=\"";
-        //    let ct = "\"grncB2oxHUi47TwgaffDmzqvWwd2hI5mI2tXnNOCEH/OqN+0ITWVxrFhLWa5a+ePr0f++z7hHl+4mTDEMUDJ3joP0xBUV1xrn0TJum6QF1fe6godMjyukLAVcr61NhFsgdaWcK5wDL/jRWeMJ+WkY29O1s00rMnq0jiQ3KAEYbiz3+dFG8FFJJRk4xds4tG8jv6IhitdhWIXlyU9JF+eMIC9nqSpUBBtmC4M3zhV4OAqmTfLULRjZcLSJrNrbeDWlnzr4MVvw8w4aJTebum3wdjPprzg/QcbtKzLUKOUU7Q=\"";
-        //    let usk = "\"sP/Vn++YOE+FhOpWRij+IWv49dXSFrNHKZNLoU87Rf6U5QpzfdkKueZSDyE5AC+TAIwjRMGwG9aNFXR3Y73dkuhQzNjc0IL9h6IFbptUtcZRvdsONkqh55VrU0VeyYSJrC5hvYghPFGoZSq/KocUR5lmi79CTViUWnntz2w8fI0mKJGTbIDPiLapv/UGtmSfB/y4DfKtsRubGt9BcK2qLxGp5g+3qZ/yJFikX8+8QAjpARrRpLrHkpcccUnUR7ZnpwCtslpRGsVWCb7/mWhGnY1Nz+2b/cCqvshlrjwSd9EUISJikdu19HjZnOQ56yTwBaH6/OYfmuAAnz1qmBU7heHRnvHdLAkdViGe9cFCgzAjsMaDUQRNiAmOkGwC3zraob4oDQubLadB+5Q7UXbuxnzeJrUBrTWt4Hbg/RRyQhIUQo+ZhWQWLzOzeAKxzfbFACcNYkjtHqDxgA4C+a9pDXRTkjFq/IbDMByl+QdlSVEzDdAJ3D0w68FakpvtKYJrjskm4Lfi+Y0d10dUVHrTdSVDygeK963pzWrRMJi5yGsJdGHHQRsytnn7PUqMJMnMBAUkbIL6rxGr2u/wbQRIuBzmEXbt08wRFH1thd4hKbRoZOuxKlZe/TpFDIrditJVuS4SJ0uhm0yx2aa4S8Trvr9f+q4P0tjXBMdpV6jQh3mENN5m8D9rXe028eAg2PWpDj/N4BTgTVT1ZlZw5z7s4zmA5XVpB8th17ifQ3+vt4U+e8mZfJTfCzIUolJxfZ6Z\"";
-        //    let mrct = "\"k6UmczJMHW4JoJ7e65PNvxei2D/ktZ1IaCf7Dju0etTuXQkesn6RF4MS5xsIoUR/hQ3H2hthkf9kLnh50PfpnZMH/HQ0B/VcD9GJ988OPlnIa/C3+h808wah6WdFeIOIk6+gppwinaSEJLG7ONB+QVtujfpBltKLn+/8/4qMRDEMejJUCSYF1GuSByGCHpcaoBIdSqCbabehA58LhrLUQrPfpRcu3IyqI1W27RRFtXzDoPvIo8uWbP4Gq5ZZPN49YsRSlVYwmAf2/PMJA6aGBCqlqNDM6AvLbTcqZN9ssidCSa30v7jBYl4FsMV8edaPqyGTaioBZ810+yi40NdrGw==\"";
+        #[test]
+        fn test_kem_regression_json() {
+            let pk ="\"g2sPj5dg1SH15TwQ9k0YsFrpUJbLgxK67mGezYZeB6Zl22AnTnkmHVXv06E44Ev1qd4nsj6SK3l6O21N/J/0/zM36vZhEF56/Kyt2qd93ovZJHqPqCMmYY3pi2d2DP9vt9w/Y0T7LXOKJZLzFzyoXR+ca/quRbQrJRrvz1YZdz36ehJ1CFO63HbqZhUIE21XjL9KKdx3S91cclj337f/FXNF5uPb+6E/6oKh0VniGPArspFhQ5ca/h+k6DsVgpYXgRohU5jqT3FYtx82OewAMo+GGUEmejGgnJwF/V69y6tH16ohZ24RVetn8F8qKkeYhLfMmnWIsjAoD/TIkznRyuQOBhR6bQhNdFP3WM2Z6a6bt/y8NVqDgGhr+hBrD8los9RZAlMlNYLHQgxiSuj3k84FHdX22QpEiUpXWJttwmzLKJyP1lhhmO98+T5Em347hsvLellKAEUABl3lr+Z5Pu6/RKz0ZOsD3fxeGzbPDtxuzqc3uXbrMe0jpG5kwR8B1lLaSs/aychKaSJ5znt9zllzzXjPIuE/+UTXcjmYmO837UVMajj5pZrPOcuf9mLEBoq82irr21UBzHJawgNAStpdWVz5Ie22dDKytdeJv1S1Se4tiZfbJTpRM0FmIX8ZEyfXwehUWFS5GCnwkwkhWyzWMGeDXb2AT+OLDSH7MqWneh2KqjtW6bBEs0XcyvSLEtApi/NDfJk3OZ0/SAJb3tH2c7HN1X0l+HJxuHtT1sDzg3JVizwJwd53mKwgFAnWDkYRScKdAEv+EM0upC5YVhnUYYLfJ8YhC8RTU4W5cvg7Q9rfKonDmZLnJTr2aRo3D9CpfjUffuxBUoARSwJlH14KlI0Id91I8z/Fy1jo22x1dP7gHSl/fto+tGnbpYvj\"";
+            let sk = "\"im1K0e1zoEmOoBtWEhMEFbK7BiQrGYh37ua2FX/bCg+cNyUEsE0ObpqZQG5t4ZAFFMsOR/f2HgLGZRbhHdXLCSIxJ5NzjtVUT5KQrbu81D9n/jUOWF47Mp5Sp+b9WzJiVWaakn7j7HuRH4uRJJTg69W+fhBj8eJFoFJL0FEGLgpyiLR1OTLSN6hrxJxQhfGkOvSAPocMw5SNGdtDS+8MDbnuK5+P/bKlTNgg0Tn5sw0wnQ5hluc4flkrcWv+E0wR98sPiRbpLK5qFYmcttzrafpbacj4RwolTrkr0fgdVzBpVhODC0WmFV07ml8t+Q8l3TBmXuZQNF2hF51d1+LabvEToP+g7NHdYoqw4cqw/7hziz52k3HYQ/oICYL/7mAs1kZxbbxtLRK3/FqleG9RrjFkerfV0P47MKNuOlX5Fl97+3/vu47MKVBGJIDUPeh/jKEczw3Pc2CZN8O6XOmRIsj626Hh3nSZ+W0fmhPTjY8gf4nHpOylHvZIMoAe/REv+KMHOMAFwc19fMGUZN/iXqKRp6Tgvao7/o6w1DJsQigDDnyQPhsWqgGIrV2OCTpKRuIOa16EYafbJFPDMlmRLgdIjw4sWXvnFjI45Oqem02RmhBSArR7HxEb0g1QUkEA/XNZI/l/8R241k4BRWZKebfqhqx5JxIe55F6JsqhvRQ=\"";
+            let usk = "\"mXLtWwa0YF2+nhiYn7AvG+Fkf4ih6orDMCnDeXxit4ejBLUkyAY0PowIF/UigkU9CygnZEmw09oFM5DxHjeYXB79ck3V8slKANxwXqxmrShf8YGR6BqpLugZW/jWATKZslKVFeDPs8gh0xCbejdBlX2lJLgNB9M5t/NxSuqnNUyCb/zYPGC1ElE3mcUWu8fsDFfIBFveQ/7b5Y8HQOyEUBwYlAbJmQs9XPSJ19WIWoqZNulhkFlcsjW8cj5cquNvpz4NEXKlkz46YMto+wyafbrcBfDbhDHPDFYEVRzGx1JrQ+tVGlJYskCtHMCzdPYfGROot2NcPcP18WB4oIppe1RBglgkM6uZx2kRYsOmJteHfYhjy5rAUTqG52BXqH24o64RNMWKDlL+/hkkqsMCT6UEvdS18xaQBc5mcQ5Hxcwl+sYuZvyy+3ZyE08zVjjrCvy+qa8DViT4ThAvM0phg6EngAhzZVONEPRuglKsd4LlDtk/Qx+pkjvAdMJvkP2qkqhmyZarWAQWHY5jOEl5t7WQNhKSRJkj4NQLMAZ+cxhQxpNy63+p1ejGsWlcjIejCPTeHjP/IJdtdaIYXjBFqsRUpi1Cd27XapHq3fntAYab+jG0TagGdHJbIMkdR6K+sRgA8QjiQsSEElzhZ/hIEDqxq1QkFllltFNodx+zTO7IowNRgJxUtkUUDRvUmNpRA+L2Wl2/Nv2CW+KNiuizwPDzsGs46c29DR5AYHVPEJOsvkzdHEa/IMxXnuqdSTsl\"";
+            let ct = "\"pjhu9vnHq7VoT+O0jftONe+9U7NhJ+jqHxV0KQczBgBQ/gaUO30kaYbSlc4IEQHeqOeUitp1I3JAD+juoprsiau6kKWw6gu0mJp/YsTF3b6SQ0q2Mhl3RxzCuWfWVZR8hR7DcQHlyoG1FMbj8tTE2Hsv8BBb0JghwedYmWXhe/7U+DkEEYQKcHPaq5pVfF1HkKnMdwA935uIULIFXGcC3Z3q56PwDCAjjv+lzkpRAlx8kPgyv9IKdhNHhLfJNuAUkzFzYSy08udRKvq0eCl/VH4mWvmWcbQOMn/BguwdGok=\"";
+            let mrct = "\"kDxkcKzqw67KhSGYkN6Lbc3PaZmyZZACvHpk5nnC17hneJUi6rDzmbvi21YJ1nrQuQMA4nIb1uuw2akHVajdv/V56G5fpyYUAzrb6IvltPxQbo/7dBsteYyD+OGwVKEho0zPr3yWVhNt9BGwGJvwXClVmmX2MRYVmQ1Gq55TON91VK/upr8Hr3XWRGwR8lhQjy0etI/v7K7UKp90nhQY4JcXlwk666YoDjhLs+gFCOxUpY1bIswJpDVr9mCXMXujdPqiRpoltYYEhdBInhID0WjA5zxvr4zobNxMSZWfk5eAcCHYxItjHX4FCYqrGcPFc5uOUhWOZmay7iNwjczcmMAlMYbSx3ppfDjGfQd06lSygsATkQmTgCMZrwM=\"";
 
-        //    let _pk_decoded: PublicKey<CGWKV> = serde_json::from_str(pk).unwrap();
-        //    let _sk_decoded: SecretKey<CGWKV> = serde_json::from_str(sk).unwrap();
-        //    let _ct_decoded: Ciphertext<CGWKV> = serde_json::from_str(ct).unwrap();
-        //    let _usk_decoded: UserSecretKey<CGWKV> = serde_json::from_str(usk).unwrap();
-        //    let _mct_decoded: MultiRecipientCiphertext<CGWKV> = serde_json::from_str(mrct).unwrap();
-        //}
+            let _pk_decoded: PublicKey<CGWKV> = serde_json::from_str(pk).unwrap();
+            let _sk_decoded: SecretKey<CGWKV> = serde_json::from_str(sk).unwrap();
+            let _ct_decoded: Ciphertext<CGWKV> = serde_json::from_str(ct).unwrap();
+            let _usk_decoded: UserSecretKey<CGWKV> = serde_json::from_str(usk).unwrap();
+            let _mct_decoded: MultiRecipientCiphertext<CGWKV> = serde_json::from_str(mrct).unwrap();
+        }
     }
 
     mod sign {
@@ -417,6 +417,7 @@ mod tests {
 
         struct SignSetup {
             pk: PublicKey,
+            sk: SecretKey,
             usk: UserSecretKey,
         }
 
@@ -427,7 +428,21 @@ mod tests {
             let id = Identity::from(rng.gen::<[u8; IDENTITY_BYTES]>());
             let usk = ibs::gg::keygen(&sk, &id, &mut rng);
 
-            SignSetup { pk, usk }
+            SignSetup { pk, sk, usk }
+        }
+
+        #[test]
+        fn test_signing_regression() {
+            let pk = "\"XMTJUg+94jtBhy/z655djL97gFLeDfANA9mhnQ+2tzE=\"";
+            let usk = "\"K3Ijgx5lgGA/wD+/rzVVQ6l4xF4N/zxMQPTbsP4c0wJkf/Q1Q3z8STL0Qg1E+b3upqRKNivYKzPZ0246z09bLst0nqGC69fa6PRpG2kEOAXS8B/h6fI/B/I0D9BfQmbU\"";
+            let sk = [
+                3, 156, 140, 183, 148, 171, 164, 239, 191, 152, 103, 133, 137, 241, 96, 169, 157,
+                199, 137, 169, 187, 204, 85, 118, 79, 35, 52, 83, 37, 217, 230, 13,
+            ];
+
+            let _pk: VerifyingKey = serde_json::from_str(&pk).unwrap();
+            let _usk: SigningKey = serde_json::from_str(&usk).unwrap();
+            let _sk: SecretKey = bincode::deserialize(&sk).unwrap();
         }
 
         macro_rules! test_serialize {
