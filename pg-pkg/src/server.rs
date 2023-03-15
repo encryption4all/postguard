@@ -205,7 +205,7 @@ pub(crate) mod tests {
         let pds = ParametersData::new(
             &Parameters::<VerifyingKey> {
                 format_version: 0x00,
-                public_key: VerifyingKey(ibs_pk),
+                public_key: VerifyingKey(ibs_pk.clone()),
             },
             None,
         )
@@ -236,7 +236,7 @@ pub(crate) mod tests {
                         )
                         .service(
                             resource("/sign/key")
-                                .app_data(Data::new(ibs_sk))
+                                .app_data(Data::new(ibs_sk.clone()))
                                 .wrap(NoAuth::new())
                                 .route(web::get().to(handlers::signing_key)),
                         ),
@@ -355,14 +355,14 @@ pub(crate) mod tests {
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
 
         let message = b"some identical message";
-        let sig = gg::Signer::new(&key_response.key.unwrap().key.0, &mut rng)
+        let sig = gg::Signer::new()
             .chain(message)
-            .sign();
+            .sign(&key_response.key.unwrap().key.0, &mut rng);
 
-        assert!(gg::Verifier::new(&pks, &sig, &id).chain(message).verify());
-        assert!(!gg::Verifier::new(&pks, &sig, &id)
+        assert!(gg::Verifier::new().chain(message).verify(&pks, &sig, &id));
+        assert!(!gg::Verifier::new()
             .chain("some other message")
-            .verify());
+            .verify(&pks, &sig, &id));
     }
 
     #[actix_web::test]
