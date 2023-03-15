@@ -417,7 +417,6 @@ mod tests {
 
         struct SignSetup {
             pk: PublicKey,
-            sk: SecretKey,
             usk: UserSecretKey,
         }
 
@@ -428,7 +427,7 @@ mod tests {
             let id = Identity::from(rng.gen::<[u8; IDENTITY_BYTES]>());
             let usk = ibs::gg::keygen(&sk, &id, &mut rng);
 
-            SignSetup { pk, sk, usk }
+            SignSetup { pk, usk }
         }
 
         #[test]
