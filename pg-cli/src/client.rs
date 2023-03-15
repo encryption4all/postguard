@@ -8,7 +8,7 @@ use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tokio::time::delay_for;
+use tokio::time::sleep;
 
 use lazy_static::lazy_static;
 
@@ -179,7 +179,7 @@ impl<'a> Client<'a> {
                     ..
                 } => return Ok(kr),
                 _ => {
-                    delay_for(Duration::new(0, 500_000_000)).await;
+                    sleep(Duration::new(0, 500_000_000)).await;
                 }
             };
         }
@@ -201,7 +201,7 @@ impl<'a> Client<'a> {
                     ..
                 } => return Ok(kr),
                 _ => {
-                    delay_for(Duration::new(0, 500_000_000)).await;
+                    sleep(Duration::new(0, 500_000_000)).await;
                 }
             };
         }

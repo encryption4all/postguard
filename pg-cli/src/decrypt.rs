@@ -94,7 +94,7 @@ pub async fn exec(dec_opts: DecOpts) {
 
     let pb = ProgressBar::new(source.metadata().unwrap().len());
     pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} {binary_bytes_per_sec} ({eta} left)")
+        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} {binary_bytes_per_sec} ({eta} left)").unwrap()
         .progress_chars("#>-"));
 
     let w = AllowStdIo::new(pb.wrap_write(destination));

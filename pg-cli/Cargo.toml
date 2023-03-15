@@ -11,18 +11,15 @@ version = "0.3.0-rc.0"
 
 [dependencies]
 pg-core = { path = "../pg-core", features = ["stream"] }
-futures = "0.3.4"
+futures = "0.3.27"
 rand = "0.8.4"
-clap = { version = "3.0.10", features = ["derive"] }
+clap = { version = "3.2.23", features = ["derive"] }
 qrcode = { version = "0.12.0", default-features = false }
-reqwest = { version = "0.10.4", default-features = false, features = [
-  "rustls-tls",
-  "json"
-] }
+reqwest = { version = "0.11.14", default-features = false, features = ["json"] }
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "1.0.57" }
-tokio = { version = "0.2.5", features = ["rt-threaded", "time", "full"] }
+tokio = { version = "1.26.0", features = ["full"] }
 irma = "0.2.1"
-indicatif = "0.16.2"
-inquire = "0.2.1"
+indicatif = "0.17.3"
+inquire = "0.6.0"
 lazy_static = "1.4.0"
