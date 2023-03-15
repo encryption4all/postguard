@@ -29,11 +29,13 @@ pub(crate) fn client_version(req: &ServiceRequest) -> String {
 }
 
 pub(crate) fn xxhash64(x: &[u8]) -> String {
+    use base64::{engine::general_purpose, Engine as _};
+
     let mut h = XxHash64::with_seed(0);
     h.write(x);
     let out = h.finish().to_be_bytes();
 
-    base64::encode(out)
+    general_purpose::STANDARD_NO_PAD.encode(out)
 }
 
 pub fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
