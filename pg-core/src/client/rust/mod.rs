@@ -1,6 +1,6 @@
 //! This module utilizes the symmetric primitives provided by [`Rust
 //! Crypto`](https://github.com/RustCrypto). The streaming interface, enabled using the feature
-//! `"stream"` is a small wrapper around [`aead::stream`]. This feature enables an interface
+//! `stream` is a small wrapper around [`aead::stream`]. This feature enables an interface
 //! to encrypt data using asynchronous byte streams, specifically from an
 //! [AsyncRead][`futures::io::AsyncRead`] into an [AsyncWrite][`futures::io::AsyncWrite`].
 

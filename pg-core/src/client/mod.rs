@@ -85,11 +85,13 @@ pub struct Unsealer<R, C: UnsealerConfig> {
 /// Sealer configuration.
 ///
 /// This trait is sealed, you cannot implement it yourself.
+#[doc(hidden)]
 pub trait SealerConfig: sealed::SealerConfig {}
 
 /// Unsealer configuration.
 ///
 /// This trait is sealed, you cannot implement it yourself.
+#[doc(hidden)]
 pub trait UnsealerConfig: sealed::UnsealerConfig {}
 
 pub(crate) mod sealed {
