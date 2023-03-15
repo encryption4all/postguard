@@ -5,7 +5,6 @@ use actix_web::{
     Error, HttpMessage,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use actix_web_httpauth::extractors::AuthExtractor;
 
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
@@ -74,7 +73,7 @@ where
 
     forward_ready!(service);
 
-    fn call(&self, req: ServiceRequest) -> Self::Future {
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
         let srv = self.service.clone();
         let auth = self.auth_data.clone();
 
@@ -101,7 +100,7 @@ where
                     res
                 }
                 Auth::Jwt(decoding_key) => {
-                    let auth = BearerAuth::from_service_request(&req).await?;
+                    let auth = req.extract::<BearerAuth>().await?;
                     let jwt = auth.token();
 
                     let mut validation = Validation::new(Algorithm::RS256);
