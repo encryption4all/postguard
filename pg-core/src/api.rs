@@ -28,6 +28,7 @@ pub struct IrmaAuthRequest {
 
 /// The key response from the Private Key Generator (PKG).
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyResponse<T> {
     /// The status of the session.
     pub status: SessionStatus,

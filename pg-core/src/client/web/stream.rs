@@ -311,7 +311,7 @@ where
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
-    ) -> Result<(), Error>
+    ) -> Result<Policy, Error>
     where
         W: Sink<JsValue, Error = JsValue> + Unpin,
     {
@@ -447,6 +447,6 @@ where
         w.flush().await?;
         w.close().await?;
 
-        Ok(())
+        Ok(pol_id.unwrap().0)
     }
 }
