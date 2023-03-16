@@ -18,7 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all-features
+      - if: ${{ matrix.workspace == 'core' }}
+        run: cargo test --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --features test,rust,stream
+      - if: ${{ matrix.workspace != 'core' }}
+        run: cargo test --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all-features
 
   format:
     name: Format workspace
@@ -40,7 +43,7 @@ jobs:
         include:
           - browser: safari
             os: macos-latest
-    runs-on: ${{ matrix.os }} 
+    runs-on: ${{ matrix.os }}
     env:
       WASM_BINDGEN_TEST_TIMEOUT: 120
     steps:
