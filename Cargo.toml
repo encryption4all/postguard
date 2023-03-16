@@ -1,14 +1,9 @@
 [workspace]
-members = [
-  "pg-core",
-  "pg-cli",
-  "pg-pkg",
-  "pg-wasm"
-]
+members = ["pg-core", "pg-cli", "pg-pkg", "pg-wasm"]
 
 resolver = "2"
 
-[profile.release] 
+[profile.release]
 lto = true
 
 [profile.release.package.pg-wasm]
