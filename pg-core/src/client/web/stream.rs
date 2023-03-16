@@ -317,7 +317,7 @@ where
     {
         let rec_info = self
             .header
-            .policies
+            .recipients
             .get(ident)
             .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
 

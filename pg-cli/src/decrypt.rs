@@ -46,7 +46,7 @@ pub async fn exec(dec_opts: DecOpts) {
         serde_json::to_string_pretty(&unsealer.header).unwrap()
     );
 
-    let hidden_policies = &unsealer.header.policies;
+    let hidden_policies = &unsealer.header.recipients;
     let options: Vec<_> = hidden_policies.keys().cloned().collect();
     let id = Select::new("What's your recipient identifier?", options)
         .prompt()

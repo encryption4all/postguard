@@ -177,7 +177,7 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
     ) -> Result<(Vec<u8>, Policy), Error> {
         let rec_info = self
             .header
-            .policies
+            .recipients
             .get(ident)
             .ok_or_else(|| Error::UnknownIdentifier(ident.to_string()))?;
 

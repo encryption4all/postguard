@@ -103,8 +103,7 @@ impl Algorithm {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Header {
     /// Map of recipient identifiers to [`RecipientHeader`]s.
-    #[serde(rename = "rs")]
-    pub policies: BTreeMap<String, RecipientHeader>,
+    pub recipients: BTreeMap<String, RecipientHeader>,
 
     /// The symmetric-key encryption algorithm used.
     pub algo: Algorithm,
@@ -118,7 +117,6 @@ pub struct Header {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecipientHeader {
     /// The [`HiddenPolicy`] associated with this identifier.
-    #[serde(rename = "p")]
     pub policy: HiddenPolicy,
 
     /// Ciphertext for this specific recipient.
@@ -167,7 +165,7 @@ impl Header {
 
         Ok((
             Header {
-                policies: recipient_info,
+                recipients: recipient_info,
                 algo: Algorithm::new_aes128_gcm(rng),
                 mode: Mode::default(),
             },
@@ -215,9 +213,9 @@ mod tests {
         let s = serde_json::to_string(&header).unwrap();
         let decoded: Header = serde_json::from_str(&s).unwrap();
 
-        assert_eq!(decoded.policies.len(), 3);
+        assert_eq!(decoded.recipients.len(), 3);
         assert_eq!(
-            &decoded.policies.get(&ids[0]).unwrap().policy,
+            &decoded.recipients.get(&ids[0]).unwrap().policy,
             &setup.policies.get(&ids[0]).unwrap().to_hidden()
         );
 
@@ -237,9 +235,9 @@ mod tests {
         let v = bincode::serialize(&header).unwrap();
         let decoded: Header = bincode::deserialize(&v).unwrap();
 
-        assert_eq!(decoded.policies.len(), 3);
+        assert_eq!(decoded.recipients.len(), 3);
         assert_eq!(
-            &decoded.policies.get(&ids[0]).unwrap().policy,
+            &decoded.recipients.get(&ids[0]).unwrap().policy,
             &setup.policies.get(&ids[0]).unwrap().to_hidden()
         );
         assert_eq!(&decoded.algo, &header2.algo);
@@ -268,7 +266,7 @@ mod tests {
 
         let decoded1: Header = bincode::deserialize(&v).unwrap();
         let ss2 = decoded1
-            .policies
+            .recipients
             .get(test_id)
             .unwrap()
             .decaps(test_usk)
@@ -276,13 +274,13 @@ mod tests {
 
         let decoded2: Header = serde_json::from_str(&json).unwrap();
         let ss3 = decoded2
-            .policies
+            .recipients
             .get(test_id)
             .unwrap()
             .decaps(test_usk)
             .unwrap();
 
-        assert_eq!(&decoded1.policies.len(), &header3.policies.len());
+        assert_eq!(&decoded1.recipients.len(), &header3.recipients.len());
         assert_eq!(&decoded1.algo, &header3.algo);
         assert_eq!(&decoded1.mode, &header3.mode);
 

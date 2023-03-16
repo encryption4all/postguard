@@ -137,7 +137,7 @@ impl JsUnsealer {
         let policies: BTreeMap<String, HiddenPolicy> = self
             .0
             .header
-            .policies
+            .recipients
             .iter()
             .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
             .collect();
