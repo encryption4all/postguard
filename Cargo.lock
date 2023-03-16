@@ -1205,6 +1205,8 @@ dependencies = [
 [[package]]
 name = "ibe"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c5d5b866d4288d4b8d03c15946b50c676787d560c1723bec05e6670ea989a4d"
 dependencies = [
  "aes-gcm",
  "arrayref",
@@ -1218,7 +1220,9 @@ dependencies = [
 
 [[package]]
 name = "ibs"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf2ab7f84d6debad98ebfe9f458f14cc08b6f26334be9b3eb5848fc30a84f622"
 dependencies = [
  "curve25519-dalek",
  "rand_core",
@@ -1377,11 +1381,11 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "8.2.0"
+version = "8.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09f4f04699947111ec1733e71778d763555737579e44b85844cae8e1940a1828"
+checksum = "6971da4d9c3aa03c3d8f3ff0f4155b534aad021292003895a469716b2a230378"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.0",
  "pem",
  "ring",
  "serde",
