@@ -33,4 +33,4 @@ pg-core = { path = "../pg-core", features = ["rust", "web", "stream", "test"] }
 web-sys = { version = "0.3", features = ["console", "Window", "Performance"] }
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-Os", "--enable-mutable-globals"]
+wasm-opt = ["-Os"]
