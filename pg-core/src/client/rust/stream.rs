@@ -210,12 +210,12 @@ where
 
         r.read_to_end(&mut header_sig_raw).await?;
 
-        let header_sig: SignatureExt = bincode::deserialize(&header_sig_raw)?;
+        let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
 
         let verifier = Verifier::default().chain(&header_raw);
-        let pub_id = Identity::from(header_sig.pol.derive::<IDENTITY_BYTES>()?);
+        let pub_id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
 
-        if !verifier.clone().verify(&pk.0, &header_sig.sig, &pub_id) {
+        if !verifier.clone().verify(&pk.0, &h_sig_ext.sig, &pub_id) {
             return Err(Error::IncorrectSignature);
         }
 
@@ -225,6 +225,7 @@ where
         Ok(Unsealer {
             version,
             header,
+            pub_id: h_sig_ext.pol,
             config: UnsealerStreamConfig { segment_size },
             r: r.into_inner(), // This (new) reader is locked to the payload.
             verifier,
@@ -238,7 +239,7 @@ where
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
-    ) -> Result<Policy, Error> {
+    ) -> Result<VerificationResult, Error> {
         let rec_info = self
             .header
             .recipients
@@ -336,20 +337,31 @@ where
 
         w.close().await?;
 
-        Ok(pol_id.unwrap().0)
+        let private_id = pol_id.unwrap().0;
+        let private = if self.pub_id == private_id {
+            None
+        } else {
+            Some(private_id)
+        };
+
+        Ok(VerificationResult {
+            public: self.pub_id,
+            private,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Sealer, SealerStreamConfig, Unsealer, UnsealerStreamConfig};
+    use crate::client::VerificationResult;
     use crate::error::Error;
     use crate::test::TestSetup;
     use crate::{PREAMBLE_SIZE, SYMMETRIC_CRYPTO_DEFAULT_CHUNK, TAG_SIZE};
     use alloc::string::String;
     use alloc::vec::Vec;
     use futures::{executor::block_on, io::AllowStdIo};
-    use rand::RngCore;
+    use rand::{thread_rng, Rng, RngCore};
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
 
@@ -370,13 +382,13 @@ mod tests {
         let mut input = AllowStdIo::new(Cursor::new(plain));
         let mut output = AllowStdIo::new(Vec::new());
 
-        let signing_key = setup.signing_keys.get("Alice").unwrap();
+        let signing_key = &setup.signing_keys[0];
 
         block_on(async {
             Sealer::<_, SealerStreamConfig>::new(
-                &setup.mpk,
-                &setup.policies,
-                signing_key,
+                &setup.ibe_pk,
+                &setup.policy,
+                &signing_key,
                 &mut rng,
             )
             .unwrap()
@@ -388,32 +400,37 @@ mod tests {
         output.into_inner()
     }
 
-    fn unseal_helper(setup: &TestSetup, ct: &[u8], recipient_idx: usize) -> Vec<u8> {
+    fn unseal_helper(setup: &TestSetup, ct: &[u8]) -> (Vec<u8>, VerificationResult) {
         let mut input = AllowStdIo::new(Cursor::new(ct));
         let mut output = AllowStdIo::new(Vec::new());
 
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
-        let id = &ids[recipient_idx];
-        let usk_id = setup.usks.get(id).unwrap();
+        // sometimes decrypt as Bob, sometimes decrypt as Charlie
+        let (id, usk_id) = if thread_rng().gen::<bool>() {
+            ("Bob", setup.usks[2].clone())
+        } else {
+            ("Charlie", setup.usks[3].clone())
+        };
 
-        block_on(async {
+        let vr = block_on(async {
             let unsealer = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk)
                 .await
                 .unwrap();
 
             // Normally, a user would need to retrieve a usk here via the PKG,
             // but in this case we own the master key pair.
-            unsealer.unseal(id, usk_id, &mut output).await.unwrap();
+            unsealer.unseal(id, &usk_id, &mut output).await.unwrap()
         });
 
-        output.into_inner()
+        (output.into_inner(), vr)
     }
 
     fn seal_and_unseal(setup: &TestSetup, plain: Vec<u8>) {
         let ct = seal_helper(setup, &plain);
-        let plain2 = unseal_helper(setup, &ct, 0);
+        let (plain2, vr) = unseal_helper(setup, &ct);
 
         assert_eq!(&plain, &plain2);
+        assert_eq!(&vr.public, &setup.signing_keys[0].policy);
+        assert_eq!(vr.private, None);
     }
 
     fn rand_vec(length: usize) -> Vec<u8> {
@@ -445,7 +462,7 @@ mod tests {
         ct[PREAMBLE_SIZE + 2] = !ct[PREAMBLE_SIZE + 2];
 
         // This should panic, because of the header signature.
-        let _plain2 = unseal_helper(&setup, &ct, 1);
+        let _plain2 = unseal_helper(&setup, &ct);
     }
 
     #[test]
@@ -462,7 +479,7 @@ mod tests {
         ct[ct_len - TAG_SIZE - 5] = !ct[ct_len - TAG_SIZE - 5];
 
         // This should panic, because of the AEAD.
-        let _plain2 = unseal_helper(&setup, &ct, 1);
+        let _plain2 = unseal_helper(&setup, &ct);
     }
 
     #[test]
@@ -478,7 +495,7 @@ mod tests {
         ct[len - 5] = !ct[len - 5];
 
         // This should panic as well.
-        let _plain2 = unseal_helper(&setup, &ct, 1);
+        let _plain2 = unseal_helper(&setup, &ct);
     }
 
     #[tokio::test]
@@ -490,7 +507,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
-        let signing_key = setup.signing_keys.get("Alice").unwrap();
+        let signing_key = &setup.signing_keys[0];
 
         let in_name = std::env::temp_dir().join("foo.txt");
         let out_name = std::env::temp_dir().join("foo.enc");
@@ -516,7 +533,7 @@ mod tests {
             .await?
             .compat();
 
-        Sealer::<_, SealerStreamConfig>::new(&setup.mpk, &setup.policies, signing_key, &mut rng)?
+        Sealer::<_, SealerStreamConfig>::new(&setup.ibe_pk, &setup.policy, signing_key, &mut rng)?
             .seal(&mut in_file, &mut out_file)
             .await?;
 
@@ -533,7 +550,8 @@ mod tests {
             .compat();
 
         let id = "Bob";
-        let usk = &setup.usks[id];
+        let usk = &setup.usks[2];
+
         Unsealer::<_, UnsealerStreamConfig>::new(&mut out_file, &setup.ibs_pk)
             .await?
             .unseal(id, usk, &mut orig_file)
@@ -560,18 +578,18 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
-        let signing_key = setup.signing_keys.get("Alice").unwrap();
+        let signing_key = &setup.signing_keys[0];
 
         let mut input = Cursor::new(b"SECRET DATA");
         let mut encrypted = Vec::new();
 
-        Sealer::<_, SealerStreamConfig>::new(&setup.mpk, &setup.policies, signing_key, &mut rng)?
+        Sealer::<_, SealerStreamConfig>::new(&setup.ibe_pk, &setup.policy, signing_key, &mut rng)?
             .seal(&mut input, &mut encrypted)
             .await?;
 
         let mut original = Vec::new();
         let id = "Bob";
-        let usk = &setup.usks[id];
+        let usk = &setup.usks[2];
         Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(encrypted), &setup.ibs_pk)
             .await?
             .unseal(id, usk, &mut original)

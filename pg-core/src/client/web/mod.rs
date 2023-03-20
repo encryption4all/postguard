@@ -29,7 +29,7 @@ use super::web::aesgcm::{decrypt, get_key};
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::{EncryptionPolicy, Policy};
+use crate::identity::EncryptionPolicy;
 
 use ibe::kem::cgw_kv::CGWKV;
 use ibs::gg::{Identity, Signer, IDENTITY_BYTES};
@@ -175,6 +175,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         Ok(Self {
             version,
             header,
+            pub_id: h_sig_ext.pol,
             r: Uint8Array::from(ct),
             verifier,
             vk: vk.clone(),
@@ -187,7 +188,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
-    ) -> Result<(Uint8Array, Policy), Error> {
+    ) -> Result<(Uint8Array, VerificationResult), Error> {
         let rec_info = self
             .header
             .recipients
@@ -218,7 +219,19 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
 
         let res = Uint8Array::from(msg.message.as_slice());
 
-        Ok((res, msg.sig.pol))
+        let private = if self.pub_id == msg.sig.pol {
+            None
+        } else {
+            Some(msg.sig.pol)
+        };
+
+        Ok((
+            res,
+            VerificationResult {
+                public: self.pub_id,
+                private,
+            },
+        ))
     }
 }
 

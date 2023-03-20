@@ -19,7 +19,7 @@ fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], rng: &mut Rng) {
     let signing_key = setup.signing_keys.get("Alice").unwrap();
 
     block_on(async {
-        Sealer::<_, SealerStreamConfig>::new(&setup.mpk, &setup.policies, signing_key, rng)
+        Sealer::<_, SealerStreamConfig>::new(&setup.ibe_pk, &setup.policy, signing_key, rng)
             .unwrap()
             .seal(&mut input, &mut output)
             .await

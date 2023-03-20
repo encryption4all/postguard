@@ -15,6 +15,7 @@ pub mod rust;
 pub mod web;
 
 use crate::artifacts::VerifyingKey;
+use crate::identity::Policy;
 use crate::util::*;
 use crate::{artifacts::SigningKeyExt, consts::*};
 use header::SignatureExt;
@@ -80,6 +81,20 @@ pub struct Unsealer<R, C: UnsealerConfig> {
 
     // The message verifier key.
     vk: VerifyingKey,
+
+    // Verified public identity.
+    pub_id: Policy,
+}
+
+/// Sender verification result.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerificationResult {
+    /// The public signing verified claims.
+    pub public: Policy,
+
+    /// The private signing verified claims.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<Policy>,
 }
 
 /// Sealer configuration.

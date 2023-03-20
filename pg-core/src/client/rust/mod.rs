@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crate::artifacts::{PublicKey, UserSecretKey, VerifyingKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::{EncryptionPolicy, Policy};
+use crate::identity::EncryptionPolicy;
 
 use aead::{Aead, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
@@ -162,6 +162,7 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
         Ok(Self {
             version,
             header,
+            pub_id: h_sig_ext.pol,
             r: ct.to_vec(),
             verifier,
             vk: vk.clone(),
@@ -174,7 +175,7 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
         self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
-    ) -> Result<(Vec<u8>, Policy), Error> {
+    ) -> Result<(Vec<u8>, VerificationResult), Error> {
         let rec_info = self
             .header
             .recipients
@@ -204,7 +205,19 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
 
         debug_assert_eq!(self.config.message_len, msg.message.len());
 
-        Ok((msg.message, msg.sig.pol))
+        let private = if self.pub_id == msg.sig.pol {
+            None
+        } else {
+            Some(msg.sig.pol)
+        };
+
+        Ok((
+            msg.message,
+            VerificationResult {
+                public: self.pub_id,
+                private,
+            },
+        ))
     }
 }
 
@@ -218,28 +231,95 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
-        let signing_key = setup.signing_keys.get("Alice").unwrap();
+        // Alice email
+        let pub_sign_key = &setup.signing_keys[0];
+        // Alice bsn
+        let priv_sign_key = &setup.signing_keys[1];
 
         let input = b"SECRET DATA";
         let sealed = Sealer::<_, SealerMemoryConfig>::new(
-            &setup.mpk,
-            &setup.policies,
-            signing_key,
+            &setup.ibe_pk,
+            &setup.policy,
+            &pub_sign_key,
             &mut rng,
         )
         .unwrap()
+        .with_priv_signing_key(priv_sign_key.clone())
         .seal(input)
         .unwrap();
 
-        let id = "Bob";
-        let usk = setup.usks.get("Bob").unwrap();
+        // Take Bob's USK for email + name
+        let usk = &setup.usks[2];
         let (original, verified_policy) =
             Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk)
                 .unwrap()
-                .unseal(id, usk)
+                .unseal("Bob", &usk)
                 .unwrap();
 
         assert_eq!(&input.to_vec(), &original);
-        assert_eq!(&verified_policy, setup.policies.get("Alice").unwrap());
+
+        let expected = VerificationResult {
+            public: setup.policies[0].clone(),
+            private: Some(setup.policies[1].clone()),
+        };
+
+        assert_eq!(&verified_policy, &expected);
+    }
+
+    #[test]
+    fn test_seal_unseal_wrong_usk() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let pub_sign_key = &setup.signing_keys[0];
+        let priv_sign_key = &setup.signing_keys[1];
+
+        let input = b"SECRET DATA";
+        let sealed = Sealer::<_, SealerMemoryConfig>::new(
+            &setup.ibe_pk,
+            &setup.policy,
+            &pub_sign_key,
+            &mut rng,
+        )
+        .unwrap()
+        .with_priv_signing_key(priv_sign_key.clone())
+        .seal(input)
+        .unwrap();
+
+        // Take Charlie's USK for only name.
+        let usk = &setup.usks[4];
+        let res = Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk)
+            .unwrap()
+            .unseal("Charlie", &usk);
+
+        assert!(matches!(res, Err(Error::KEM)));
+    }
+
+    #[test]
+    fn test_seal_unseal_wrong_id() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let pub_sign_key = &setup.signing_keys[0];
+        let priv_sign_key = &setup.signing_keys[1];
+
+        let input = b"SECRET DATA";
+        let sealed = Sealer::<_, SealerMemoryConfig>::new(
+            &setup.ibe_pk,
+            &setup.policy,
+            &pub_sign_key,
+            &mut rng,
+        )
+        .unwrap()
+        .with_priv_signing_key(priv_sign_key.clone())
+        .seal(input)
+        .unwrap();
+
+        let usk = &setup.usks[4];
+        let res = Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk)
+            .unwrap()
+            .unseal("Daniel", &usk);
+
+        assert!(matches!(res, Err(Error::UnknownIdentifier(_))));
     }
 }

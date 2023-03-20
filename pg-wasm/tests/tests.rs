@@ -2,7 +2,7 @@ use futures::io::Cursor;
 use js_sys::Uint8Array;
 
 use pg_core::client::rust::stream::{SealerStreamConfig as RSC, UnsealerStreamConfig as RUC};
-use pg_core::client::{Sealer, Unsealer};
+use pg_core::client::{Sealer, Unsealer, VerificationResult};
 use pg_core::consts::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
 use pg_core::test::TestSetup;
 use pg_wasm::SealOptions;
@@ -41,8 +41,8 @@ async fn test_rust_to_rust(len: usize) {
     let mut rng = rand::thread_rng();
     let setup = TestSetup::new(&mut rng);
 
-    let usk = setup.usks.get("Bob").unwrap();
-    let signing_key = setup.signing_keys.get("Alice").unwrap();
+    let usk = &setup.usks[2];
+    let signing_key = &setup.signing_keys[0];
     let vk = setup.ibs_pk;
 
     let plain = rand_vec(len);
@@ -54,7 +54,7 @@ async fn test_rust_to_rust(len: usize) {
     let performance = window.performance().expect("no performance");
     let t0 = performance.now();
 
-    Sealer::<_, RSC>::new(&setup.mpk, &setup.policies, signing_key, &mut rng)
+    Sealer::<_, RSC>::new(&setup.ibe_pk, &setup.policy, signing_key, &mut rng)
         .unwrap()
         .seal(&mut a, &mut b)
         .await
@@ -72,7 +72,8 @@ async fn test_rust_to_rust(len: usize) {
     ));
 
     assert_eq!(&plain, &plain2);
-    assert_eq!(&signing_key.policy, &pol);
+    assert_eq!(&pol.public, &signing_key.policy);
+    assert_eq!(pol.private, None);
 }
 
 async fn test_web_to_web(len: usize) {
@@ -80,15 +81,15 @@ async fn test_web_to_web(len: usize) {
     let setup = TestSetup::new(&mut rng);
 
     let options = SealOptions {
-        policy: setup.policies.clone(),
-        pub_sign_key: setup.signing_keys.get("Alice").unwrap().clone(),
-        priv_sign_key: None,
+        policy: setup.policy.clone(),
+        pub_sign_key: setup.signing_keys[0].clone(),
+        priv_sign_key: Some(setup.signing_keys[1].clone()),
     };
 
     let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
 
-    let mpk = serde_wasm_bindgen::to_value(&setup.mpk).unwrap();
-    let usk = serde_wasm_bindgen::to_value(&setup.usks.get("Bob").unwrap()).unwrap();
+    let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
+    let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
     let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
 
     let plain = rand_vec(len);
@@ -116,11 +117,12 @@ async fn test_web_to_web(len: usize) {
 
     let unsealer = JsUnsealer::new(unsealer_input, vk).await.unwrap();
 
-    unsealer
+    let res = unsealer
         .unseal("Bob".to_string(), usk, unsealer_output.stream())
         .await
         .unwrap();
 
+    let res: VerificationResult = serde_wasm_bindgen::from_value(res).unwrap();
     let t = performance.now() - t0;
     log(&format!(
         "[web]: seal/unseal message of length {len} took {t:.1} ms"
@@ -133,6 +135,8 @@ async fn test_web_to_web(len: usize) {
         .collect();
 
     assert_eq!(&plain, &plain2);
+    assert_eq!(&res.public, &setup.signing_keys[0].policy);
+    assert_eq!(res.private, Some(setup.signing_keys[1].policy.clone()));
 }
 
 async fn test_web_to_rust(len: usize) {
@@ -140,17 +144,17 @@ async fn test_web_to_rust(len: usize) {
     let setup = TestSetup::new(&mut rng);
 
     // Seal inputs (Web).
-    let mpk = serde_wasm_bindgen::to_value(&setup.mpk).unwrap();
+    let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
     let options = SealOptions {
-        policy: setup.policies.clone(),
-        pub_sign_key: setup.signing_keys.get("Alice").unwrap().clone(),
+        policy: setup.policy.clone(),
+        pub_sign_key: setup.signing_keys[0].clone(),
         priv_sign_key: None,
     };
 
     let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
 
     // Unseal inputs (Rust).
-    let usk = setup.usks.get("Bob").unwrap();
+    let usk = &setup.usks[2];
     let vk = setup.ibs_pk;
 
     let plain = rand_vec(len);
@@ -178,10 +182,9 @@ async fn test_web_to_rust(len: usize) {
     let unsealer = Unsealer::<_, RUC>::new(&mut tmp, &vk).await.unwrap();
 
     let mut plain2 = Vec::new();
-    let pol = unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
+    unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
 
     assert_eq!(&plain, &plain2);
-    assert_eq!(&setup.signing_keys.get("Alice").unwrap().policy, &pol);
 }
 
 async fn test_rust_to_web(len: usize) {
@@ -189,17 +192,17 @@ async fn test_rust_to_web(len: usize) {
     let setup = TestSetup::new(&mut rng);
 
     // Sealer inputs (rust).
-    let signing_key = setup.signing_keys.get("Alice").unwrap();
+    let signing_key = &setup.signing_keys[0];
 
     // Unsealer inputs (web).
-    let usk = serde_wasm_bindgen::to_value(&setup.usks.get("Bob").unwrap()).unwrap();
+    let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
     let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
 
     let plain = rand_vec(len);
     let mut a = Cursor::new(&plain);
     let mut b = Vec::new();
 
-    Sealer::<_, RSC>::new(&setup.mpk, &setup.policies, signing_key, &mut rng)
+    Sealer::<_, RSC>::new(&setup.ibe_pk, &setup.policy, &signing_key, &mut rng)
         .unwrap()
         .seal(&mut a, &mut b)
         .await

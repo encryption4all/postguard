@@ -274,18 +274,18 @@ where
         let mut header_raw = vec![0u8; header_len];
         read_atleast(&mut r, &mut header_raw, &mut spill).await?;
 
-        let mut header_sig_len_bytes = [0u8; SIG_SIZE_SIZE];
-        read_atleast(&mut r, &mut header_sig_len_bytes, &mut spill).await?;
-        let header_sig_len = u32::from_be_bytes(header_sig_len_bytes);
+        let mut h_sig_len_bytes = [0u8; SIG_SIZE_SIZE];
+        read_atleast(&mut r, &mut h_sig_len_bytes, &mut spill).await?;
+        let header_sig_len = u32::from_be_bytes(h_sig_len_bytes);
 
         let mut header_sig_raw = vec![0u8; header_sig_len as usize];
         read_atleast(&mut r, &mut header_sig_raw, &mut spill).await?;
-        let header_sig: SignatureExt = bincode::deserialize(&header_sig_raw)?;
+        let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
 
         let verifier = Verifier::default().chain(&header_raw);
-        let pub_id = Identity::from(header_sig.pol.derive::<IDENTITY_BYTES>()?);
+        let pub_id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
 
-        if !verifier.clone().verify(&vk.0, &header_sig.sig, &pub_id) {
+        if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &pub_id) {
             return Err(Error::IncorrectSignature.into());
         }
 
@@ -295,6 +295,7 @@ where
         Ok(Unsealer {
             version,
             header,
+            pub_id: h_sig_ext.pol,
             verifier,
             vk: vk.clone(),
             r,
@@ -311,7 +312,7 @@ where
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
         mut w: W,
-    ) -> Result<Policy, Error>
+    ) -> Result<VerificationResult, Error>
     where
         W: Sink<JsValue, Error = JsValue> + Unpin,
     {
@@ -447,6 +448,16 @@ where
         w.flush().await?;
         w.close().await?;
 
-        Ok(pol_id.unwrap().0)
+        let private_id = pol_id.unwrap().0;
+        let private = if self.pub_id == private_id {
+            None
+        } else {
+            Some(private_id)
+        };
+
+        Ok(VerificationResult {
+            public: self.pub_id.clone(),
+            private,
+        })
     }
 }

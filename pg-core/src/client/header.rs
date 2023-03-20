@@ -206,17 +206,17 @@ mod tests {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
 
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
-        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, _ss) = Header::new(&setup.ibe_pk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
 
         let s = serde_json::to_string(&header).unwrap();
         let decoded: Header = serde_json::from_str(&s).unwrap();
 
-        assert_eq!(decoded.recipients.len(), 3);
+        assert_eq!(decoded.recipients.len(), 2);
+
         assert_eq!(
-            &decoded.recipients.get(&ids[0]).unwrap().policy,
-            &setup.policies.get(&ids[0]).unwrap().to_hidden()
+            &decoded.recipients.get("Bob").unwrap().policy,
+            &setup.policy.get("Bob").unwrap().to_hidden()
         );
 
         assert_eq!(&decoded.algo, &header2.algo);
@@ -227,18 +227,17 @@ mod tests {
     fn test_enc_dec_binary() {
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
 
-        let (header, _ss) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, _ss) = Header::new(&setup.ibe_pk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
 
         let v = bincode::serialize(&header).unwrap();
         let decoded: Header = bincode::deserialize(&v).unwrap();
 
-        assert_eq!(decoded.recipients.len(), 3);
+        assert_eq!(decoded.recipients.len(), 2);
         assert_eq!(
-            &decoded.recipients.get(&ids[0]).unwrap().policy,
-            &setup.policies.get(&ids[0]).unwrap().to_hidden()
+            &decoded.recipients.get("Charlie").unwrap().policy,
+            &setup.policy.get("Charlie").unwrap().to_hidden()
         );
         assert_eq!(&decoded.algo, &header2.algo);
         assert_eq!(&decoded.mode, &header2.mode);
@@ -250,24 +249,24 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let setup = TestSetup::new(&mut rng);
-        let ids: Vec<String> = setup.policies.keys().cloned().collect();
 
-        let test_id = &ids[1];
-        let test_usk = &setup.usks.get(test_id).unwrap();
+        // Take Bob's usk for email + name.
+        let test_usk = &setup.usks[2];
 
-        let (header, ss1) = Header::new(&setup.mpk, &setup.policies, &mut rng).unwrap();
+        let (header, ss1) = Header::new(&setup.ibe_pk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
         let header3 = header.clone();
 
-        let v = bincode::serialize(&header).unwrap();
+        // encode as binary
+        let bytes = bincode::serialize(&header).unwrap();
 
-        // Encode to JSON string.
+        // encode as JSON
         let json = serde_json::to_string(&header2).unwrap();
 
-        let decoded1: Header = bincode::deserialize(&v).unwrap();
+        let decoded1: Header = bincode::deserialize(&bytes).unwrap();
         let ss2 = decoded1
             .recipients
-            .get(test_id)
+            .get("Bob")
             .unwrap()
             .decaps(test_usk)
             .unwrap();
@@ -275,7 +274,7 @@ mod tests {
         let decoded2: Header = serde_json::from_str(&json).unwrap();
         let ss3 = decoded2
             .recipients
-            .get(test_id)
+            .get("Bob")
             .unwrap()
             .decaps(test_usk)
             .unwrap();

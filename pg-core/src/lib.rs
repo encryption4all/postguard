@@ -69,22 +69,22 @@
 //!     .unwrap()
 //!     .as_secs();
 //!
-//! let id1 = String::from("Alice");
-//! let id2 = String::from("Bob");
+//! let id1 = String::from("Bob");
+//! let id2 = String::from("Charlie");
 //!
 //! let p1 = Policy {
 //!     timestamp,
 //!     con: vec![Attribute::new(
 //!         "pbdf.gemeente.personalData.bsn",
-//!         Some("123456789"),
+//!         Some("123bob789"),
 //!     )],
 //! };
 //!
 //! let p2 = Policy {
 //!     timestamp,
 //!     con: vec![
-//!         Attribute::new("pbdf.gemeente.personalData.name", Some("Bob")),
-//!         Attribute::new("pbdf.sidn-pbdf.email.email", Some("bob@example.com")),
+//!         Attribute::new("pbdf.gemeente.personalData.name", Some("Charlie")),
+//!         Attribute::new("pbdf.sidn-pbdf.email.email", Some("charlie@example.com")),
 //!     ],
 //! };
 //!
@@ -107,21 +107,22 @@
 //! # fn main() -> Result<(), Error> {
 //! let mut rng = rand::thread_rng();
 //! # let TestSetup {
-//! #     mpk,
+//! #     ibe_pk,
 //! #     ibs_pk,
 //! #     policies,
 //! #     usks,
 //! #     signing_keys,
+//! #     policy,
 //! #     ..
 //! # } = TestSetup::new(&mut rng);
-//! # let signing_key = signing_keys.get("Alice").unwrap();
+//! # let signing_key = &signing_keys[0];
 //! # let id = "Bob";
-//! # let usk = usks.get("Bob").unwrap();
+//! # let usk = &usks[2];
 //!                                                                                             
 //! // Sender: retrieve public key, setup policy and signing keys.
 //!                                                                                             
 //! let input = b"SECRET DATA";
-//! let sealed = Sealer::<_, SealerMemoryConfig>::new(&mpk, &policies, &signing_key, &mut rng)?
+//! let sealed = Sealer::<_, SealerMemoryConfig>::new(&ibe_pk, &policy, &signing_key, &mut rng)?
 //!     .seal(input)?;
 //!                                                                                             
 //! // Receiver: retrieve USK and verifying key.
@@ -130,7 +131,9 @@
 //!     Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &ibs_pk)?.unseal(id, &usk)?;
 //!                                                                                             
 //! assert_eq!(&input.to_vec(), &original);
-//! assert_eq!(&verified_sender_id, policies.get("Alice").unwrap());
+//!
+//! assert_eq!(&verified_sender_id.public, &signing_key.policy);
+//! assert_eq!(verified_sender_id.private, None);
 //! # Ok(())
 //! # }
 //! ```
@@ -151,15 +154,15 @@
  # async fn main() -> Result<(), Error> {
  let mut rng = rand::thread_rng();
  # let setup = TestSetup::new(&mut rng);
- # let signing_key = setup.signing_keys.get("Alice").unwrap().clone();
+ # let signing_key = &setup.signing_keys[0];
  # let vk = setup.ibs_pk;
- # let usk = setup.usks.get("Bob").unwrap();
+ # let usk = &setup.usks[2];
  let mut input = Cursor::new(b"SECRET DATA");
  let mut sealed = Vec::new();
                                                                                       
  Sealer::<_, SealerStreamConfig>::new(
-     &setup.mpk,
-     &setup.policies,
+     &setup.ibe_pk,
+     &setup.policy,
      &signing_key,
      &mut rng,
  )?
@@ -169,11 +172,12 @@
  let mut original = Vec::new();
  let policy = Unsealer::<_, UnsealerStreamConfig>::new(&mut Cursor::new(sealed), &vk)
      .await?
-     .unseal("Bob", usk, &mut original)
+     .unseal("Bob", &usk, &mut original)
      .await?;
                                                                                       
  assert_eq!(input.into_inner().to_vec(), original);
- assert_eq!(&policy, &signing_key.policy);
+ assert_eq!(&policy.public, &signing_key.policy);
+ assert_eq!(policy.private, None);
  # Ok(())
  # }
  ```
