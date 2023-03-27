@@ -16,7 +16,7 @@ fn bench_seal<Rng: RngCore + CryptoRng>(plain: &[u8], rng: &mut Rng) {
     let mut output = futures::io::sink();
 
     let setup = TestSetup::new(rng);
-    let signing_key = setup.signing_keys.get("Alice").unwrap();
+    let signing_key = &setup.signing_keys[0];
 
     block_on(async {
         Sealer::<_, SealerStreamConfig>::new(&setup.ibe_pk, &setup.policy, signing_key, rng)
