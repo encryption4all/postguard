@@ -6,7 +6,7 @@ use pg_core::client::{Sealer, Unsealer, VerificationResult};
 use pg_core::consts::SYMMETRIC_CRYPTO_DEFAULT_CHUNK;
 use pg_core::test::TestSetup;
 use pg_wasm::SealOptions;
-use pg_wasm::{js_seal, JsUnsealer};
+use pg_wasm::{js_seal, js_stream_seal, MemoryUnsealer, StreamUnsealer};
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -37,222 +37,282 @@ const LENGTHS: &[u32] = &[
     1024 * 1024,
 ];
 
-async fn test_rust_to_rust(len: usize) {
-    let mut rng = rand::thread_rng();
-    let setup = TestSetup::new(&mut rng);
+mod mem {
+    use super::*;
 
-    let usk = &setup.usks[2];
-    let signing_key = &setup.signing_keys[0];
-    let vk = setup.ibs_pk;
+    async fn test_web_to_web(len: usize) {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
 
-    let plain = rand_vec(len);
+        let options = SealOptions {
+            policy: setup.policy.clone(),
+            pub_sign_key: setup.signing_keys[0].clone(),
+            priv_sign_key: Some(setup.signing_keys[1].clone()),
+        };
 
-    let mut a = Cursor::new(&plain);
-    let mut b = Vec::new();
+        let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
 
-    let window = web_sys::window().expect("no window");
-    let performance = window.performance().expect("no performance");
-    let t0 = performance.now();
+        let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
+        let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
+        let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
 
-    Sealer::<_, RSC>::new(&setup.ibe_pk, &setup.policy, signing_key, &mut rng)
-        .unwrap()
-        .seal(&mut a, &mut b)
-        .await
-        .unwrap();
+        let plain = rand_vec(len);
+        let js_plain = Uint8Array::from(&plain[..]);
 
-    let mut c = Cursor::new(&b);
-    let unsealer = Unsealer::<_, RUC>::new(&mut c, &vk).await.unwrap();
+        let window = web_sys::window().expect("no window");
+        let performance = window.performance().expect("no performance");
 
-    let mut plain2 = Vec::new();
-    let pol = unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
+        let t0 = performance.now();
 
-    let t = performance.now() - t0;
-    log(&format!(
-        "[rust]: seal/unseal message of length {len} took {t:.1} ms"
-    ));
+        let unsealer_input = js_seal(mpk.clone(), js_options, js_plain).await.unwrap();
 
-    assert_eq!(&plain, &plain2);
-    assert_eq!(&pol.public, &signing_key.policy);
-    assert_eq!(pol.private, None);
-}
+        let unsealer = MemoryUnsealer::new(unsealer_input.into(), vk)
+            .await
+            .unwrap();
+        let res = unsealer.unseal("Bob".to_string(), usk).await.unwrap();
 
-async fn test_web_to_web(len: usize) {
-    let mut rng = rand::thread_rng();
-    let setup = TestSetup::new(&mut rng);
+        let t = performance.now() - t0;
+        log(&format!(
+            "[web]: seal/unseal message of length {len} took {t:.1} ms"
+        ));
 
-    let options = SealOptions {
-        policy: setup.policy.clone(),
-        pub_sign_key: setup.signing_keys[0].clone(),
-        priv_sign_key: Some(setup.signing_keys[1].clone()),
-    };
+        let verified: VerificationResult = serde_wasm_bindgen::from_value(res.policy()).unwrap();
 
-    let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
+        assert_eq!(&plain, &res.plain().to_vec());
+        assert_eq!(&verified.public, &setup.signing_keys[0].policy);
+        assert_eq!(verified.private, Some(setup.signing_keys[1].policy.clone()));
+    }
 
-    let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
-    let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
-    let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
-
-    let plain = rand_vec(len);
-    let js_plain = Uint8Array::from(&plain[..]);
-
-    let sealer_input = new_readable_stream_from_array(vec![js_plain.into()].into_boxed_slice());
-    let sealer_output = new_recording_writable_stream();
-
-    let window = web_sys::window().expect("no window");
-    let performance = window.performance().expect("no performance");
-    let t0 = performance.now();
-
-    js_seal(
-        mpk.clone(),
-        js_options,
-        sealer_input,
-        sealer_output.stream(),
-    )
-    .await
-    .unwrap();
-
-    let unsealer_input =
-        new_readable_stream_from_array(sealer_output.written().to_vec().into_boxed_slice());
-    let unsealer_output = new_recording_writable_stream();
-
-    let unsealer = JsUnsealer::new(unsealer_input, vk).await.unwrap();
-
-    let res = unsealer
-        .unseal("Bob".to_string(), usk, unsealer_output.stream())
-        .await
-        .unwrap();
-
-    let res: VerificationResult = serde_wasm_bindgen::from_value(res).unwrap();
-    let t = performance.now() - t0;
-    log(&format!(
-        "[web]: seal/unseal message of length {len} took {t:.1} ms"
-    ));
-
-    let plain2: Vec<u8> = unsealer_output
-        .written()
-        .iter()
-        .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .collect();
-
-    assert_eq!(&plain, &plain2);
-    assert_eq!(&res.public, &setup.signing_keys[0].policy);
-    assert_eq!(res.private, Some(setup.signing_keys[1].policy.clone()));
-}
-
-async fn test_web_to_rust(len: usize) {
-    let mut rng = rand::thread_rng();
-    let setup = TestSetup::new(&mut rng);
-
-    // Seal inputs (Web).
-    let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
-    let options = SealOptions {
-        policy: setup.policy.clone(),
-        pub_sign_key: setup.signing_keys[0].clone(),
-        priv_sign_key: None,
-    };
-
-    let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
-
-    // Unseal inputs (Rust).
-    let usk = &setup.usks[2];
-    let vk = setup.ibs_pk;
-
-    let plain = rand_vec(len);
-    let js_plain = Uint8Array::from(&plain[..]);
-
-    let sealer_input = new_readable_stream_from_array(vec![js_plain.into()].into_boxed_slice());
-    let sealer_output = new_recording_writable_stream();
-
-    js_seal(
-        mpk.clone(),
-        js_options,
-        sealer_input,
-        sealer_output.stream(),
-    )
-    .await
-    .unwrap();
-
-    let unsealer_input: Vec<u8> = sealer_output
-        .written()
-        .iter()
-        .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .collect();
-
-    let mut tmp = Cursor::new(&unsealer_input);
-    let unsealer = Unsealer::<_, RUC>::new(&mut tmp, &vk).await.unwrap();
-
-    let mut plain2 = Vec::new();
-    unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
-
-    assert_eq!(&plain, &plain2);
-}
-
-async fn test_rust_to_web(len: usize) {
-    let mut rng = rand::thread_rng();
-    let setup = TestSetup::new(&mut rng);
-
-    // Sealer inputs (rust).
-    let signing_key = &setup.signing_keys[0];
-
-    // Unsealer inputs (web).
-    let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
-    let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
-
-    let plain = rand_vec(len);
-    let mut a = Cursor::new(&plain);
-    let mut b = Vec::new();
-
-    Sealer::<_, RSC>::new(&setup.ibe_pk, &setup.policy, &signing_key, &mut rng)
-        .unwrap()
-        .seal(&mut a, &mut b)
-        .await
-        .unwrap();
-
-    let unsealer_input = new_readable_stream_from_array(
-        vec![Uint8Array::from(&b[..]).dyn_into().unwrap()].into_boxed_slice(),
-    );
-    let unsealer_output = new_recording_writable_stream();
-
-    let unsealer = JsUnsealer::new(unsealer_input, vk).await.unwrap();
-
-    unsealer
-        .unseal("Bob".to_string(), usk, unsealer_output.stream())
-        .await
-        .unwrap();
-
-    let plain2: Vec<u8> = unsealer_output
-        .written()
-        .iter()
-        .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
-        .collect();
-
-    assert_eq!(&plain, &plain2);
-}
-
-#[wasm_bindgen_test]
-async fn test_seal_unseal_rust() {
-    for l in LENGTHS {
-        test_rust_to_rust(*l as usize).await;
+    #[wasm_bindgen_test]
+    async fn test_seal_unseal_web() {
+        for l in LENGTHS {
+            test_web_to_web(*l as usize).await;
+        }
     }
 }
 
-#[wasm_bindgen_test]
-async fn test_seal_unseal_web() {
-    for l in LENGTHS {
-        test_web_to_web(*l as usize).await;
-    }
-}
+mod stream {
+    use super::*;
 
-#[wasm_bindgen_test]
-async fn test_seal_unseal_web_to_rust() {
-    for l in LENGTHS {
-        test_web_to_rust(*l as usize).await;
-    }
-}
+    async fn test_rust_to_rust(len: usize) {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
 
-#[wasm_bindgen_test]
-async fn test_seal_unseal_rust_to_web() {
-    for l in LENGTHS {
-        test_rust_to_web(*l as usize).await;
+        let usk = &setup.usks[2];
+        let signing_key = &setup.signing_keys[0];
+        let vk = setup.ibs_pk;
+
+        let plain = rand_vec(len);
+
+        let mut a = Cursor::new(&plain);
+        let mut b = Vec::new();
+
+        let window = web_sys::window().expect("no window");
+        let performance = window.performance().expect("no performance");
+        let t0 = performance.now();
+
+        Sealer::<_, RSC>::new(&setup.ibe_pk, &setup.policy, signing_key, &mut rng)
+            .unwrap()
+            .seal(&mut a, &mut b)
+            .await
+            .unwrap();
+
+        let mut c = Cursor::new(&b);
+        let unsealer = Unsealer::<_, RUC>::new(&mut c, &vk).await.unwrap();
+
+        let mut plain2 = Vec::new();
+        let pol = unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
+
+        let t = performance.now() - t0;
+        log(&format!(
+            "[rust]: seal/unseal message of length {len} took {t:.1} ms"
+        ));
+
+        assert_eq!(&plain, &plain2);
+        assert_eq!(&pol.public, &signing_key.policy);
+        assert_eq!(pol.private, None);
+    }
+
+    async fn test_web_to_web(len: usize) {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let options = SealOptions {
+            policy: setup.policy.clone(),
+            pub_sign_key: setup.signing_keys[0].clone(),
+            priv_sign_key: Some(setup.signing_keys[1].clone()),
+        };
+
+        let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
+
+        let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
+        let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
+        let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
+
+        let plain = rand_vec(len);
+        let js_plain = Uint8Array::from(&plain[..]);
+
+        let sealer_input = new_readable_stream_from_array(vec![js_plain.into()].into_boxed_slice());
+        let sealer_output = new_recording_writable_stream();
+
+        let window = web_sys::window().expect("no window");
+        let performance = window.performance().expect("no performance");
+
+        let t0 = performance.now();
+
+        js_stream_seal(
+            mpk.clone(),
+            js_options,
+            sealer_input,
+            sealer_output.stream(),
+        )
+        .await
+        .unwrap();
+
+        let unsealer_input =
+            new_readable_stream_from_array(sealer_output.written().to_vec().into_boxed_slice());
+        let unsealer_output = new_recording_writable_stream();
+
+        let unsealer = StreamUnsealer::new(unsealer_input, vk).await.unwrap();
+
+        let res = unsealer
+            .unseal("Bob".to_string(), usk, unsealer_output.stream())
+            .await
+            .unwrap();
+
+        let t = performance.now() - t0;
+        log(&format!(
+            "[web]: seal/unseal message of length {len} took {t:.1} ms"
+        ));
+
+        let res: VerificationResult = serde_wasm_bindgen::from_value(res).unwrap();
+
+        let plain2: Vec<u8> = unsealer_output
+            .written()
+            .iter()
+            .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
+            .collect();
+
+        assert_eq!(&plain, &plain2);
+        assert_eq!(&res.public, &setup.signing_keys[0].policy);
+        assert_eq!(res.private, Some(setup.signing_keys[1].policy.clone()));
+    }
+
+    async fn test_web_to_rust(len: usize) {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // Seal inputs (Web).
+        let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
+        let options = SealOptions {
+            policy: setup.policy.clone(),
+            pub_sign_key: setup.signing_keys[0].clone(),
+            priv_sign_key: None,
+        };
+
+        let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
+
+        // Unseal inputs (Rust).
+        let usk = &setup.usks[2];
+        let vk = setup.ibs_pk;
+
+        let plain = rand_vec(len);
+        let js_plain = Uint8Array::from(&plain[..]);
+
+        let sealer_input = new_readable_stream_from_array(vec![js_plain.into()].into_boxed_slice());
+        let sealer_output = new_recording_writable_stream();
+
+        js_stream_seal(
+            mpk.clone(),
+            js_options,
+            sealer_input,
+            sealer_output.stream(),
+        )
+        .await
+        .unwrap();
+
+        let unsealer_input: Vec<u8> = sealer_output
+            .written()
+            .iter()
+            .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
+            .collect();
+
+        let mut tmp = Cursor::new(&unsealer_input);
+        let unsealer = Unsealer::<_, RUC>::new(&mut tmp, &vk).await.unwrap();
+
+        let mut plain2 = Vec::new();
+        unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
+
+        assert_eq!(&plain, &plain2);
+    }
+
+    async fn test_rust_to_web(len: usize) {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // Sealer inputs (rust).
+        let signing_key = &setup.signing_keys[0];
+
+        // Unsealer inputs (web).
+        let usk = serde_wasm_bindgen::to_value(&setup.usks[2]).unwrap();
+        let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
+
+        let plain = rand_vec(len);
+        let mut a = Cursor::new(&plain);
+        let mut b = Vec::new();
+
+        Sealer::<_, RSC>::new(&setup.ibe_pk, &setup.policy, &signing_key, &mut rng)
+            .unwrap()
+            .seal(&mut a, &mut b)
+            .await
+            .unwrap();
+
+        let unsealer_input = new_readable_stream_from_array(
+            vec![Uint8Array::from(&b[..]).dyn_into().unwrap()].into_boxed_slice(),
+        );
+        let unsealer_output = new_recording_writable_stream();
+
+        let unsealer = StreamUnsealer::new(unsealer_input, vk).await.unwrap();
+
+        unsealer
+            .unseal("Bob".to_string(), usk, unsealer_output.stream())
+            .await
+            .unwrap();
+
+        let plain2: Vec<u8> = unsealer_output
+            .written()
+            .iter()
+            .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
+            .collect();
+
+        assert_eq!(&plain, &plain2);
+    }
+
+    #[wasm_bindgen_test]
+    async fn test_seal_unseal_rust() {
+        for l in LENGTHS {
+            test_rust_to_rust(*l as usize).await;
+        }
+    }
+
+    #[wasm_bindgen_test]
+    async fn test_seal_unseal_web() {
+        for l in LENGTHS {
+            test_web_to_web(*l as usize).await;
+        }
+    }
+
+    #[wasm_bindgen_test]
+    async fn test_seal_unseal_web_to_rust() {
+        for l in LENGTHS {
+            test_web_to_rust(*l as usize).await;
+        }
+    }
+
+    #[wasm_bindgen_test]
+    async fn test_seal_unseal_rust_to_web() {
+        for l in LENGTHS {
+            test_rust_to_web(*l as usize).await;
+        }
     }
 }

@@ -14,7 +14,7 @@ categories = ["cryptography"]
 
 [dependencies]
 ibe = { version = "0.3.0", features = ["cgwkv", "mkem"] }
-ibs = { version = "0.4.0-rc.6" }
+ibs = { version = "0.4.0-rc.7" }
 irma = "0.2.1"
 rand = { version = "0.8", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
