@@ -61,7 +61,7 @@ pub async fn js_seal(
     mpk: JsValue,
     options: JsValue,
     plain: Uint8Array,
-) -> Result<JsValue, JsValue> {
+) -> Result<Uint8Array, JsValue> {
     let mut rng = rand::thread_rng();
 
     let mpk: PublicKey<CGWKV> = serde_wasm_bindgen::from_value(mpk)?;
@@ -80,7 +80,7 @@ pub async fn js_seal(
 
     let res = sealer.seal(&plain).await?;
 
-    Ok(res.into())
+    Ok(res)
 }
 
 /// Seals the contents of a `ReadableStream` into a `WritableStream` using
