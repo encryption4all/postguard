@@ -108,7 +108,7 @@ pub async fn js_seal(
 /// # Errors
 ///
 /// The seal function expects `Uint8Array` chunks and will error otherwise.
-#[wasm_bindgen(js_name = stream_seal)]
+#[wasm_bindgen(js_name = sealStream)]
 pub async fn js_stream_seal(
     mpk: JsValue,
     options: JsValue,
