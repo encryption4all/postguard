@@ -240,3 +240,9 @@ impl From<Error> for JsValue {
         JsError::new(&err.to_string()).into()
     }
 }
+
+impl From<JsValue> for Error {
+    fn from(e: JsValue) -> Self {
+        Error::JavaScript(e)
+    }
+}

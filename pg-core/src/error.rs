@@ -3,10 +3,13 @@
 use core::{array::TryFromSliceError, num::TryFromIntError};
 
 use crate::client::{Algorithm, Mode};
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 #[cfg(feature = "stream")]
 use futures::io::Error as FuturesIOError;
+
+#[cfg(feature = "web")]
+use wasm_bindgen::JsValue;
 
 /// An PostGuard error.
 #[derive(Debug)]
@@ -45,6 +48,9 @@ pub enum Error {
     /// Opaque asynchronous IO error from the futures crate.
     #[cfg(feature = "stream")]
     FuturesIO(FuturesIOError),
+    /// A JavaScript error.
+    #[cfg(feature = "web")]
+    JavaScript(JsValue),
 }
 
 impl core::fmt::Display for Error {
@@ -71,6 +77,12 @@ impl core::fmt::Display for Error {
             Self::IncorrectSignature => write!(f, "incorrect signature"),
             #[cfg(feature = "stream")]
             Self::FuturesIO(e) => write!(f, "futures IO error: {e}"),
+            #[cfg(feature = "web")]
+            Self::JavaScript(e) => write!(
+                f,
+                "JavaScript error: {}",
+                e.as_string().unwrap_or("no further details".to_string())
+            ),
         }
     }
 }

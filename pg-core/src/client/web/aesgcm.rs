@@ -16,13 +16,6 @@ extern "C" {
     fn get_crypto() -> Crypto;
 }
 
-// Any error that happens in this module is an opaque symmetric error.
-impl From<JsValue> for Error {
-    fn from(_: JsValue) -> Self {
-        Error::Symmetric
-    }
-}
-
 pub async fn get_key(key: &[u8]) -> Result<CryptoKey, Error> {
     let subtle = get_crypto().subtle();
     let algorithm: JsValue = Object::new().into();

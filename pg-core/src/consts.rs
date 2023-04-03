@@ -54,8 +54,8 @@ pub const PREAMBLE_SIZE: usize = PRELUDE_SIZE + VERSION_SIZE + HEADER_SIZE_SIZE;
 
 /// Default size of symmetric encryption segments, if in streaming mode.
 ///
-/// A reasonable default is 64 KiB.
-pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: u32 = 64 * 1024;
+/// A reasonable default is 256 KiB.
+pub const SYMMETRIC_CRYPTO_DEFAULT_CHUNK: u32 = 256 * 1024;
 
 // Symmetric crypto constants.
 // This library uses AES128 because BLS12-381 is only secure up to around 120 bits.
