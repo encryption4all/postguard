@@ -1,13 +1,10 @@
 [workspace]
-members = [
-  "irmaseal-core",
-  "irmaseal-cli",
-  "irmaseal-pkg",
-  "irmaseal-wasm-bindings"
-]
+members = ["pg-core", "pg-cli", "pg-pkg", "pg-wasm"]
 
-[profile.release] 
+resolver = "2"
+
+[profile.release]
 lto = true
 
-[profile.release.package.irmaseal-wasm-bindings]
+[profile.release.package.pg-wasm]
 opt-level = "s"
