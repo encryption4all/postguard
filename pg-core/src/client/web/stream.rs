@@ -335,6 +335,19 @@ where
         let mut buf_tail = 0;
         let mut pol_id: Option<(Policy, Identity)> = None;
 
+        fn extract_policy(
+            plain: Uint8Array,
+        ) -> Result<(Option<(Policy, Identity)>, Uint8Array), Error> {
+            let pol_len =
+                u32::from_be_bytes(plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?);
+            let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
+            let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
+            let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
+            let new_plain = plain.slice(POL_SIZE_SIZE as u32 + pol_len, plain.byte_length());
+
+            Ok((Some((pol, id)), new_plain))
+        }
+
         loop {
             // First exhaust the spillage, then the rest of the stream.
             let mut array: Uint8Array = if !self.config.spill.is_empty() {
@@ -368,15 +381,7 @@ where
                     .await?;
 
                     if counter == 0 {
-                        let pol_len = u32::from_be_bytes(
-                            plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?,
-                        );
-                        let pol_bytes =
-                            plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
-                        let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
-                        let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
-                        plain = plain.slice(POL_SIZE_SIZE as u32 + pol_len, plain.byte_length());
-                        pol_id = Some((pol, id));
+                        (pol_id, plain) = extract_policy(plain)?;
                     }
 
                     debug_assert!(plain.byte_length() > SIG_BYTES as u32);
@@ -413,15 +418,7 @@ where
         .await?;
 
         if counter == 0 {
-            let pol_len = u32::from_be_bytes(
-                final_plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?,
-            );
-            let pol_bytes = final_plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
-            let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
-            let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
-            final_plain =
-                final_plain.slice(POL_SIZE_SIZE as u32 + pol_len, final_plain.byte_length());
-            pol_id = Some((pol, id));
+            (pol_id, final_plain) = extract_policy(final_plain)?;
         }
 
         debug_assert!(final_plain.byte_length() > SIG_BYTES as u32);
@@ -432,9 +429,7 @@ where
         );
 
         let sig: Signature = bincode::deserialize(&sig.to_vec())?;
-
         self.verifier.update(&m.to_vec());
-
         if !self
             .verifier
             .clone()
