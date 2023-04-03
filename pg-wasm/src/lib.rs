@@ -9,7 +9,7 @@
 use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use pg_core::client::web::stream::{StreamSealerConfig, StreamUnsealerConfig};
 use pg_core::client::web::{SealerMemoryConfig, UnsealerMemoryConfig};
-use pg_core::client::{Sealer, Unsealer};
+use pg_core::client::{Header, Sealer, Unsealer};
 use pg_core::identity::{EncryptionPolicy, HiddenPolicy};
 use pg_core::kem::cgw_kv::CGWKV;
 
@@ -47,6 +47,18 @@ pub struct StreamUnsealer(Unsealer<IntoStream<'static>, StreamUnsealerConfig>);
 #[derive(Debug)]
 #[wasm_bindgen(js_name = Unsealer)]
 pub struct MemoryUnsealer(Unsealer<Uint8Array, UnsealerMemoryConfig>);
+
+// Helper to retrieve the recipients from a header.
+fn get_recipients(header: &Header) -> Result<JsValue, JsValue> {
+    let policies: BTreeMap<String, HiddenPolicy> = header
+        .recipients
+        .iter()
+        .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
+        .collect();
+    let pol = serde_wasm_bindgen::to_value(&policies)?;
+
+    Ok(pol)
+}
 
 /// Seals the contents of a `Uint8Array` into a `Uint8Array` using
 /// the given master public key and policies.
@@ -132,10 +144,10 @@ pub async fn js_stream_seal(
 impl StreamUnsealer {
     /// Constructs a new `Unsealer` from a Javascript `ReadableStream`.
     ///
-    /// The decrypting party should then use [`Unsealer::inspect_header]`
+    /// The decrypting party should then use [`Unsealer::inspect_header`]
     /// to retrieve a user secret key for using in [`Unsealer::unseal()`].
     ///
-    /// Locks the ReadableStream until this Unsealer is dropped.`
+    /// Locks the ReadableStream until this Unsealer is dropped.
     pub async fn new(readable: RawReadableStream, vk: JsValue) -> Result<StreamUnsealer, JsValue> {
         let vk: VerifyingKey = serde_wasm_bindgen::from_value(vk)?;
 
@@ -176,21 +188,10 @@ impl StreamUnsealer {
     ///
     /// The user should use this to retrieve a `UserSecretKey` via the PKG.
     pub fn inspect_header(&self) -> Result<JsValue, JsValue> {
-        let policies: BTreeMap<String, HiddenPolicy> = self
-            .0
-            .header
-            .recipients
-            .iter()
-            .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
-            .collect();
-
-        let pol = serde_wasm_bindgen::to_value(&policies)?;
-
-        Ok(pol)
+        get_recipients(&self.0.header)
     }
 }
 
-// TODO: might be simpler to return a js_sys::Array?
 /// The result of unsealing.
 #[derive(Debug)]
 #[wasm_bindgen]
@@ -198,19 +199,19 @@ pub struct UnsealerResult {
     /// The plaintext.
     plain: Uint8Array,
 
-    /// The serialized [`VerificationResult`] that was used to sign.
+    /// The verified policy of the sender.
     policy: JsValue,
 }
 
 #[wasm_bindgen]
 impl UnsealerResult {
-    /// The plaintext.
+    /// Returns the plaintext.
     #[wasm_bindgen(getter)]
     pub fn plain(self) -> Uint8Array {
         self.plain
     }
 
-    /// The verified sender identity claims.
+    /// Returns the verified policy of the sender.
     #[wasm_bindgen(getter)]
     pub fn policy(&self) -> JsValue {
         self.policy.clone()
@@ -246,16 +247,6 @@ impl MemoryUnsealer {
     /// Inspects the header for hidden policies in the header.
     /// The user should use this to retrieve a `UserSecretKey` via the PKG.
     pub fn inspect_header(&self) -> Result<JsValue, JsValue> {
-        let policies: BTreeMap<String, HiddenPolicy> = self
-            .0
-            .header
-            .recipients
-            .iter()
-            .map(|(rid, r_info)| (rid.clone(), r_info.policy.clone()))
-            .collect();
-
-        let pol = serde_wasm_bindgen::to_value(&policies)?;
-
-        Ok(pol)
+        get_recipients(&self.0.header)
     }
 }
