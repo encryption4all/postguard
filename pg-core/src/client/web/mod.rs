@@ -32,7 +32,7 @@ use crate::error::Error;
 use crate::identity::EncryptionPolicy;
 
 use ibe::kem::cgw_kv::CGWKV;
-use ibs::gg::{Identity, Signer, IDENTITY_BYTES};
+use ibs::gg::Signer;
 
 use js_sys::Error as JsError;
 use js_sys::Uint8Array;

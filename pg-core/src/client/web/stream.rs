@@ -7,7 +7,7 @@ use crate::client::*;
 use crate::error::Error;
 use crate::identity::{EncryptionPolicy, Policy};
 use crate::util::preamble_checked;
-use ibs::gg::{Identity, Signature, Signer, Verifier, IDENTITY_BYTES, SIG_BYTES};
+use ibs::gg::{Identity, Signature, Signer, Verifier, SIG_BYTES};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use ibe::kem::cgw_kv::CGWKV;
