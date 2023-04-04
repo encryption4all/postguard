@@ -283,7 +283,7 @@ where
         let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
 
         let verifier = Verifier::default().chain(&header_raw);
-        let pub_id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
+        let pub_id = h_sig_ext.pol.derive_ibs()?;
 
         if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &pub_id) {
             return Err(Error::IncorrectSignature.into());
@@ -342,7 +342,7 @@ where
                 u32::from_be_bytes(plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?);
             let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
             let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
-            let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
+            let id = pol.derive_ibs()?;
             let new_plain = plain.slice(POL_SIZE_SIZE as u32 + pol_len, plain.byte_length());
 
             Ok((Some((pol, id)), new_plain))

@@ -158,7 +158,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);
 
         let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
-        let id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
+        let id = h_sig_ext.pol.derive_ibs()?;
 
         let verifier = Verifier::default().chain(&header_bytes);
 
@@ -205,7 +205,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
             .to_vec();
 
         let msg: MessageAndSignature = bincode::deserialize(&plain).map_err(Into::<Error>::into)?;
-        let id = Identity::from(msg.sig.pol.derive::<IDENTITY_BYTES>()?);
+        let id = msg.sig.pol.derive_ibs()?;
         let verified = self
             .verifier
             .chain(&msg.message)

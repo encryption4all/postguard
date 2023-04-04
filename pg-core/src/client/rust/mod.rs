@@ -15,7 +15,7 @@ use crate::identity::EncryptionPolicy;
 use aead::{Aead, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
 use ibe::kem::cgw_kv::CGWKV;
-use ibs::gg::{Identity, Signer, IDENTITY_BYTES};
+use ibs::gg::Signer;
 use rand::{CryptoRng, RngCore};
 
 #[cfg(feature = "stream")]
@@ -145,7 +145,7 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
         let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);
 
         let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
-        let id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
+        let id = h_sig_ext.pol.derive_ibs()?;
 
         let verifier = Verifier::default().chain(header_bytes);
 
@@ -193,7 +193,7 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
         let plain = aead.decrypt(nonce, &*self.r)?;
 
         let msg: MessageAndSignature = bincode::deserialize(&plain)?;
-        let id = Identity::from(msg.sig.pol.derive::<IDENTITY_BYTES>()?);
+        let id = msg.sig.pol.derive_ibs()?;
 
         if !self
             .verifier

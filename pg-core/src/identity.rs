@@ -4,12 +4,13 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
+use ibs::gg::Identity;
 
 use crate::error::Error;
 use ibe::kem::IBKEM;
 use ibe::Derive;
 use serde::{Deserialize, Serialize};
-use tiny_keccak::{Hasher, Sha3, Shake};
+use tiny_keccak::{Hasher, Sha3};
 
 const IDENTITY_UNSET: u64 = u64::MAX;
 const MAX_CON: usize = (IDENTITY_UNSET as usize - 1) >> 1;
@@ -89,8 +90,8 @@ impl Policy {
         }
     }
 
-    /// Derives an N-byte identity from a [`Policy`].
-    pub fn derive<const N: usize>(&self) -> Result<[u8; N], Error> {
+    /// Derives an 64-byte identity from a [`Policy`].
+    pub fn derive(&self) -> Result<[u8; 64], Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
         //  - con[0..n - 1] consisting of n conjunctions.
@@ -108,7 +109,7 @@ impl Policy {
         }
 
         let mut tmp = [0u8; 64];
-        let mut pre_h = Shake::v256();
+        let mut pre_h = Sha3::v512();
 
         // 0 indicates the IRMA authentication method.
         pre_h.update(&[0x00]);
@@ -145,17 +146,20 @@ impl Policy {
         }
 
         pre_h.update(&self.timestamp.to_be_bytes());
-        let mut res = [0u8; N];
+        let mut res = [0u8; 64];
         pre_h.finalize(&mut res);
 
         Ok(res)
     }
 
-    /// Derive a KEMs associated identity from a [`Policy`].
+    /// Derive a KEM identity from a [`Policy`].
     pub fn derive_kem<K: IBKEM>(&self) -> Result<<K as IBKEM>::Id, Error> {
-        // This hash is superfluous in theory, but derive does not support incremental hashing.
-        // As a practical considerion we use an extra hash here.
-        Ok(<K as IBKEM>::Id::derive(&self.derive::<64>()?))
+        Ok(<K as IBKEM>::Id::derive(&self.derive()?))
+    }
+
+    /// Derive an IBS identity from a [`Policy`].
+    pub fn derive_ibs(&self) -> Result<ibs::gg::Identity, Error> {
+        Ok(Identity::from(&self.derive()?))
     }
 }
 
@@ -217,5 +221,80 @@ mod tests {
         };
         let hinted_empty = attr_not_whitelisted.hintify_value();
         assert_eq!(hinted_empty.value, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_regression() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // Make sure that the policies in the TestSetup map to identical KEM/IBS identities.
+        let kem_ids: [[u8; 64]; 5] = [
+            [
+                243, 215, 91, 185, 176, 144, 186, 190, 101, 135, 237, 186, 47, 183, 76, 243, 182,
+                195, 213, 35, 18, 38, 203, 7, 53, 157, 78, 193, 99, 141, 169, 0, 13, 112, 111, 32,
+                172, 75, 5, 106, 165, 47, 53, 111, 177, 2, 8, 107, 242, 252, 49, 241, 67, 229, 5,
+                191, 13, 17, 246, 216, 119, 186, 227, 119,
+            ],
+            [
+                245, 162, 197, 104, 15, 166, 248, 109, 79, 173, 252, 30, 92, 165, 193, 237, 255,
+                228, 162, 5, 42, 227, 151, 207, 97, 134, 20, 41, 20, 142, 220, 5, 234, 222, 45,
+                199, 163, 191, 112, 167, 52, 193, 120, 143, 245, 8, 24, 46, 8, 77, 183, 255, 32,
+                196, 251, 247, 233, 114, 16, 114, 69, 19, 88, 105,
+            ],
+            [
+                55, 240, 138, 50, 172, 20, 36, 194, 154, 137, 247, 125, 112, 215, 118, 219, 172,
+                226, 21, 87, 116, 226, 44, 228, 62, 148, 86, 82, 119, 154, 209, 89, 219, 49, 115,
+                130, 187, 57, 252, 108, 239, 118, 210, 165, 13, 53, 96, 200, 55, 211, 229, 32, 59,
+                140, 234, 87, 124, 64, 128, 223, 6, 248, 172, 238,
+            ],
+            [
+                224, 26, 15, 201, 109, 47, 252, 119, 219, 216, 15, 186, 65, 123, 47, 131, 130, 196,
+                248, 145, 241, 235, 13, 216, 182, 74, 236, 81, 198, 67, 28, 7, 114, 158, 252, 90,
+                123, 131, 138, 155, 56, 93, 46, 93, 160, 8, 72, 122, 193, 229, 123, 36, 69, 50,
+                189, 38, 183, 208, 7, 102, 249, 33, 219, 46,
+            ],
+            [
+                199, 241, 225, 34, 158, 92, 56, 128, 249, 122, 93, 192, 132, 106, 3, 247, 209, 109,
+                66, 92, 203, 108, 184, 198, 208, 254, 255, 150, 116, 17, 225, 112, 114, 121, 189,
+                231, 19, 215, 46, 246, 250, 211, 61, 254, 172, 44, 242, 18, 170, 49, 37, 56, 140,
+                217, 127, 97, 247, 210, 224, 181, 220, 246, 126, 140,
+            ],
+        ];
+
+        let ibs_ids: [[u8; 32]; 5] = [
+            [
+                180, 14, 93, 181, 36, 29, 110, 232, 226, 36, 52, 230, 202, 168, 128, 63, 18, 200,
+                133, 234, 142, 171, 42, 130, 204, 102, 83, 232, 69, 19, 188, 40,
+            ],
+            [
+                28, 98, 33, 83, 107, 211, 195, 182, 119, 220, 223, 113, 224, 225, 193, 22, 200,
+                249, 124, 48, 182, 122, 0, 65, 241, 201, 164, 104, 236, 175, 50, 108,
+            ],
+            [
+                254, 181, 235, 14, 113, 97, 93, 200, 45, 48, 184, 245, 237, 118, 89, 250, 199, 105,
+                213, 208, 27, 41, 189, 166, 246, 1, 105, 163, 244, 239, 78, 122,
+            ],
+            [
+                165, 205, 240, 238, 241, 135, 30, 175, 42, 99, 93, 112, 171, 40, 249, 246, 133,
+                162, 228, 144, 133, 77, 246, 199, 134, 77, 78, 182, 224, 66, 111, 239,
+            ],
+            [
+                22, 61, 147, 117, 0, 147, 225, 164, 134, 216, 244, 108, 165, 173, 205, 236, 24,
+                185, 73, 128, 9, 95, 91, 162, 155, 120, 67, 252, 138, 112, 249, 217,
+            ],
+        ];
+
+        for (p, (kem, ibs)) in setup
+            .policies
+            .iter()
+            .zip(kem_ids.iter().zip(ibs_ids.iter()))
+        {
+            let kem2 = p.derive_kem::<CGWKV>().unwrap();
+            let ibs2 = p.derive_ibs().unwrap();
+
+            assert_eq!(&kem[..], &kem2.0);
+            assert_eq!(&ibs::gg::Identity::from(&ibs), &ibs2);
+        }
     }
 }

@@ -5,7 +5,7 @@ use pg_core::api::KeyResponse;
 use pg_core::artifacts::{SigningKey, SigningKeyExt};
 use pg_core::identity::Policy;
 
-use pg_core::ibs::gg::{keygen, Identity, SecretKey, IDENTITY_BYTES};
+use pg_core::ibs::gg::{keygen, Identity, SecretKey};
 
 use crate::middleware::irma::IrmaAuthResult;
 use crate::util::current_time_u64;
@@ -38,9 +38,7 @@ pub async fn signing_key(
         con,
     };
 
-    let derived = policy
-        .derive::<IDENTITY_BYTES>()
-        .map_err(|_e| crate::Error::Unexpected)?;
+    let derived = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
 
     let id = Identity::from(derived);
     let key = keygen(sk, &id, &mut rng);

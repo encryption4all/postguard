@@ -3,6 +3,8 @@
 use core::{array::TryFromSliceError, num::TryFromIntError};
 
 use crate::client::{Algorithm, Mode};
+
+#[allow(unused)]
 use alloc::string::{String, ToString};
 
 #[cfg(feature = "stream")]

@@ -4,7 +4,6 @@ use crate::artifacts::{PublicKey, SigningKey, SigningKeyExt, UserSecretKey, Veri
 use crate::identity::{Attribute, EncryptionPolicy, Policy};
 use ibe::kem::cgw_kv::CGWKV;
 use ibe::kem::IBKEM;
-use ibs::gg::IDENTITY_BYTES as IBS_ID_BYTES;
 use rand::{CryptoRng, Rng};
 
 use alloc::string::String;
@@ -103,7 +102,7 @@ impl TestSetup {
         let signing_keys = policies
             .iter()
             .map(|pol| {
-                let derived = ibs::gg::Identity::from(pol.derive::<IBS_ID_BYTES>().unwrap());
+                let derived = pol.derive_ibs().unwrap();
                 let signing_key = ibs::gg::keygen(&ibs_sk, &derived, rng);
 
                 SigningKeyExt {

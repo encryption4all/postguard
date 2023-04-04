@@ -7,7 +7,7 @@ use crate::client::*;
 use crate::error::Error;
 use crate::identity::{EncryptionPolicy, Policy};
 use ibe::kem::cgw_kv::CGWKV;
-use ibs::gg::{Identity, Signature, Signer, Verifier, IDENTITY_BYTES, SIG_BYTES};
+use ibs::gg::{Identity, Signature, Signer, Verifier, SIG_BYTES};
 
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use aead::KeyInit;
@@ -213,7 +213,7 @@ where
         let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
 
         let verifier = Verifier::default().chain(&header_raw);
-        let pub_id = Identity::from(h_sig_ext.pol.derive::<IDENTITY_BYTES>()?);
+        let pub_id = h_sig_ext.pol.derive_ibs()?;
 
         if !verifier.clone().verify(&pk.0, &h_sig_ext.sig, &pub_id) {
             return Err(Error::IncorrectSignature);
@@ -265,7 +265,7 @@ where
             let pol_len = u32::from_be_bytes(buf[..POL_SIZE_SIZE].try_into()?) as usize;
             let pol_bytes = &buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len];
             let pol: Policy = bincode::deserialize(pol_bytes)?;
-            let id = Identity::from(pol.derive::<IDENTITY_BYTES>()?);
+            let id = pol.derive_ibs()?;
 
             buf.drain(..POL_SIZE_SIZE + pol_len);
 

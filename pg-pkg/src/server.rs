@@ -341,7 +341,7 @@ pub(crate) mod tests {
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
-        let id = gg::Identity::from(pol.derive::<32>().unwrap());
+        let id = pol.derive_ibs().unwrap();
 
         let req = test::TestRequest::get()
             .uri("/v2/sign/key")
