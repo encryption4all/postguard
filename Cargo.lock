@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "pg-wasm"
-version = "0.3.0-rc.0"
+version = "0.3.0-rc.3"
 dependencies = [
  "futures 0.3.27",
  "getrandom",

@@ -1,6 +1,6 @@
 [package]
 name = "pg-wasm"
-version = "0.3.0-rc.0"
+version = "0.3.0-rc.3"
 authors = [
   "Leon Botros <l.botros@cs.ru.nl>",
   "Bas Westerbaan <bas@westerbaan.name>",
