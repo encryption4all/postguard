@@ -19,7 +19,7 @@ use wasm_streams::readable::IntoStream;
 use wasm_streams::readable::{sys::ReadableStream as RawReadableStream, ReadableStream};
 use wasm_streams::writable::{sys::WritableStream as RawWritableStream, WritableStream};
 
-use js_sys::Uint8Array;
+use js_sys::{Array, Uint8Array};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -192,32 +192,6 @@ impl StreamUnsealer {
     }
 }
 
-/// The result of unsealing.
-#[derive(Debug)]
-#[wasm_bindgen]
-pub struct UnsealerResult {
-    /// The plaintext.
-    plain: Uint8Array,
-
-    /// The verified policy of the sender.
-    policy: JsValue,
-}
-
-#[wasm_bindgen]
-impl UnsealerResult {
-    /// Returns the plaintext.
-    #[wasm_bindgen(getter)]
-    pub fn plain(self) -> Uint8Array {
-        self.plain
-    }
-
-    /// Returns the verified policy of the sender.
-    #[wasm_bindgen(getter)]
-    pub fn policy(&self) -> JsValue {
-        self.policy.clone()
-    }
-}
-
 #[wasm_bindgen(js_class = Unsealer)]
 impl MemoryUnsealer {
     /// Create new `Unsealer`.
@@ -229,19 +203,16 @@ impl MemoryUnsealer {
     }
 
     /// Unseal the payload.
-    pub async fn unseal(
-        self,
-        recipient_id: String,
-        usk: JsValue,
-    ) -> Result<UnsealerResult, JsValue> {
+    pub async fn unseal(self, recipient_id: String, usk: JsValue) -> Result<Array, JsValue> {
         let usk: UserSecretKey<CGWKV> = serde_wasm_bindgen::from_value(usk)?;
         let (output, pol) = self.0.unseal(&recipient_id, &usk).await?;
         let pol_serialized = serde_wasm_bindgen::to_value(&pol)?;
 
-        Ok(UnsealerResult {
-            plain: output,
-            policy: pol_serialized,
-        })
+        let arr = Array::new_with_length(2);
+        arr.set(0, output.into());
+        arr.set(1, pol_serialized);
+
+        Ok(arr)
     }
 
     /// Inspects the header for hidden policies in the header.
