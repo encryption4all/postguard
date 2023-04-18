@@ -19,6 +19,10 @@
 //! encapsulation and signatures) to provide confidentiality, integrity and authenticity over
 //! messages.
 //!
+//! ⚠️ **Warning**: This implementation has not been audited and is not ready for use in production. Use at your own risk!
+//!
+//! ## Overview
+//!
 //! The library implements a hybrid Sign-then-Encrypt (StE) composition:
 //!
 //! * KEM: First, a shared secret is encapsulated for all recipients using [`Multi-User Identity-Based
