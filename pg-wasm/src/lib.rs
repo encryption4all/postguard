@@ -25,6 +25,7 @@ use std::collections::BTreeMap;
 
 /// Seal options.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SealOptions {
     /// The encryption policy.
     pub policy: EncryptionPolicy,
