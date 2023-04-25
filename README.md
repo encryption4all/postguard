@@ -1,8 +1,6 @@
 # <p align="center"><img src="./img/pg_logo.svg" height="128px" alt="PostGuard" /></p>
 
-:exclamation:
-**PostGuard is a research project. The code has not be audited. Do not use in production!**
-:exclamation:
+⚠️ **Warning**: This implementation has not been audited. Use at your own risk!
 
 PostGuard is an Identity-Based Encryption (IBE) service that can be used to
 encrypt messages. In Identity-Based Encryption, anyone can encrypt messages for
