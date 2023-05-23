@@ -23,6 +23,35 @@ use js_sys::{Array, Uint8Array};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[wasm_bindgen(typescript_custom_section)]
+const TS_APPEND_CONTENT: &'static str = r#"
+interface ISealOptions {
+  policy: EncryptionPolicy;
+  pubSignKey: SigningKey;
+  privSignKey?: SigningKey;
+}
+
+export type EncryptionPolicy = { [recipient: string]: Policy };
+
+interface ISigningKey {
+  key: string;
+  policy: Policy;
+}
+
+interface IPolicy {
+  con: AttributeCon;
+  ts: number;
+}
+
+export type AttributeCon = { t: string; v: string }[];
+"#;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "ISealOptions")]
+    pub type ISealOptions;
+}
+
 /// Seal options.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,12 +96,12 @@ fn get_recipients(header: &Header) -> Result<JsValue, JsValue> {
 /// # Arguments
 ///
 /// * `mpk`      - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
-/// * `options`  - The seal options [`SealOptions`].
+/// * `options`  - The seal options [`ISealOptions`].
 /// * `plain`    - The plaintext `Uint8Array` for data encapsulation.
 #[wasm_bindgen(js_name = seal)]
 pub async fn js_seal(
     mpk: JsValue,
-    options: JsValue,
+    options: ISealOptions,
     plain: Uint8Array,
 ) -> Result<Uint8Array, JsValue> {
     let mut rng = rand::thread_rng();
@@ -83,7 +112,7 @@ pub async fn js_seal(
         policy,
         pub_sign_key,
         priv_sign_key,
-    } = serde_wasm_bindgen::from_value(options)?;
+    } = serde_wasm_bindgen::from_value(options.into())?;
 
     let mut sealer = Sealer::<_, SealerMemoryConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)?;
 
@@ -102,7 +131,7 @@ pub async fn js_seal(
 /// # Arguments
 ///
 /// * `mpk`      - Master public key, can be obtained using, e.g. fetch(`{PKGURL}/v2/parameters`).
-/// * `options`  - The seal options [`SealOptions`].
+/// * `options`  - The seal options [`ISealOptions`].
 /// * `readable` - The plaintext `ReadableStream` for data encapsulation. Only chunks of type `Uint8Array` should be enqueued.
 /// * `writable` - The `WritableStream` to which the ciphertext is written. Writes chunks of type `Uint8Array`.
 ///
@@ -112,7 +141,7 @@ pub async fn js_seal(
 #[wasm_bindgen(js_name = sealStream)]
 pub async fn js_stream_seal(
     mpk: JsValue,
-    options: JsValue,
+    options: ISealOptions,
     readable: RawReadableStream,
     writable: RawWritableStream,
 ) -> Result<(), JsValue> {
@@ -124,7 +153,7 @@ pub async fn js_stream_seal(
         policy,
         pub_sign_key,
         priv_sign_key,
-    } = serde_wasm_bindgen::from_value(options)?;
+    } = serde_wasm_bindgen::from_value(options.into())?;
 
     let read = ReadableStream::from_raw(readable);
     let mut stream = read.into_stream();
