@@ -27,15 +27,15 @@ use std::collections::BTreeMap;
 const TS_APPEND_CONTENT: &'static str = r#"
 interface ISealOptions {
   policy: EncryptionPolicy;
-  pubSignKey: SigningKey;
-  privSignKey?: SigningKey;
+  pubSignKey: ISigningKey;
+  privSignKey?: ISigningKey;
 }
 
-export type EncryptionPolicy = { [recipient: string]: Policy };
+export type EncryptionPolicy = { [recipient: string]: IPolicy };
 
 interface ISigningKey {
   key: string;
-  policy: Policy;
+  policy: IPolicy;
 }
 
 interface IPolicy {
