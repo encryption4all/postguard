@@ -220,6 +220,11 @@ impl StreamUnsealer {
     pub fn inspect_header(&self) -> Result<JsValue, JsValue> {
         get_recipients(&self.0.header)
     }
+
+    /// Returns the verified public identity of the sender.
+    pub fn public_identity(&self) -> Result<JsValue, JsValue> {
+        Ok(serde_wasm_bindgen::to_value(&self.0.pub_id)?)
+    }
 }
 
 #[wasm_bindgen(js_class = Unsealer)]
@@ -249,5 +254,10 @@ impl MemoryUnsealer {
     /// The user should use this to retrieve a `UserSecretKey` via the PKG.
     pub fn inspect_header(&self) -> Result<JsValue, JsValue> {
         get_recipients(&self.0.header)
+    }
+
+    /// Returns the verified public identity of the sender.
+    pub fn public_identity(&self) -> Result<JsValue, JsValue> {
+        Ok(serde_wasm_bindgen::to_value(&self.0.pub_id)?)
     }
 }

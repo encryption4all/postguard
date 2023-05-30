@@ -70,7 +70,10 @@ pub struct Unsealer<R, C: UnsealerConfig> {
     /// The parsed header.
     pub header: Header,
 
-    // The type of the input.
+    /// The verified public identity which was used to sign the header.
+    pub pub_id: Policy,
+
+    // The input.
     r: R,
 
     // The implementation-specific configuration.
@@ -81,9 +84,6 @@ pub struct Unsealer<R, C: UnsealerConfig> {
 
     // The message verifier key.
     vk: VerifyingKey,
-
-    // Verified public identity.
-    pub_id: Policy,
 }
 
 /// Sender verification result.
