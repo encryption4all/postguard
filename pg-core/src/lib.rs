@@ -5,7 +5,7 @@
     html_logo_url = "https://postguard.eu/pg_logo_no_text.svg"
 )]
 #![doc = "<div style=\"max-width: 400px; margin: auto\">"]
-#![doc = include_str!("./../../img/pg_logo.svg")]
+#![doc = include_str!("./../doc/pg_logo.svg")]
 #![doc = "</div>"]
 #![deny(
     missing_debug_implementations,
