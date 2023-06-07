@@ -78,14 +78,14 @@ async function fetchKey(sort, keyRequest, timestamp = undefined) {
 
 ```javascript
 // Load the WASM module.
-const { sealStream } = await import("@e4a/irmaseal-wasm-bindings");
+const { sealStream } = await import("@e4a/pg-wasm");
 
 // Retrieve the public key from PKG API:
 const resp = await fetch(`${url}/v2/parameters`);
 const pk = await resp.json().then((r) => r.publicKey);
 
 // We provide the policies which we want to use for encryption.
-const enc_policy = {
+const policy = {
   Bob: {
     ts: Math.round(Date.now() / 1000),
     con: [{ t: "irma-demo.sidn-pbdf.email.email", v: "bob@example.com" }],
@@ -95,23 +95,23 @@ const enc_policy = {
 // We provide the policies which we want to sign with.
 
 // This policy is visible to everyone.
-const pub_sig_policy = {
+const pubSignPolicy = {
   con: [{ t: "irma-demo.gemeente.personalData.fullname", v: "Alice" }],
 };
 
 // This policy is only visible to recipients.
-const priv_sig_policy = {
+const privSignPolicy = {
   con: [{ t: "irma-demo.gemeente.personalData.bsn", v: "1234" }],
 };
 
 // We retrieve keys for these policies.
-let pub_sign_key = await fetchKey(KeySorts.Signing, pub_sig_policy);
-let priv_sign_key = await fetchKey(KeySorts.Signing, priv_sig_policy);
+let pubSignKey = await fetchKey(KeySorts.Signing, pubSignPolicy);
+let privSignKey = await fetchKey(KeySorts.Signing, privSignPolicy);
 
 const sealOptions = {
-  policy: enc_policy,
-  pub_sign_key,
-  priv_sign_key,
+  policy,
+  pubSignKey,
+  privSignKey,
 };
 
 // The following call reads data from a `ReadableStream` and seals it into `WritableStream`.
@@ -123,7 +123,7 @@ await sealStream(pk, sealOptions, readable, writable);
 
 ```javascript
 // Load the WASM module.
-const { StreamUnsealer } = await import("@e4a/irmaseal-wasm-bindings");
+const { StreamUnsealer } = await import("@e4a/pg-wasm");
 
 // Retrieve to global verification key.
 const vk = await fetch(`${PKG_URL}/v2/sign/parameters`)
@@ -187,7 +187,7 @@ let sender = await unsealer.unseal("Bob", usk, writable);
 Encrypting and decrypting `Uint8Array` works similar as the example above. The
 WASM module also exports `seal` and `Unsealer`, which can be used for this. The
 function `seal` returns a new `Uint8Array`. The `Unsealer.unseal` method
-returns an object `{ plain, policy }`, where `plain` is a `Uint8Array` containg
+returns an array `[plain, policy]`, where `plain` is a `Uint8Array` containing
 the plaintext and `policy` is an object containing the sender's signing policy.
 
 ### Leveraging Web Workers
