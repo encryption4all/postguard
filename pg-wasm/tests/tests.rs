@@ -98,7 +98,9 @@ mod mem {
 
         let t0 = performance.now();
 
-        let unsealer_input = js_seal(mpk.clone(), js_options, js_plain).await.unwrap();
+        let unsealer_input = js_seal(mpk.clone(), js_options.into(), js_plain)
+            .await
+            .unwrap();
 
         let unsealer = MemoryUnsealer::new(unsealer_input.into(), vk)
             .await
@@ -110,9 +112,12 @@ mod mem {
             "[web/mem]: seal/unseal message of length {len} took {t:.1} ms"
         ));
 
-        let verified: VerificationResult = serde_wasm_bindgen::from_value(res.policy()).unwrap();
+        let verified: VerificationResult = serde_wasm_bindgen::from_value(res.get(1)).unwrap();
 
-        assert_eq!(&plain, &res.plain().to_vec());
+        assert_eq!(
+            &plain,
+            &res.get(0).dyn_into::<Uint8Array>().unwrap().to_vec()
+        );
         assert_eq!(&verified.public, &setup.signing_keys[0].policy);
         assert_eq!(verified.private, Some(setup.signing_keys[1].policy.clone()));
     }
@@ -140,7 +145,9 @@ mod mem {
         let plain = rand_vec(len);
         let js_plain = Uint8Array::from(&plain[..]);
 
-        let ct = js_seal(mpk.clone(), js_options, js_plain).await.unwrap();
+        let ct = js_seal(mpk.clone(), js_options.into(), js_plain)
+            .await
+            .unwrap();
 
         let unsealer = Unsealer::<_, UC>::new(&ct.to_vec(), &vk).unwrap();
         let (plain2, verified) = unsealer.unseal("Bob", usk).unwrap();
@@ -176,9 +183,12 @@ mod mem {
 
         let unsealer = MemoryUnsealer::new(js_ct, vk).await.unwrap();
         let res = unsealer.unseal("Bob".to_string(), usk).await.unwrap();
-        let verified: VerificationResult = serde_wasm_bindgen::from_value(res.policy()).unwrap();
+        let verified: VerificationResult = serde_wasm_bindgen::from_value(res.get(1)).unwrap();
 
-        assert_eq!(&plain, &res.plain().to_vec());
+        assert_eq!(
+            &plain,
+            &res.get(0).dyn_into::<Uint8Array>().unwrap().to_vec()
+        );
         assert_eq!(&verified.public, &setup.signing_keys[0].policy);
         assert_eq!(verified.private, Some(setup.signing_keys[1].policy.clone()));
     }
@@ -285,7 +295,7 @@ mod stream {
 
         js_stream_seal(
             mpk.clone(),
-            js_options,
+            js_options.into(),
             sealer_input,
             sealer_output.stream(),
         )
@@ -349,7 +359,7 @@ mod stream {
 
         js_stream_seal(
             mpk.clone(),
-            js_options,
+            js_options.into(),
             sealer_input,
             sealer_output.stream(),
         )
