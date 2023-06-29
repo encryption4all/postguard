@@ -14,20 +14,20 @@ obtains a key that can be used to decrypt the message.
 
 The repository consists of a workspace with four members:
 
-| crate/package | description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------- | -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------      |
-| `pg-core`     | The core library. The core library's functionality includes: <ul><li>Managing metadata containing required data for key decapsulation, including (compact binary) serialization.</li><li>Serialization of all artifacts that are sent over the network/stored to disk (e.g., public keys, user secret keys, ciphertexts, etc.).</li><li> A streaming encryption interface (under the `stream` feature) with an efficient web back-end (levering the `WebCrypto` API), see `web` and `stream` feature. </li></ul> |
-| `pg-pkg`      | An HTTP API server written in `actix-web` that runs an instance of a Private Key Generator (PKG).                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `pg-wasm`     | A library that generates Web Assembly bindings (using `wasm-pack`) that allows interfacing with the core library in web applications.                                                                                                                                                                                                                                                                                                                                                                            |
-| `pg-cli`      | A command-line (client) utility that encrypts and decrypts files.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| crate/package | description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------- | -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------         |
+| `pg-core`     | The core library. The core library's functionality includes: <ul><li>Managing metadata containing required data for key decapsulation, including (compact binary) serialization.</li><li>Serialization of all artifacts that are sent over the network/stored to disk (e.g., public keys, user secret keys, ciphertexts, etc.).</li><li> A streaming encryption interface (under the `stream` feature) with an efficient wasm back-end (leveraging the `WebCrypto` API), see `web` and `stream` feature. </li></ul> |
+| `pg-pkg`      | An HTTP API server written in `actix-web` that runs an instance of a Private Key Generator (PKG).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `pg-wasm`     | A library that generates Web Assembly bindings (using `wasm-pack`) that allows interfacing with the core library in web applications.                                                                                                                                                                                                                                                                                                                                                                               |
+| `pg-cli`      | A command-line (client) utility that encrypts and decrypts files.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Authentication providers
 
-PostGuard uses [IRMA](https://irma.app), a privacy-friendly identity platform,
+PostGuard uses [Yivi](https://yivi.app), a privacy-friendly identity platform,
 to authenticate these identities. These identities are stored on the users
-phone in the IRMA app in the form of uniquely identifying attributes. These
+phone in the Yivi app in the form of uniquely identifying attributes. These
 attributes can freely and selectively be disclosed by the user to any party,
-but only with explicit consent of the user. Eventhough PostGuard uses IRMA,
+but only with explicit consent of the user. Eventhough PostGuard uses Yivi,
 other authentication modules could easily be intregrated.
 
 ### Session flow
@@ -45,10 +45,10 @@ user interaction. All other actions are automatic.
   <li>Alice uses the public master key and Bob's identity to encrypt a message.</li>
   <li>Alice's client sends the ciphertext to Bob via a possibly untrusted channel/cloud storage.</li>
   <li>Bob's client asks for a key to decrypt the ciphertext.</li>
-  <li>The PKG starts an authentication session at the IRMA server.</li>
+  <li>The PKG starts an authentication session at the Yivi server.</li>
   <li>Bob is asked to reveal his identity, using a QR code.</li>
   <li>Bob reveals his identity.</li>
-  <li>The IRMA server sends the authentication results to the PKG.</li>
+  <li>The Yivi server sends the authentication results to the PKG.</li>
   <li>The PKG issues a key for Bob's identity.</li>
   <li>Bob's client decrypts the ciphertext using his just obtained key.</li>
 </ol>
