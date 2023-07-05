@@ -134,6 +134,8 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         // First segment: DEM.K (pol_len || pol || m_0 || sig_0 )
         // Other segments: DEM.K (m_i || sig_0)
 
+        let mut counter: u32 = 0;
+
         loop {
             let read = r
                 .read(&mut buf[buf_tail..self.config.segment_size as usize])
@@ -144,7 +146,11 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
                 buf.truncate(buf_tail);
 
                 signer.update(&buf[start..]);
-                let sig = signer.clone().sign(&signing_key.key.0, self.rng);
+                let sig = signer
+                    .clone()
+                    .chain(&counter.to_be_bytes())
+                    .chain(&[0x00])
+                    .sign(&signing_key.key.0, self.rng);
                 bincode::serialize_into(&mut buf, &sig)?;
 
                 enc.encrypt_next_in_place(b"", &mut buf)?;
@@ -153,11 +159,17 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
 
                 buf_tail = 0;
                 start = 0;
+                counter = counter.checked_add(1).unwrap(); // cannot fail, otherwise
+                                                           // encrypt_next_in_place would have
+                                                           // failed too.                                                // encrypt_next_in_place not failing
             } else if read == 0 {
                 buf.truncate(buf_tail);
 
                 signer.update(&buf[start..]);
-                let sig_final = signer.sign(&signing_key.key.0, self.rng);
+                let sig_final = signer
+                    .chain(&counter.to_be_bytes())
+                    .chain(&[0x01])
+                    .sign(&signing_key.key.0, self.rng);
                 bincode::serialize_into(&mut buf, &sig_final)?;
 
                 enc.encrypt_last_in_place(b"", &mut buf)?;
@@ -258,7 +270,7 @@ where
         let bufsize: usize = self.config.segment_size as usize + SIG_BYTES + TAG_SIZE;
         let mut buf = vec![0u8; bufsize];
         let mut buf_tail = 0;
-        let mut counter = 0;
+        let mut counter: u32 = 0;
         let mut pol_id: Option<(Policy, Identity)> = None;
 
         fn extract_policy(buf: &mut Vec<u8>) -> Result<Option<(Policy, Identity)>, Error> {
@@ -277,6 +289,8 @@ where
             verifier: &mut Verifier,
             vk: &VerifyingKey,
             id: &Identity,
+            counter: u32,
+            is_last: bool,
         ) -> Result<&'a [u8], Error> {
             debug_assert!(seg.len() > SIG_BYTES);
 
@@ -284,7 +298,12 @@ where
             let sig: Signature = bincode::deserialize(sig_bytes)?;
             verifier.update(m);
 
-            if !verifier.clone().verify(&vk.0, &sig, id) {
+            if !verifier
+                .clone()
+                .chain(&counter.to_be_bytes())
+                .chain(&[is_last as u8])
+                .verify(&vk.0, &sig, id)
+            {
                 return Err(Error::IncorrectSignature);
             }
 
@@ -307,6 +326,8 @@ where
                     &mut self.verifier,
                     &self.vk,
                     &pol_id.as_ref().unwrap().1,
+                    counter,
+                    false,
                 )?;
 
                 w.write_all(m).await?;
@@ -327,6 +348,8 @@ where
                     &mut self.verifier,
                     &self.vk,
                     &pol_id.as_ref().unwrap().1,
+                    counter,
+                    true,
                 )?;
 
                 w.write_all(m).await?;

@@ -157,7 +157,11 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
                     buf_tail += rem;
 
                     signer.update(&buf.slice(start, buf_tail).to_vec());
-                    let sig = signer.clone().sign(&signing_key.key.0, self.rng);
+                    let sig = signer
+                        .clone()
+                        .chain(&counter.to_be_bytes())
+                        .chain(&[0x00])
+                        .sign(&signing_key.key.0, self.rng);
                     let sig_bytes = bincode::serialize(&sig)?;
 
                     buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
@@ -180,7 +184,10 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         }
 
         signer.update(&buf.slice(start, buf_tail).to_vec());
-        let sig = signer.sign(&signing_key.key.0, self.rng);
+        let sig = signer
+            .chain(&counter.to_be_bytes())
+            .chain(&[0x01])
+            .sign(&signing_key.key.0, self.rng);
         let sig_bytes = bincode::serialize(&sig)?;
 
         buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
@@ -396,6 +403,8 @@ where
                     if !self
                         .verifier
                         .clone()
+                        .chain(&counter.to_be_bytes())
+                        .chain(&[0x00])
                         .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
                     {
                         return Err(Error::IncorrectSignature.into());
@@ -433,6 +442,8 @@ where
         if !self
             .verifier
             .clone()
+            .chain(&counter.to_be_bytes())
+            .chain(&[0x01])
             .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
         {
             return Err(Error::IncorrectSignature.into());
