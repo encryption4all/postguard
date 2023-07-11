@@ -7,7 +7,7 @@
  src="https://postguard.eu/pg_logo.svg"/>
 </p>
 
-PostGuard is cryptographic protocol that utilizes identity-based primitivesto
+PostGuard is cryptographic protocol that utilizes identity-based primitives to
 provide confidentiality, integrity and authenticity over messages.
 
 ⚠️ **Warning**: This implementation has not been audited and is not ready for use in production. Use at your own risk!
