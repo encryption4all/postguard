@@ -8,14 +8,14 @@
 //! [Web Streams](https://developer.mozilla.org/en-US/docs/Web/API/Streams_API) using the
 //! [wasm-streams](https://docs.rs/wasm-streams/latest/wasm_streams/index.html) crate.
 //!
-//! This module is only available on the `target_arch = "wasm32-unknown-unknown"` and the output
+//! This module is only available on the `target = "wasm32-unknown-unknown"` and the output
 //! _should_ be used in browser environments. This also greatly reduces the bundle size.
 //!
 //! This module can largely be simplified when [the AEAD crate](https://docs.rs/aead/latest/aead/index.html) will support async, see
 //! [the relevant issue](https://github.com/RustCrypto/traits/issues/304).
 //!
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", docsrs)))]
 compile_error!("\"web\" feature should only be enabled on wasm32 targets");
 
 mod aesgcm;
