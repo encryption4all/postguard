@@ -261,6 +261,8 @@ where
     }
 }
 
+// Note: It might be easier to work with R: ReadableStream.
+
 impl<R> Unsealer<R, StreamUnsealerConfig>
 where
     R: Stream<Item = Result<JsValue, JsValue>> + Unpin,
