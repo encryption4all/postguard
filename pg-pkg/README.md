@@ -92,10 +92,11 @@ The `status` field will always be included. The `proofStatus` and `key` values
 are optional and depend on the JWT. A key is included if and only if the proof
 was valid and all the claimed attributes were present. A key is derived from these attributes.
 
-### `GET /v2/irma/sign/key`
+### `POST /v2/irma/sign/key`
 
-Retrieves a signing key. The request must include a HTTP Authorization header
+Retrieves signing key(s). The request must include a HTTP Authorization header
 `Authorization: Bearer <JWT>`.
 
 The response looks similar as `GET /v2/irma/key/{timestamp}`, except the key is
-a signing key.
+a signing key. If a JSON body with subsets of attributes are sent, the response
+wil contain multiple keys.

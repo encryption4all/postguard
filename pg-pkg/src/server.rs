@@ -142,7 +142,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                 resource("/sign/key")
                                     .app_data(Data::new(ibs_sk.clone()))
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
-                                    .route(web::get().to(handlers::signing_key)),
+                                    .route(web::post().to(handlers::signing_key)),
                             ),
                     ),
             )
@@ -238,7 +238,7 @@ pub(crate) mod tests {
                             resource("/sign/key")
                                 .app_data(Data::new(ibs_sk.clone()))
                                 .wrap(NoAuth::new())
-                                .route(web::get().to(handlers::signing_key)),
+                                .route(web::post().to(handlers::signing_key)),
                         ),
                 ),
         )
@@ -317,12 +317,12 @@ pub(crate) mod tests {
             con: vec![Attribute::new("testattribute", Some("testvalue"))],
         };
 
-        let req = test::TestRequest::get()
+        let req = test::TestRequest::post()
             .uri("/v2/sign/key")
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<SigningKeyExt> =
+        let key_response: KeyResponse<Vec<SigningKeyExt>> =
             test::call_and_read_body_json(&app, req).await;
 
         assert_eq!(key_response.status, SessionStatus::Done);
@@ -343,21 +343,22 @@ pub(crate) mod tests {
 
         let id = pol.derive_ibs().unwrap();
 
-        let req = test::TestRequest::get()
+        let req = test::TestRequest::post()
             .uri("/v2/sign/key")
             .set_json(pol.clone())
             .to_request();
 
-        let key_response: KeyResponse<SigningKeyExt> =
+        let key_response: KeyResponse<Vec<SigningKeyExt>> =
             test::call_and_read_body_json(&app, req).await;
 
+        assert!(key_response.key.clone().is_some_and(|x| x.len() == 1));
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
 
         let message = b"some identical message";
         let sig = gg::Signer::new()
             .chain(message)
-            .sign(&key_response.key.unwrap().key.0, &mut rng);
+            .sign(&key_response.key.unwrap()[0].key.0, &mut rng);
 
         assert!(gg::Verifier::new().chain(message).verify(&pks, &sig, &id));
         assert!(!gg::Verifier::new()
