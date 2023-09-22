@@ -41,3 +41,10 @@ pub struct KeyResponse<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<T>,
 }
+
+/// Signing request body.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignBody {
+    /// The subsets.
+    pub subsets: Vec<Vec<Attribute>>,
+}

@@ -149,11 +149,20 @@ impl<'a> Client<'a> {
     pub async fn request_signing_key(
         &self,
         auth: &str,
+        body: &Option<SignBody>,
     ) -> Result<KeyResponse<Vec<SigningKeyExt>>, ClientError> {
-        let res = self
+        let builder = self
             .client
             .post(self.create_url("v2/irma/sign/key"))
-            .bearer_auth(auth)
+            .bearer_auth(auth);
+
+        let builder = if let Some(body) = body {
+            builder.json(&body)
+        } else {
+            builder
+        };
+
+        let res = builder
             .headers(HEADERS.clone())
             .send()
             .await?
@@ -190,10 +199,11 @@ impl<'a> Client<'a> {
     pub async fn wait_on_signing_keys(
         &self,
         sp: &irma::SessionData,
+        body: &Option<SignBody>,
     ) -> Result<KeyResponse<Vec<SigningKeyExt>>, ClientError> {
         for _ in 0..120 {
             let jwt: String = self.request_jwt(&sp.token).await?;
-            let kr = self.request_signing_key(&jwt).await?;
+            let kr = self.request_signing_key(&jwt, body).await?;
 
             match kr {
                 kr @ KeyResponse::<Vec<SigningKeyExt>> {

@@ -2,7 +2,7 @@ use actix_web::{web::Data, web::Json, HttpResponse};
 use actix_web::{HttpMessage, HttpRequest};
 use serde::Deserialize;
 
-use pg_core::api::KeyResponse;
+use pg_core::api::{KeyResponse, SignBody};
 use pg_core::artifacts::{SigningKey, SigningKeyExt};
 use pg_core::identity::{Attribute, Policy};
 
@@ -11,15 +11,10 @@ use pg_core::ibs::gg::{keygen, Identity, SecretKey};
 use crate::middleware::irma::IrmaAuthResult;
 use crate::util::current_time_u64;
 
-#[derive(Debug, Deserialize)]
-pub struct Body {
-    subsets: Vec<Vec<Attribute>>,
-}
-
 pub async fn signing_key(
     req: HttpRequest,
     msk: Data<SecretKey>,
-    body: Option<Json<Body>>,
+    body: Option<Json<SignBody>>,
 ) -> Result<HttpResponse, crate::Error> {
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();

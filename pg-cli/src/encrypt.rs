@@ -1,4 +1,4 @@
-use pg_core::api::IrmaAuthRequest;
+use pg_core::api::{IrmaAuthRequest, SignBody};
 use pg_core::client::rust::stream::SealerStreamConfig;
 use pg_core::client::Sealer;
 use pg_core::identity::{Attribute, Policy};
@@ -50,10 +50,13 @@ pub async fn exec(enc_opts: EncOpts) {
     let pub_sig_id: Vec<Attribute> = serde_json::from_str(&pub_sign_id).unwrap();
     let mut total_id = pub_sig_id.clone();
 
-    if let Some(priv_id_str) = priv_sign_id {
+    let priv_sig_id = if let Some(priv_id_str) = priv_sign_id {
         let priv_id: Vec<Attribute> = serde_json::from_str(&priv_id_str).unwrap();
-        total_id.extend(priv_id);
-    }
+        total_id.extend(priv_id.clone());
+        Some(priv_id)
+    } else {
+        None
+    };
 
     let client = crate::client::Client::new(&pkg).unwrap();
     let parameters = client.parameters().await.unwrap();
@@ -77,7 +80,17 @@ pub async fn exec(enc_opts: EncOpts) {
 
     print_qr(&sd.session_ptr);
 
-    let keys = client.wait_on_signing_keys(&sd).await.unwrap().key.unwrap();
+    let body = priv_sig_id.map(|id| SignBody {
+        subsets: vec![pub_sig_id, id],
+    });
+
+    let keys = client
+        .wait_on_signing_keys(&sd, &body)
+        .await
+        .unwrap()
+        .key
+        .unwrap();
+
     let pub_sign_key = &keys[0];
 
     let input_path = Path::new(&input);
