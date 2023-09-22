@@ -48,8 +48,14 @@ pub async fn exec(enc_opts: EncOpts) {
         .collect();
 
     let pub_sig_id: Vec<Attribute> = serde_json::from_str(&pub_sign_id).unwrap();
-    let client = crate::client::Client::new(&pkg).unwrap();
+    let mut total_id = pub_sig_id.clone();
 
+    if let Some(priv_id_str) = priv_sign_id {
+        let priv_id: Vec<Attribute> = serde_json::from_str(&priv_id_str).unwrap();
+        total_id.extend(priv_id);
+    }
+
+    let client = crate::client::Client::new(&pkg).unwrap();
     let parameters = client.parameters().await.unwrap();
 
     eprintln!("Fetched parameters from {}", pkg);
@@ -59,11 +65,11 @@ pub async fn exec(enc_opts: EncOpts) {
         serde_json::to_string_pretty(&policies).unwrap()
     );
 
-    eprintln!("retrieving signing keys...");
+    eprintln!("Retrieving signing keys...");
 
     let sd = client
         .request_start(&IrmaAuthRequest {
-            con: pub_sig_id,
+            con: total_id,
             validity: None,
         })
         .await
@@ -71,28 +77,8 @@ pub async fn exec(enc_opts: EncOpts) {
 
     print_qr(&sd.session_ptr);
 
-    let pub_sign_key = client.wait_on_signing_key(&sd).await.unwrap().key.unwrap();
-
-    let priv_sign_key = match priv_sign_id {
-        Some(id) => {
-            let priv_sign_id: Vec<Attribute> = serde_json::from_str(&id).unwrap();
-
-            let sd = client
-                .request_start(&IrmaAuthRequest {
-                    con: priv_sign_id,
-                    validity: None,
-                })
-                .await
-                .unwrap();
-
-            print_qr(&sd.session_ptr);
-
-            let priv_sign_key = client.wait_on_signing_key(&sd).await.unwrap().key.unwrap();
-
-            Some(priv_sign_key)
-        }
-        None => None,
-    };
+    let keys = client.wait_on_signing_keys(&sd).await.unwrap().key.unwrap();
+    let pub_sign_key = &keys[0];
 
     let input_path = Path::new(&input);
     let file_name_path = input_path.file_name().unwrap();
@@ -122,8 +108,8 @@ pub async fn exec(enc_opts: EncOpts) {
     )
     .unwrap();
 
-    if let Some(key) = priv_sign_key {
-        sealer = sealer.with_priv_signing_key(key);
+    if keys.len() == 2 {
+        sealer = sealer.with_priv_signing_key(keys[1].clone());
     };
 
     sealer.seal(r, w).await.unwrap();

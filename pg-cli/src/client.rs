@@ -149,16 +149,16 @@ impl<'a> Client<'a> {
     pub async fn request_signing_key(
         &self,
         auth: &str,
-    ) -> Result<KeyResponse<SigningKeyExt>, ClientError> {
+    ) -> Result<KeyResponse<Vec<SigningKeyExt>>, ClientError> {
         let res = self
             .client
-            .get(self.create_url("v2/irma/sign/key"))
+            .post(self.create_url("v2/irma/sign/key"))
             .bearer_auth(auth)
             .headers(HEADERS.clone())
             .send()
             .await?
             .error_for_status()?
-            .json::<KeyResponse<SigningKeyExt>>()
+            .json::<KeyResponse<Vec<SigningKeyExt>>>()
             .await?;
 
         Ok(res)
@@ -187,16 +187,16 @@ impl<'a> Client<'a> {
         Err(ClientError::Timeout)
     }
 
-    pub async fn wait_on_signing_key(
+    pub async fn wait_on_signing_keys(
         &self,
         sp: &irma::SessionData,
-    ) -> Result<KeyResponse<SigningKeyExt>, ClientError> {
+    ) -> Result<KeyResponse<Vec<SigningKeyExt>>, ClientError> {
         for _ in 0..120 {
             let jwt: String = self.request_jwt(&sp.token).await?;
             let kr = self.request_signing_key(&jwt).await?;
 
             match kr {
-                kr @ KeyResponse::<SigningKeyExt> {
+                kr @ KeyResponse::<Vec<SigningKeyExt>> {
                     status: irma::SessionStatus::Done,
                     ..
                 } => return Ok(kr),
