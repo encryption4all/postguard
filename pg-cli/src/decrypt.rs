@@ -74,11 +74,7 @@ pub async fn exec(dec_opts: DecOpts) {
 
     eprintln!("Requesting key for {:?}", &keyrequest);
 
-    let mut sd: irma::SessionData = client.request_start(&keyrequest).await.unwrap();
-
-    if pkg.contains("ihub.ru.nl") {
-        sd.session_ptr.u = format!("https://ihub.ru.nl/irma/1/{}", sd.session_ptr.u);
-    }
+    let sd: irma::SessionData = client.request_start(&keyrequest).await.unwrap();
 
     eprintln!("Please scan the following QR-code with IRMA/Yivi:");
     print_qr(&sd.session_ptr);
