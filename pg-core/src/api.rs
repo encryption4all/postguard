@@ -1,6 +1,6 @@
 //! Definitions of the PostGuard protocol REST API.
 
-use crate::identity::Attribute;
+use crate::{artifacts::SigningKeyExt, identity::Attribute};
 use alloc::vec::Vec;
 use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
@@ -40,4 +40,37 @@ pub struct KeyResponse<T> {
     /// The key will remain `None` until the status is `Done` and the proof is `Valid`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<T>,
+}
+
+/// The request Signing key request body.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningKeyRequest {
+    /// The public signing identity.
+    pub pub_sign_id: Vec<Attribute>,
+
+    /// The private signing identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priv_sign_id: Option<Vec<Attribute>>,
+}
+
+/// The signing key response from the Private Key Generator (PKG).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningKeyResponse {
+    /// The status of the session.
+    pub status: SessionStatus,
+
+    /// The status of the IRMA proof.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_status: Option<ProofStatus>,
+
+    /// The public signing key.
+    /// The key will remain `None` until the status is `Done` and the proof is `Valid`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pub_sign_key: Option<SigningKeyExt>,
+
+    /// This private signing key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priv_sign_key: Option<SigningKeyExt>,
 }
