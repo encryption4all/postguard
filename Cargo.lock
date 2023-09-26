@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "pg-core"
-version = "0.3.0-rc.2"
+version = "0.3.0"
 dependencies = [
  "aead",
  "aes-gcm",

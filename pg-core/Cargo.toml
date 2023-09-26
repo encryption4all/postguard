@@ -1,7 +1,7 @@
 [package]
 name = "pg-core"
 description = "PostGuard core library communication and bytestream operations."
-version = "0.3.0-rc.2"
+version = "0.3.0"
 authors = [
   "Leon Botros <l.botros@cs.ru.nl",
   "Wouter Geraedts <git@woutergeraedts.nl>",
