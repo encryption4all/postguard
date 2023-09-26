@@ -95,8 +95,36 @@ was valid and all the claimed attributes were present. A key is derived from the
 ### `POST /v2/irma/sign/key`
 
 Retrieves signing key(s). The request must include a HTTP Authorization header
-`Authorization: Bearer <JWT>`.
+`Authorization: Bearer <JWT>`. The body must include under which identities a user wants to sign.
 
-The response looks similar as `GET /v2/irma/key/{timestamp}`, except the key is
-a signing key. If a JSON body with subsets of attributes are sent, the response
-wil contain multiple keys.
+```JSON
+{
+  "pubSignId": [
+    { "t": "irma-demo.gemeente.personalData.fullname", "v": "Alice" }
+  ],
+  "privSignId": [{ "t": "irma-demo.gemeente.personalData.bsn", "v": "1234" }]
+}
+```
+
+The response looks similar as `GET /v2/irma/key/{timestamp}`, except with signing keys.
+
+```JSON
+{
+  "status": "DONE",
+  "proofStatus": "VALID",
+  "pubSignKey": {
+    "key": "/VBSvTSsTloj5xUKH1EDWN1s6c9Z5L1UqL2NGJnpaQMoFa2sjLw+cjA8P5OD3AwP7zv1VcU7Tzon/8J/vnVLbzGNswBZk5KAjYZVrFNZx34/5Hbk28ajjqVA4fKqNawB",
+    "policy": {
+      "ts": 1695723474,
+      "con": [{ "t": "irma-demo.gemeente.personalData.fullname", "v": "Alice" }]
+    }
+  },
+  "privSignKey": {
+    "key": "Uk+BFli0n5yz8huZCQWiztgdo3KvN9Y6XcsPc+IAmARKXGUApvaYYTCi+7WdjxZzXs1mnrAas3r5wuWu2ecuQaSyboyIuCbGD/P7+FO1rc712czlVm6RxKrZx4BjlsqU",
+    "policy": {
+      "ts": 1695723474,
+      "con": [{ "t": "irma-demo.gemeente.personalData.bsn", "v": "1234" }]
+    }
+  }
+}
+```
