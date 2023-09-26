@@ -30,7 +30,12 @@ const KeySorts = {
   Signing: "sign/key",
 };
 
-async function fetchKey(sort, keyRequest, timestamp = undefined) {
+export async function fetchKey(
+  sort,
+  keyRequest,
+  timestamp = undefined,
+  signingKeyRequest = undefined
+) {
   const session = {
     url: PKG_URL,
     start: {
@@ -50,9 +55,14 @@ async function fetchKey(sort, keyRequest, timestamp = undefined) {
                 timestamp ? "/" + timestamp.toString() : ""
               }`,
               {
+                method: sort === KeySorts.Encryption ? "GET" : "POST",
                 headers: {
                   Authorization: `Bearer ${jwt}`,
+                  "Content-Type": "application/json",
                 },
+                ...(signingKeyRequest && {
+                  body: JSON.stringify({ ...signingKeyRequest }),
+                }),
               }
             )
           )
@@ -60,8 +70,11 @@ async function fetchKey(sort, keyRequest, timestamp = undefined) {
           .then((json) => {
             if (json.status !== "DONE" || json.proofStatus !== "VALID")
               throw new Error("not done and valid");
-            return json.key;
-          });
+            return sort === KeySorts.Encryption
+              ? json.key
+              : { pubSignKey: json.pubSignKey, privSignKey: json.privSignKey };
+          })
+          .catch((e) => console.log("error: ", e));
       },
     },
   };
@@ -69,7 +82,6 @@ async function fetchKey(sort, keyRequest, timestamp = undefined) {
   const yivi = new YiviCore({ debugging: false, session });
   yivi.use(YiviClient);
   yivi.use(YiviPopup);
-
   return yivi.start();
 }
 ```
@@ -95,18 +107,20 @@ const policy = {
 // We provide the policies which we want to sign with.
 
 // This policy is visible to everyone.
-const pubSignPolicy = {
-  con: [{ t: "irma-demo.gemeente.personalData.fullname", v: "Alice" }],
-};
+const pubSignId = [
+  { t: "irma-demo.gemeente.personalData.fullname", v: "Alice" },
+];
 
 // This policy is only visible to recipients.
-const privSignPolicy = {
-  con: [{ t: "irma-demo.gemeente.personalData.bsn", v: "1234" }],
-};
+const privSignId = [{ t: "irma-demo.gemeente.personalData.bsn", v: "1234" }];
 
 // We retrieve keys for these policies.
-let pubSignKey = await fetchKey(KeySorts.Signing, pubSignPolicy);
-let privSignKey = await fetchKey(KeySorts.Signing, privSignPolicy);
+let { pubSignKey, privSignKey } = await fetchKey(
+  KeySorts.Signing,
+  { con: [...pubSignId, ...privSignId] },
+  undefined,
+  { pubSignId, privSignId }
+);
 
 const sealOptions = {
   policy,
