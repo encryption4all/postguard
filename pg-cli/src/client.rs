@@ -1,5 +1,5 @@
 use pg_core::api::*;
-use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
+use pg_core::artifacts::{PublicKey, UserSecretKey, VerifyingKey};
 use pg_core::kem::IBKEM;
 
 use pg_core::kem::cgw_kv::CGWKV;
@@ -149,25 +149,17 @@ impl<'a> Client<'a> {
     pub async fn request_signing_key(
         &self,
         auth: &str,
-        body: &Option<SignBody>,
-    ) -> Result<KeyResponse<Vec<SigningKeyExt>>, ClientError> {
-        let builder = self
+        body: &SigningKeyRequest,
+    ) -> Result<SigningKeyResponse, ClientError> {
+        let res = self
             .client
             .post(self.create_url("v2/irma/sign/key"))
-            .bearer_auth(auth);
-
-        let builder = if let Some(body) = body {
-            builder.json(&body)
-        } else {
-            builder
-        };
-
-        let res = builder
-            .headers(HEADERS.clone())
+            .bearer_auth(auth)
+            .json(body)
             .send()
             .await?
             .error_for_status()?
-            .json::<KeyResponse<Vec<SigningKeyExt>>>()
+            .json::<SigningKeyResponse>()
             .await?;
 
         Ok(res)
@@ -199,14 +191,14 @@ impl<'a> Client<'a> {
     pub async fn wait_on_signing_keys(
         &self,
         sp: &irma::SessionData,
-        body: &Option<SignBody>,
-    ) -> Result<KeyResponse<Vec<SigningKeyExt>>, ClientError> {
+        body: &SigningKeyRequest,
+    ) -> Result<SigningKeyResponse, ClientError> {
         for _ in 0..120 {
             let jwt: String = self.request_jwt(&sp.token).await?;
             let kr = self.request_signing_key(&jwt, body).await?;
 
             match kr {
-                kr @ KeyResponse::<Vec<SigningKeyExt>> {
+                kr @ SigningKeyResponse {
                     status: irma::SessionStatus::Done,
                     ..
                 } => return Ok(kr),

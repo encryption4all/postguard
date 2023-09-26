@@ -165,8 +165,7 @@ pub(crate) mod tests {
 
     use crate::middleware::irma_noauth::NoAuth;
     use irma::{ProofStatus, SessionStatus};
-    use pg_core::api::{KeyResponse, Parameters};
-    use pg_core::artifacts::SigningKeyExt;
+    use pg_core::api::{KeyResponse, Parameters, SigningKeyRequest, SigningKeyResponse};
     use pg_core::ibs::gg;
     use pg_core::identity::{Attribute, Policy};
     use pg_core::kem::IBKEM;
@@ -231,13 +230,13 @@ pub(crate) mod tests {
                         .service(
                             resource("/key/{timestamp}")
                                 .app_data(Data::new(ibe_sk))
-                                .wrap(NoAuth::new())
+                                .wrap(NoAuth::Decryption)
                                 .route(web::get().to(handlers::key::<CGWKV>)),
                         )
                         .service(
                             resource("/sign/key")
                                 .app_data(Data::new(ibs_sk.clone()))
-                                .wrap(NoAuth::new())
+                                .wrap(NoAuth::Signing)
                                 .route(web::post().to(handlers::signing_key)),
                         ),
                 ),
@@ -310,23 +309,53 @@ pub(crate) mod tests {
     async fn test_get_usk_signing() {
         let (app, _, _, _, _) = default_setup().await;
 
-        let ts = now();
-
-        let pol = Policy {
-            timestamp: ts,
-            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            priv_sign_id: None,
         };
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .set_json(pol.clone())
+            .set_json(skr)
             .to_request();
 
-        let key_response: KeyResponse<Vec<SigningKeyExt>> =
-            test::call_and_read_body_json(&app, req).await;
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+        assert!(key_response.pub_sign_key.is_some());
+        assert!(key_response.priv_sign_key.is_none());
+    }
+
+    #[actix_web::test]
+    async fn test_get_usk_signing_with_private() {
+        let (app, _, _, _, _) = default_setup().await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            priv_sign_id: Some(vec![Attribute::new(
+                "private test attribute",
+                Some("some private information"),
+            )]),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+        assert!(key_response
+            .pub_sign_key
+            .is_some_and(|k| k.policy.con == skr.pub_sign_id));
+        assert!(key_response
+            .priv_sign_key
+            .is_some_and(|k| k.policy.con == skr.priv_sign_id.unwrap()));
     }
 
     #[actix_web::test]
@@ -334,31 +363,28 @@ pub(crate) mod tests {
         let mut rng = thread_rng();
         let (app, _, _, pks, _) = default_setup().await;
 
-        let ts = now();
-
-        let pol = Policy {
-            timestamp: ts,
-            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            priv_sign_id: None,
         };
-
-        let id = pol.derive_ibs().unwrap();
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .set_json(pol.clone())
+            .set_json(skr)
             .to_request();
 
-        let key_response: KeyResponse<Vec<SigningKeyExt>> =
-            test::call_and_read_body_json(&app, req).await;
+        let key_response: SigningKeyResponse = test::call_and_read_body_json(&app, req).await;
 
-        assert!(key_response.key.clone().is_some_and(|x| x.len() == 1));
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+
+        let pub_sign_key = key_response.pub_sign_key.unwrap();
+        let id = pub_sign_key.policy.derive_ibs().unwrap();
 
         let message = b"some identical message";
         let sig = gg::Signer::new()
             .chain(message)
-            .sign(&key_response.key.unwrap()[0].key.0, &mut rng);
+            .sign(&pub_sign_key.key.0, &mut rng);
 
         assert!(gg::Verifier::new().chain(message).verify(&pks, &sig, &id));
         assert!(!gg::Verifier::new()
