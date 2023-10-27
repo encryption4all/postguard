@@ -1,0 +1,78 @@
+[package]
+name = "pg-core"
+description = "PostGuard core library communication and bytestream operations."
+version = "0.3.0"
+authors = [
+  "Leon Botros <l.botros@cs.ru.nl",
+  "Wouter Geraedts <git@woutergeraedts.nl>",
+]
+edition = "2021"
+license = "MIT"
+keywords = ["ibe", "encryption", "ecc"]
+homepage = "https://github.com/encryption4all/postguard/tree/main/pg-core"
+categories = ["cryptography"]
+
+[dependencies]
+ibe = { version = "0.3.0", features = ["cgwkv", "mkem"] }
+ibs =  "0.4.0"
+irma = "0.2.1"
+rand = { version = "0.8", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+subtle = "2.3"
+tiny-keccak = { version = "2.0", features = ["sha3"] }
+base64ct = "1.5"
+bincode = "1.3.3"
+
+# For both stream features and the web implementation.
+futures = { version = "0.3.27", optional = true }
+
+# For the Rust Crypto backend.
+aead = { version = "0.5", features = ["alloc"], optional = true }
+aes-gcm = { version = "0.10", optional = true }
+
+# For the Web Crypto backend.
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", features = [
+  "SubtleCrypto",
+  "AesGcmParams",
+  "Crypto",
+  "CryptoKey",
+], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.24.3", features = ["full"] }
+tokio-util = { version = "0.7.4", features = ["compat"] }
+serde-transcode = "1.1.1"
+criterion = "0.5.1"
+rand = "0.8.5"
+futures = { version = "0.3", features = ["io-compat"] }
+futures-util = "0.3.25"
+
+[features]
+default = ["rust"]
+rust = ["aead", "aes-gcm"]
+web = [
+  "futures",
+  "wasm-bindgen",
+  "js-sys",
+  "wasm-bindgen-futures",
+  "web-sys/SubtleCrypto",
+  "web-sys/AesGcmParams",
+  "web-sys/Crypto",
+  "web-sys/CryptoKey",
+]
+stream = ["futures", "aead/stream"]
+test = []
+
+[[bench]]
+name = "main"
+harness = false
+required-features = ["test", "rust", "stream"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
