@@ -106,6 +106,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         out.extend_from_slice(&(header_buf.len() as u32).to_be_bytes());
         out.extend_from_slice(&header_buf);
 
+        // TODO: Make signing optional
         let signer = Signer::new().chain(header_buf);
         let h_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
 
@@ -122,6 +123,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
         let m_sig = signer.chain(&m).sign(&m_sig_key.key.0, self.rng);
 
+        // TODO: input could be just message without signature
         let input = bincode::serialize(&MessageAndSignature {
             message: m,
             sig: SignatureExt {
@@ -153,6 +155,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         let (version, header_len) = preamble_checked(preamble_bytes)?;
 
         let (header_bytes, b) = b.split_at(header_len);
+        // TODO: How to make this optional? How to know whether message is signed? Extra header maybe?
         let (h_sig_len_bytes, b) = b.split_at(SIG_SIZE_SIZE);
         let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into()?);
         let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);

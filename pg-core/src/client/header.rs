@@ -111,6 +111,8 @@ pub struct Header {
     /// The encryption mode.
     #[serde(default)]
     pub mode: Mode,
+
+    // TODO: Add bool to indicate signature?
 }
 
 /// Contains header data specific to _one_ recipient.
