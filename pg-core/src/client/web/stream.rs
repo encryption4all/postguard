@@ -395,6 +395,7 @@ where
 
                     debug_assert!(plain.byte_length() > SIG_BYTES as u32);
 
+                    // TODO: Only if signature is present. Check via extra header?
                     let m = plain.slice(0, plain.byte_length() - SIG_BYTES as u32);
                     let sig =
                         plain.slice(plain.byte_length() - SIG_BYTES as u32, plain.byte_length());
