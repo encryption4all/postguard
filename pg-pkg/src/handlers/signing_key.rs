@@ -13,7 +13,7 @@ use crate::util::current_time_u64;
 pub async fn signing_key(
     req: HttpRequest,
     msk: Data<SecretKey>,
-    body: Json<SigningKeyRequest>,
+    _body: Json<SigningKeyRequest>,
 ) -> Result<HttpResponse, crate::Error> {
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();
@@ -33,7 +33,6 @@ pub async fn signing_key(
 
     // The PKG gets to decide the timestamp in the policy.
     let iat = current_time_u64()?;
-    let body = body.into_inner();
 
     match status {
         SessionStatus::Done => (),
@@ -47,13 +46,9 @@ pub async fn signing_key(
         }
     }
 
-    if !body.pub_sign_id.iter().all(|attr| con.contains(attr)) {
-        return Err(crate::Error::Unexpected);
-    }
-
     let policy = Policy {
         timestamp: iat,
-        con: body.pub_sign_id.clone(),
+        con: con.clone(),
     };
     let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
     let key = keygen(sk, &id, &mut rng);
@@ -63,25 +58,18 @@ pub async fn signing_key(
         policy,
     };
 
-    let priv_sign_key = body.priv_sign_id.map(|priv_sign_id| {
-        if !priv_sign_id.iter().all(|attr| con.contains(attr)) {
-            return Err(crate::Error::Unexpected);
-        }
-        let policy = Policy {
-            timestamp: iat,
-            con: priv_sign_id,
-        };
+    let policy = Policy {
+        timestamp: iat,
+        con: con,
+    };
 
-        let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
-        let key = keygen(sk, &id, &mut rng);
+    let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
+    let key = keygen(sk, &id, &mut rng);
 
-        Ok(SigningKeyExt {
-            key: SigningKey(key),
-            policy,
-        })
+    let priv_sign_key = Some(SigningKeyExt {
+        key: SigningKey(key),
+        policy,
     });
-
-    let priv_sign_key = priv_sign_key.map_or(Ok(None), |r| r.map(Some))?;
 
     Ok(HttpResponse::Ok().json(SigningKeyResponse {
         status,

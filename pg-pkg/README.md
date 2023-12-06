@@ -100,9 +100,9 @@ Retrieves signing key(s). The request must include a HTTP Authorization header
 ```JSON
 {
   "pubSignId": [
-    { "t": "irma-demo.gemeente.personalData.fullname", "v": "Alice" }
+    { "t": "irma-demo.gemeente.personalData.fullname" }
   ],
-  "privSignId": [{ "t": "irma-demo.gemeente.personalData.bsn", "v": "1234" }]
+  "privSignId": [{ "t": "irma-demo.gemeente.personalData.bsn" }]
 }
 ```
 
