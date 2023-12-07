@@ -334,10 +334,7 @@ pub(crate) mod tests {
 
         let skr = SigningKeyRequest {
             pub_sign_id: vec![Attribute::new("testattribute", None)],
-            priv_sign_id: Some(vec![Attribute::new(
-                "private test attribute",
-                None,
-            )]),
+            priv_sign_id: Some(vec![Attribute::new("private test attribute", None)]),
         };
 
         let req = test::TestRequest::post()

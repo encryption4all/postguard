@@ -47,7 +47,17 @@ pub async fn signing_key(
         }
     }
 
-    let pub_con = con.clone().into_iter().filter(|attr| body.pub_sign_id.iter().map(|a| a.atype.clone()).collect::<Vec<String>>().contains(&attr.atype)).collect();
+    let pub_con = con
+        .clone()
+        .into_iter()
+        .filter(|attr| {
+            body.pub_sign_id
+                .iter()
+                .map(|a| a.atype.clone())
+                .collect::<Vec<String>>()
+                .contains(&attr.atype)
+        })
+        .collect();
 
     let policy = Policy {
         timestamp: iat,
@@ -62,7 +72,11 @@ pub async fn signing_key(
     };
 
     let priv_sign_key = body.priv_sign_id.as_ref().map(|priv_sign_id| {
-        let priv_con = con.clone().into_iter().filter(|a| priv_sign_id.contains(&Attribute::new(&a.atype,None))).collect();
+        let priv_con = con
+            .clone()
+            .into_iter()
+            .filter(|a| priv_sign_id.contains(&Attribute::new(&a.atype, None)))
+            .collect();
         let policy = Policy {
             timestamp: iat,
             con: priv_con,
