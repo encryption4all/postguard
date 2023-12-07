@@ -5,7 +5,7 @@ use irma::SessionStatus;
 use pg_core::api::{SigningKeyRequest, SigningKeyResponse};
 use pg_core::artifacts::{SigningKey, SigningKeyExt};
 use pg_core::ibs::gg::{keygen, SecretKey};
-use pg_core::identity::Policy;
+use pg_core::identity::{Attribute, Policy};
 
 use crate::middleware::irma::IrmaAuthResult;
 use crate::util::current_time_u64;
@@ -47,13 +47,21 @@ pub async fn signing_key(
         }
     }
 
-    if !body.pub_sign_id.iter().all(|attr| con.contains(attr)) {
-        return Err(crate::Error::Unexpected);
-    }
+    let pub_con = con
+        .clone()
+        .into_iter()
+        .filter(|attr| {
+            body.pub_sign_id
+                .iter()
+                .map(|a| a.atype.clone())
+                .collect::<Vec<String>>()
+                .contains(&attr.atype)
+        })
+        .collect();
 
     let policy = Policy {
         timestamp: iat,
-        con: body.pub_sign_id.clone(),
+        con: pub_con,
     };
     let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
     let key = keygen(sk, &id, &mut rng);
@@ -63,13 +71,15 @@ pub async fn signing_key(
         policy,
     };
 
-    let priv_sign_key = body.priv_sign_id.map(|priv_sign_id| {
-        if !priv_sign_id.iter().all(|attr| con.contains(attr)) {
-            return Err(crate::Error::Unexpected);
-        }
+    let priv_sign_key = body.priv_sign_id.as_ref().map(|priv_sign_id| {
+        let priv_con = con
+            .clone()
+            .into_iter()
+            .filter(|a| priv_sign_id.contains(&Attribute::new(&a.atype, None)))
+            .collect();
         let policy = Policy {
             timestamp: iat,
-            con: priv_sign_id,
+            con: priv_con,
         };
 
         let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
