@@ -43,7 +43,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
     pub fn new(
         pk: &PublicKey<CGWKV>,
         policies: &EncryptionPolicy,
-        pub_sign_key: &SigningKeyExt,
+        pub_sign_key: Option<&SigningKeyExt>,
         rng: &'r mut Rng,
     ) -> Result<Self, Error> {
         let (header, ss) = Header::new(pk, policies, rng)?;
@@ -60,7 +60,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         Ok(Sealer {
             rng,
             header,
-            pub_sign_key: pub_sign_key.clone(),
+            pub_sign_key: pub_sign_key.cloned(),
             priv_sign_key: None,
             config: StreamSealerConfig {
                 segment_size,
@@ -101,44 +101,67 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         w.feed(Uint8Array::from(&header_vec[..]).into()).await?;
 
         let mut signer = Signer::default().chain(&header_vec);
-        let header_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
-        let header_sig_ext = SignatureExt {
-            sig: header_sig,
-            pol: self.pub_sign_key.policy.clone(),
-        };
-        let header_sig_bytes = bincode::serialize(&header_sig_ext)?;
 
-        w.feed(Uint8Array::from(&(header_sig_bytes.len() as u32).to_be_bytes()[..]).into())
-            .await?;
-        w.feed(Uint8Array::from(&header_sig_bytes[..]).into())
-            .await?;
+        struct SigningDetails {
+            pol_len: u32,
+            buf: Uint8Array,
+            signing_key: Option<SigningKeyExt>,
+        }
+
+        let sign_details: SigningDetails = if self.pub_sign_key.is_some() {
+            let pub_sign_key = self.pub_sign_key.unwrap();
+
+            let header_sig = signer.clone().sign(&pub_sign_key.key.0, self.rng);
+            let header_sig_ext = SignatureExt {
+                sig: header_sig,
+                pol: pub_sign_key.policy.clone(),
+            };
+            let header_sig_bytes = bincode::serialize(&header_sig_ext)?;
+
+            w.feed(Uint8Array::from(&(header_sig_bytes.len() as u32).to_be_bytes()[..]).into())
+                .await?;
+            w.feed(Uint8Array::from(&header_sig_bytes[..]).into())
+                .await?;
+
+            // Check for a private signing key, otherwise fall back to the public one.
+            let signing_key = self.priv_sign_key.unwrap_or(pub_sign_key);
+            let pol_bytes: Vec<u8> = bincode::serialize(&signing_key.policy)?;
+            let pol_len: u32 = pol_bytes.len() as u32;
+
+            if pol_len + POL_SIZE_SIZE as u32 > self.config.segment_size {
+                return Err(Error::ConstraintViolation.into());
+            }
+
+            let buf = Uint8Array::new_with_length(self.config.segment_size + SIG_BYTES as u32);
+
+            buf.set(
+                &Uint8Array::from(&(pol_len as u32).to_be_bytes()[..]).into(),
+                0,
+            );
+            buf.set(
+                &Uint8Array::from(&pol_bytes[..]).into(),
+                POL_SIZE_SIZE as u32,
+            );
+
+            SigningDetails {
+                pol_len,
+                buf,
+                signing_key: Some(signing_key),
+            }
+        } else {
+            SigningDetails {
+                pol_len: 0,
+                buf: Uint8Array::new_with_length(self.config.segment_size),
+                signing_key: None,
+            }
+        };
 
         let key = get_key(&self.config.key).await?;
 
-        // Check for a private signing key, otherwise fall back to the public one.
-        let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
-
-        let pol_bytes = bincode::serialize(&signing_key.policy)?;
-        let pol_len: u32 = pol_bytes.len() as u32;
-
-        if pol_len + POL_SIZE_SIZE as u32 > self.config.segment_size {
-            return Err(Error::ConstraintViolation.into());
-        }
-
-        let buf = Uint8Array::new_with_length(self.config.segment_size + SIG_BYTES as u32);
-
-        buf.set(
-            &Uint8Array::from(&(pol_len as u32).to_be_bytes()[..]).into(),
-            0,
-        );
-        buf.set(
-            &Uint8Array::from(&pol_bytes[..]).into(),
-            POL_SIZE_SIZE as u32,
-        );
-
         let mut counter = 0u32;
-        let mut buf_tail: u32 = POL_SIZE_SIZE as u32 + pol_len;
+        let mut buf_tail: u32 = POL_SIZE_SIZE as u32 + sign_details.pol_len;
         let mut start: u32 = buf_tail;
+        let buf = sign_details.buf;
 
         while let Some(Ok(data)) = r.next().await {
             let mut array: Uint8Array = data.dyn_into()?;
@@ -156,15 +179,17 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
                     array = array.slice(rem, len);
                     buf_tail += rem;
 
-                    signer.update(&buf.slice(start, buf_tail).to_vec());
-                    let sig = signer
-                        .clone()
-                        .chain(&counter.to_be_bytes())
-                        .chain(&[0x00])
-                        .sign(&signing_key.key.0, self.rng);
-                    let sig_bytes = bincode::serialize(&sig)?;
+                    if let Some(x) = &sign_details.signing_key {
+                        signer.update(&buf.slice(start, buf_tail).to_vec());
+                        let sig = signer
+                            .clone()
+                            .chain(&counter.to_be_bytes())
+                            .chain(&[0x00])
+                            .sign(&x.key.0, self.rng);
+                        let sig_bytes = bincode::serialize(&sig)?;
 
-                    buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
+                        buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
+                    }
 
                     let ct = encrypt(
                         &key,
@@ -183,15 +208,17 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
             }
         }
 
-        signer.update(&buf.slice(start, buf_tail).to_vec());
-        let sig = signer
-            .chain(&counter.to_be_bytes())
-            .chain(&[0x01])
-            .sign(&signing_key.key.0, self.rng);
-        let sig_bytes = bincode::serialize(&sig)?;
+        if let Some(x) = &sign_details.signing_key {
+            signer.update(&buf.slice(start, buf_tail).to_vec());
+            let sig = signer
+                .chain(&counter.to_be_bytes())
+                .chain(&[0x01])
+                .sign(&x.key.0, self.rng);
+            let sig_bytes = bincode::serialize(&sig)?;
 
-        buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
-        buf_tail += SIG_BYTES as u32;
+            buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
+            buf_tail += SIG_BYTES as u32;
+        }
 
         let final_ct = encrypt(
             &key,
@@ -284,35 +311,52 @@ where
         read_atleast(&mut r, &mut header_raw, &mut spill).await?;
 
         let mut h_sig_len_bytes = [0u8; SIG_SIZE_SIZE];
+
         read_atleast(&mut r, &mut h_sig_len_bytes, &mut spill).await?;
         let header_sig_len = u32::from_be_bytes(h_sig_len_bytes);
 
-        let mut header_sig_raw = vec![0u8; header_sig_len as usize];
-        read_atleast(&mut r, &mut header_sig_raw, &mut spill).await?;
-        let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
+        if header_sig_len > 0 {
+            let mut header_sig_raw = vec![0u8; header_sig_len as usize];
+            read_atleast(&mut r, &mut header_sig_raw, &mut spill).await?;
+            let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
 
-        let verifier = Verifier::default().chain(&header_raw);
-        let pub_id = h_sig_ext.pol.derive_ibs()?;
+            let verifier = Verifier::default().chain(&header_raw);
+            let pub_id = h_sig_ext.pol.derive_ibs()?;
 
-        if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &pub_id) {
-            return Err(Error::IncorrectSignature.into());
+            if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &pub_id) {
+                return Err(Error::IncorrectSignature.into());
+            }
+            let header: Header = bincode::deserialize(&header_raw)?;
+            let (segment_size, _) = stream_mode_checked(&header)?;
+
+            Ok(Unsealer {
+                version,
+                header,
+                pub_id: Some(h_sig_ext.pol),
+                verifier: Some(verifier),
+                vk: vk.clone(),
+                r,
+                config: StreamUnsealerConfig {
+                    spill,
+                    segment_size,
+                },
+            })
+        } else {
+            let header: Header = bincode::deserialize(&header_raw)?;
+            let (segment_size, _) = stream_mode_checked(&header)?;
+            Ok(Unsealer {
+                version,
+                header,
+                pub_id: None,
+                verifier: None,
+                vk: vk.clone(),
+                r,
+                config: StreamUnsealerConfig {
+                    spill,
+                    segment_size,
+                },
+            })
         }
-
-        let header: Header = bincode::deserialize(&header_raw)?;
-        let (segment_size, _) = stream_mode_checked(&header)?;
-
-        Ok(Unsealer {
-            version,
-            header,
-            pub_id: h_sig_ext.pol,
-            verifier,
-            vk: vk.clone(),
-            r,
-            config: StreamUnsealerConfig {
-                spill,
-                segment_size,
-            },
-        })
     }
 
     /// Unseal into an [`Sink<Uint8Array, Error = JsValue>`][Sink].
@@ -395,25 +439,25 @@ where
 
                     debug_assert!(plain.byte_length() > SIG_BYTES as u32);
 
-                    // TODO: Only if signature is present. Check via extra header?
-                    let m = plain.slice(0, plain.byte_length() - SIG_BYTES as u32);
-                    let sig =
-                        plain.slice(plain.byte_length() - SIG_BYTES as u32, plain.byte_length());
-                    let sig: Signature = bincode::deserialize(&sig.to_vec())?;
+                    if let Some(x) = &mut self.verifier {
+                        let m = plain.slice(0, plain.byte_length() - SIG_BYTES as u32);
+                        let sig = plain
+                            .slice(plain.byte_length() - SIG_BYTES as u32, plain.byte_length());
+                        let sig: Signature = bincode::deserialize(&sig.to_vec())?;
 
-                    self.verifier.update(&m.to_vec());
+                        x.update(&m.to_vec());
 
-                    if !self
-                        .verifier
-                        .clone()
-                        .chain(&counter.to_be_bytes())
-                        .chain(&[0x00])
-                        .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
-                    {
-                        return Err(Error::IncorrectSignature.into());
+                        if !x
+                            .clone()
+                            .chain(&counter.to_be_bytes())
+                            .chain(&[0x00])
+                            .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
+                        {
+                            return Err(Error::IncorrectSignature.into());
+                        }
+
+                        w.feed(m.into()).await?;
                     }
-
-                    w.feed(m.into()).await?;
 
                     counter = counter.checked_add(1).ok_or(Error::Symmetric)?;
                     buf_tail = 0;
@@ -441,32 +485,40 @@ where
         );
 
         let sig: Signature = bincode::deserialize(&sig.to_vec())?;
-        self.verifier.update(&m.to_vec());
-        if !self
-            .verifier
-            .clone()
-            .chain(&counter.to_be_bytes())
-            .chain(&[0x01])
-            .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
-        {
-            return Err(Error::IncorrectSignature.into());
-        }
 
-        w.feed(m.into()).await?;
+        if let Some(x) = &mut self.verifier {
+            x.update(&m.to_vec());
+            if !x
+                .clone()
+                .chain(&counter.to_be_bytes())
+                .chain(&[0x01])
+                .verify(&self.vk.0, &sig, &pol_id.as_ref().unwrap().1)
+            {
+                return Err(Error::IncorrectSignature.into());
+            }
+
+            w.feed(m.into()).await?;
+        }
 
         w.flush().await?;
         w.close().await?;
 
-        let private_id = pol_id.unwrap().0;
-        let private = if self.pub_id == private_id {
-            None
+        if let Some(pol_id) = pol_id {
+            let private_id = pol_id.0.clone();
+            let private = if self.pub_id == Some(private_id) {
+                None
+            } else {
+                Some(pol_id.0.clone())
+            };
+            Ok(VerificationResult {
+                public: Some(pol_id.0.clone()),
+                private: private,
+            })
         } else {
-            Some(private_id)
-        };
-
-        Ok(VerificationResult {
-            public: self.pub_id.clone(),
-            private,
-        })
+            Ok(VerificationResult {
+                public: None,
+                private: None,
+            })
+        }
     }
 }

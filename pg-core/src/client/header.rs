@@ -113,6 +113,8 @@ pub struct Header {
     pub mode: Mode,
 
     // TODO: Add bool to indicate signature?
+    /// Indicate whether signature is added
+    pub hasSignature: bool
 }
 
 /// Contains header data specific to _one_ recipient.
@@ -170,6 +172,7 @@ impl Header {
                 recipients: recipient_info,
                 algo: Algorithm::new_aes128_gcm(rng),
                 mode: Mode::default(),
+                hasSignature: false,
             },
             ss,
         ))
@@ -184,6 +187,12 @@ impl Header {
     /// Set the encryption algorithm.
     pub fn with_algo(mut self, algo: Algorithm) -> Self {
         self.algo = algo;
+        self
+    }
+    
+    /// Set the signature .
+    pub fn with_signature(mut self, hasSig: bool) -> Self {
+        self.hasSignature = hasSig;
         self
     }
 }

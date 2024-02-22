@@ -19,7 +19,7 @@ use crate::identity::Policy;
 use crate::util::*;
 use crate::{artifacts::SigningKeyExt, consts::*};
 use header::SignatureExt;
-use ibs::gg::Verifier;
+use ibs::gg::{UserSecretKey, Verifier};
 use serde::{Deserialize, Serialize};
 
 /// A Sealer is used to encrypt and sign data using PostGuard.
@@ -34,9 +34,9 @@ pub struct Sealer<'r, R, C> {
     // The flavor-specific configuration.
     config: C,
 
-    // The public signing key. Used to sign public data, such as the header.
+    // Optional public signing key. Used to sign public data, such as the header.
     // The signature and claims are visible to outsiders.
-    pub_sign_key: SigningKeyExt,
+    pub_sign_key: Option<SigningKeyExt>,
 
     // An optional private signing key.
     // The signature and claims are encrypted and not visible to outsiders.
@@ -71,7 +71,7 @@ pub struct Unsealer<R, C: UnsealerConfig> {
     pub header: Header,
 
     /// The verified public identity which was used to sign the header.
-    pub pub_id: Policy,
+    pub pub_id: Option<Policy>,
 
     // The input.
     r: R,
@@ -80,7 +80,7 @@ pub struct Unsealer<R, C: UnsealerConfig> {
     config: C,
 
     // The message verifier.
-    verifier: Verifier,
+    verifier: Option<Verifier>,
 
     // The message verifier key.
     vk: VerifyingKey,
@@ -90,7 +90,8 @@ pub struct Unsealer<R, C: UnsealerConfig> {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerificationResult {
     /// The public signing verified claims.
-    pub public: Policy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public: Option<Policy>,
 
     /// The private signing verified claims.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -6,6 +6,7 @@ use pg_core::api::IrmaAuthRequest;
 /// Maximum allowed valitidy (in seconds) of a JWT (1 day).
 const MAX_VALIDITY: u64 = 60 * 60 * 24;
 
+
 /// Default validity if no validity is specified (5 min).
 const DEFAULT_VALIDITY: u64 = 60 * 5;
 
@@ -37,6 +38,7 @@ pub async fn start(
         None => Ok(DEFAULT_VALIDITY),
     }?;
 
+    // TODO: male depending on MAX_VALIDITY_SIGN_EMAIL as well (depends whether one signs, how to know? ..)
     let er = ExtendedIrmaRequest {
         timeout: None,
         callback_url: None,

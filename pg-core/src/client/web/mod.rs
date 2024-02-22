@@ -64,7 +64,7 @@ impl super::sealed::UnsealerConfig for UnsealerMemoryConfig {}
 #[derive(Debug, Serialize, Deserialize)]
 struct MessageAndSignature {
     message: Vec<u8>,
-    sig: SignatureExt,
+    sig: Option<SignatureExt>,
 }
 
 impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
@@ -86,7 +86,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         Ok(Self {
             rng,
             header,
-            pub_sign_key: pub_sign_key.clone(),
+            pub_sign_key: Some(pub_sign_key.clone()),
             priv_sign_key: None,
             config: SealerMemoryConfig { key, nonce },
         })
@@ -106,31 +106,39 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         out.extend_from_slice(&(header_buf.len() as u32).to_be_bytes());
         out.extend_from_slice(&header_buf);
 
-        // TODO: Make signing optional
-        let signer = Signer::new().chain(header_buf);
-        let h_sig = signer.clone().sign(&self.pub_sign_key.key.0, self.rng);
+        let mut input: Vec<u8> = [].to_vec();
 
-        let h_sig_ext = SignatureExt {
-            sig: h_sig,
-            pol: self.pub_sign_key.policy.clone(),
-        };
+        if self.pub_sign_key.is_some() {
+            let pub_sign_key = self.pub_sign_key.unwrap();
+            let signer = Signer::new().chain(header_buf);
+            let h_sig = signer.clone().sign(&pub_sign_key.key.0, self.rng);
 
-        let h_sig_ext_bytes = bincode::serialize(&h_sig_ext)?;
-        out.extend_from_slice(&(h_sig_ext_bytes.len() as u32).to_be_bytes());
-        out.extend_from_slice(&h_sig_ext_bytes);
+            let h_sig_ext = SignatureExt {
+                sig: h_sig,
+                pol: pub_sign_key.policy.clone(),
+            };
 
-        let m = message.to_vec();
-        let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
-        let m_sig = signer.chain(&m).sign(&m_sig_key.key.0, self.rng);
+            let h_sig_ext_bytes = bincode::serialize(&h_sig_ext)?;
+            out.extend_from_slice(&(h_sig_ext_bytes.len() as u32).to_be_bytes());
+            out.extend_from_slice(&h_sig_ext_bytes);
 
-        // TODO: input could be just message without signature
-        let input = bincode::serialize(&MessageAndSignature {
-            message: m,
-            sig: SignatureExt {
-                sig: m_sig,
-                pol: m_sig_key.policy.clone(),
-            },
-        })?;
+            let m: Vec<u8> = message.to_vec();
+            let m_sig_key = self.priv_sign_key.unwrap_or(pub_sign_key);
+            let m_sig = signer.chain(&m).sign(&m_sig_key.key.0, self.rng);
+
+            input = bincode::serialize(&MessageAndSignature {
+                message: m,
+                sig: Some(SignatureExt {
+                    sig: m_sig,
+                    pol: m_sig_key.policy.clone(),
+                }),
+            })?;
+        } else {
+            input = bincode::serialize(&MessageAndSignature {
+                message: message.to_vec(),
+                sig: None,
+            })?;
+        }
 
         let key = get_key(&self.config.key).await?;
         let ciphertext = encrypt(
@@ -155,19 +163,24 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         let (version, header_len) = preamble_checked(preamble_bytes)?;
 
         let (header_bytes, b) = b.split_at(header_len);
-        // TODO: How to make this optional? How to know whether message is signed? Extra header maybe?
+
         let (h_sig_len_bytes, b) = b.split_at(SIG_SIZE_SIZE);
         let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into()?);
         let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);
 
-        let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
-        let id = h_sig_ext.pol.derive_ibs()?;
+        let (verifier, pub_id) = if h_sig_len != 0 {
+            let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
+            let id = h_sig_ext.pol.derive_ibs()?;
+            let verifier = Verifier::default().chain(&header_bytes);
 
-        let verifier = Verifier::default().chain(&header_bytes);
+            if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &id) {
+                return Err(Error::IncorrectSignature.into());
+            }
 
-        if !verifier.clone().verify(&vk.0, &h_sig_ext.sig, &id) {
-            return Err(Error::IncorrectSignature.into());
-        }
+            (Some(verifier), Some(h_sig_ext.pol))
+        } else {
+            (None, None)
+        };
 
         let header: Header = bincode::deserialize(header_bytes)?;
         let message_len = match header.mode {
@@ -178,7 +191,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         Ok(Self {
             version,
             header,
-            pub_id: h_sig_ext.pol,
+            pub_id: pub_id,
             r: Uint8Array::from(ct),
             verifier,
             vk: vk.clone(),
@@ -191,7 +204,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         self,
         ident: &str,
         usk: &UserSecretKey<CGWKV>,
-    ) -> Result<(Uint8Array, VerificationResult), Error> {
+    ) -> Result<(Uint8Array, Option<VerificationResult>), Error> {
         let rec_info = self
             .header
             .recipients
@@ -208,33 +221,42 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
             .to_vec();
 
         let msg: MessageAndSignature = bincode::deserialize(&plain).map_err(Into::<Error>::into)?;
-        let id = msg.sig.pol.derive_ibs()?;
-        let verified = self
-            .verifier
-            .chain(&msg.message)
-            .verify(&self.vk.0, &msg.sig.sig, &id);
 
-        if !verified {
-            return Err(Error::IncorrectSignature.into());
-        }
+        let verification_result = if msg.sig.is_some() {
+            let sig = msg.sig.unwrap();
+            let id = sig.pol.derive_ibs()?;
+            let verified = self
+                .verifier
+                .unwrap()
+                .chain(&msg.message)
+                .verify(&self.vk.0, &sig.sig, &id);
 
+            if !verified {
+                return Err(Error::IncorrectSignature.into());
+            }
+
+            if let Some(pub_id) = self.pub_id {
+                let private = if pub_id == sig.pol {
+                    None
+                } else {
+                    Some(sig.pol)
+                };
+
+                Some(VerificationResult {
+                    public: Some(pub_id),
+                    private,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         debug_assert_eq!(self.config.message_len, msg.message.len());
 
         let res = Uint8Array::from(msg.message.as_slice());
 
-        let private = if self.pub_id == msg.sig.pol {
-            None
-        } else {
-            Some(msg.sig.pol)
-        };
-
-        Ok((
-            res,
-            VerificationResult {
-                public: self.pub_id,
-                private,
-            },
-        ))
+        Ok((res, verification_result))
     }
 }
 
