@@ -6,12 +6,16 @@ use pg_core::api::IrmaAuthRequest;
 /// Maximum allowed valitidy (in seconds) of a JWT (1 day).
 const MAX_VALIDITY: u64 = 60 * 60 * 24;
 
+/// Maximum allowed valitidy (in seconds) of a JWT used when signing (100 day).
+const MAX_VALIDITY_SIGN: u64 = 60 * 60 * 24 * 100;
+
 /// Default validity if no validity is specified (5 min).
 const DEFAULT_VALIDITY: u64 = 60 * 5;
 
 pub async fn start(
     url: Data<String>,
     value: Json<IrmaAuthRequest>,
+    isSigning: bool
 ) -> Result<HttpResponse, crate::Error> {
     let irma_url = url.get_ref().clone();
     let kr = value.into_inner();
@@ -31,8 +35,11 @@ pub async fn start(
         )
         .build();
 
+    // Challenge: only one request for whole policy, cannot make JWT for email alone with current implementation. Or make one JWT for each attribute and sent JWT 
+    let is_sign_and_email = isSigning;
+
     let validity = match kr.validity {
-        Some(validity) if validity > MAX_VALIDITY => Err(Error::ValidityError),
+        Some(validity) if !isSigning && validity > MAX_VALIDITY || isSigning && validity > MAX_VALIDITY_SIGN => Err(Error::ValidityError),
         Some(validity) => Ok(validity),
         None => Ok(DEFAULT_VALIDITY),
     }?;
