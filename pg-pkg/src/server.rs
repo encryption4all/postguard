@@ -333,11 +333,8 @@ pub(crate) mod tests {
         let (app, _, _, _, _) = default_setup().await;
 
         let skr = SigningKeyRequest {
-            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
-            priv_sign_id: Some(vec![Attribute::new(
-                "private test attribute",
-                Some("some private information"),
-            )]),
+            pub_sign_id: vec![Attribute::new("testattribute", None)],
+            priv_sign_id: Some(vec![Attribute::new("private test attribute", None)]),
         };
 
         let req = test::TestRequest::post()
@@ -364,7 +361,7 @@ pub(crate) mod tests {
         let (app, _, _, pks, _) = default_setup().await;
 
         let skr = SigningKeyRequest {
-            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            pub_sign_id: vec![Attribute::new("testattribute", None)],
             priv_sign_id: None,
         };
 

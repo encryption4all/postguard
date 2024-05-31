@@ -43,7 +43,7 @@ interface IPolicy {
   ts: number;
 }
 
-export type AttributeCon = { t: string; v: string }[];
+export type AttributeCon = { t: string; v?: string }[];
 "#;
 
 #[wasm_bindgen]
