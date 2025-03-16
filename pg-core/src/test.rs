@@ -44,7 +44,7 @@ impl TestSetup {
         let id2 = String::from("Bob");
         let id3 = String::from("Charlie");
 
-        // Some example policies.
+        // Some example policies.
         let policies = vec![
             // Alice just email
             Policy {
@@ -81,6 +81,11 @@ impl TestSetup {
                     "pbdf.gemeente.personalData.name",
                     Some("Charlie"),
                 )],
+            },
+            // Default (for skip-enc)
+            Policy {
+                timestamp: 0,
+                con: vec![Attribute::new("default", Some("Default"))],
             },
         ];
 

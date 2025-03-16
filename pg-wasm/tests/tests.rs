@@ -79,7 +79,8 @@ mod mem {
         let setup = TestSetup::new(&mut rng);
 
         let options = SealOptions {
-            policy: setup.policy.clone(),
+            skip_encryption: None,
+            policy: Some(setup.policy.clone()),
             pub_sign_key: setup.signing_keys[0].clone(),
             priv_sign_key: Some(setup.signing_keys[1].clone()),
         };
@@ -131,7 +132,8 @@ mod mem {
         // Seal inputs (Web).
         let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
         let options = SealOptions {
-            policy: setup.policy.clone(),
+            skip_encryption: None,
+            policy: Some(setup.policy.clone()),
             pub_sign_key: setup.signing_keys[0].clone(),
             priv_sign_key: Some(setup.signing_keys[1].clone()),
         };
@@ -271,7 +273,8 @@ mod stream {
         let setup = TestSetup::new(&mut rng);
 
         let options = SealOptions {
-            policy: setup.policy.clone(),
+            skip_encryption: None,
+            policy: Some(setup.policy.clone()),
             pub_sign_key: setup.signing_keys[0].clone(),
             priv_sign_key: Some(setup.signing_keys[1].clone()),
         };
@@ -340,7 +343,8 @@ mod stream {
         // Seal inputs (Web).
         let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
         let options = SealOptions {
-            policy: setup.policy.clone(),
+            skip_encryption: None,
+            policy: Some(setup.policy.clone()),
             pub_sign_key: setup.signing_keys[0].clone(),
             priv_sign_key: None,
         };
@@ -377,6 +381,57 @@ mod stream {
 
         let mut plain2 = Vec::new();
         unsealer.unseal("Bob", usk, &mut plain2).await.unwrap();
+
+        assert_eq!(&plain, &plain2);
+    }
+
+    async fn test_web_to_rust_skip_enc(len: usize) {
+        use pg_core::client::rust::stream::UnsealerStreamConfig as UC;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // Seal inputs (Web).
+        let mpk = serde_wasm_bindgen::to_value(&setup.ibe_pk).unwrap();
+        let options = SealOptions {
+            skip_encryption: Some(true),
+            policy: None,
+            pub_sign_key: setup.signing_keys[0].clone(),
+            priv_sign_key: None,
+        };
+
+        let js_options = serde_wasm_bindgen::to_value(&options).unwrap();
+
+        // Unseal inputs (Rust).
+        let usk = &setup.usks[5];
+        let vk = setup.ibs_pk;
+
+        let plain = rand_vec(len);
+        let js_plain = Uint8Array::from(&plain[..]);
+
+        let sealer_input = new_readable_stream_from_array(vec![js_plain.into()].into_boxed_slice());
+        let sealer_output = new_recording_writable_stream();
+
+        js_stream_seal(
+            mpk.clone(),
+            js_options.into(),
+            sealer_input,
+            sealer_output.stream(),
+        )
+            .await
+            .unwrap();
+
+        let unsealer_input: Vec<u8> = sealer_output
+            .written()
+            .iter()
+            .flat_map(|chunk| chunk.dyn_ref::<Uint8Array>().unwrap().to_vec())
+            .collect();
+
+        let mut tmp = Cursor::new(&unsealer_input);
+        let unsealer = Unsealer::<_, UC>::new(&mut tmp, &vk).await.unwrap();
+
+        let mut plain2 = Vec::new();
+        unsealer.unseal("Default", usk, &mut plain2).await.unwrap();
 
         assert_eq!(&plain, &plain2);
     }
@@ -450,6 +505,13 @@ mod stream {
     async fn test_seal_unseal_rust_to_web() {
         for l in LENGTHS {
             test_rust_to_web(*l as usize).await;
+        }
+    }
+    
+    #[wasm_bindgen_test]
+    async fn test_seal_unseal_web_to_rust_skip_enc() {
+        for l in LENGTHS {
+            test_web_to_rust_skip_enc(*l as usize).await;
         }
     }
 }

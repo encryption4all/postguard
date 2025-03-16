@@ -7,7 +7,7 @@ description = "Commandline interface for PostGuard"
 edition = "2021"
 license = "MIT"
 name = "pg-cli"
-version = "0.3.0-rc.0"
+version = "0.3.3"
 
 [dependencies]
 pg-core = { path = "../pg-core", features = ["stream"] }

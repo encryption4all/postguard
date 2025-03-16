@@ -1,6 +1,6 @@
 [package]
 name = "pg-wasm"
-version = "0.3.0"
+version = "0.3.8"
 authors = [
   "Leon Botros <l.botros@cs.ru.nl>",
   "Bas Westerbaan <bas@westerbaan.name>",
@@ -16,16 +16,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pg-core = { path = "../pg-core", features = ["web", "stream"] }
-wasm-bindgen = { version = "0.2" }
+wasm-bindgen = { version = "0.2.100" }
 js-sys = "0.3"
 web-sys = "0.3"
 rand = { version = "0.8.4" }
 serde = "*"
-wasm-streams = "0.3"
-getrandom = { version = "0.2", features = ["js"] }
+wasm-streams = "0.4.2"
 futures = "0.3"
-wasm-bindgen-futures = "0.4"
-serde-wasm-bindgen = "0.5.0"
+wasm-bindgen-futures = "0.4.50"
+serde-wasm-bindgen = "0.6.5"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -34,3 +33,6 @@ web-sys = { version = "0.3", features = ["console", "Window", "Performance"] }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Os"]
+
+[profile.release]
+strip = true

@@ -1,9 +1,9 @@
 use actix_web::{web::Data, HttpResponse};
 use actix_web::{HttpMessage, HttpRequest};
-
+use irma::{ProofStatus, SessionStatus};
 use pg_core::api::KeyResponse;
 use pg_core::artifacts::UserSecretKey;
-use pg_core::identity::Policy;
+use pg_core::identity::{Attribute, Policy};
 use pg_core::kem::IBKEM;
 
 use crate::middleware::irma::IrmaAuthResult;
@@ -25,31 +25,39 @@ where
         .parse::<u64>()
         .map_err(|_e| crate::Error::NoTimestampError)?;
 
-    let IrmaAuthResult {
-        con,
-        status,
-        proof_status,
-        exp,
-    } = req
-        .extensions()
-        .get::<IrmaAuthResult>()
-        .cloned()
-        .ok_or(crate::Error::Unexpected)?;
+    let mut con: Vec<Attribute> = vec![Attribute::new("default", Some("Default"))];
+    let mut status: SessionStatus = SessionStatus::Done;
+    let mut proof_status: Option<ProofStatus> = None;
 
-    // It is not allowed to ask for USKs with a timestamp in the future.
-    let now = current_time_u64()?;
-    if timestamp > now {
-        return Err(crate::Error::ChronologyError);
-    }
+    // Hacky: if timestamp is 0, we want to get USK for non-enc policy
+    if timestamp > 0 {
+        let auth_result
+         = req
+            .extensions()
+            .get::<IrmaAuthResult>()
+            .cloned()
+            .ok_or(crate::Error::Unexpected)?;
 
-    // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
-    if let Some(exp) = exp {
-        if timestamp > exp {
+        let exp = auth_result.exp;
+        con = auth_result.con;
+        status = auth_result.status;
+        proof_status = Some(auth_result.proof_status.unwrap_or(ProofStatus::Invalid));
+
+        // It is not allowed to ask for USKs with a timestamp in the future.
+        let now = current_time_u64()?;
+        if timestamp > now {
             return Err(crate::Error::ChronologyError);
         }
-    }
 
-    req.extensions_mut().clear();
+        // It is not allowed to ask for USKs with a timestamp beyond the expiry date.
+        if let Some(exp) = exp {
+            if timestamp > exp {
+                return Err(crate::Error::ChronologyError);
+            }
+        }
+
+        req.extensions_mut().clear();
+    }
 
     let policy = Policy { timestamp, con };
 

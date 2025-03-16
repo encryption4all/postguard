@@ -6,7 +6,7 @@ authors = [
 edition = "2021"
 license = "MIT"
 name = "pg-pkg"
-version = "0.3.0-rc.0"
+version = "0.3.3"
 
 [dependencies]
 actix-cors = "0.6.1"
