@@ -48,6 +48,7 @@ export type AttributeCon = { t: string; v?: string }[];
 
 #[wasm_bindgen]
 extern "C" {
+    /// Seal options type from TypeScript.
     #[wasm_bindgen(typescript_type = "ISealOptions")]
     pub type ISealOptions;
 }
