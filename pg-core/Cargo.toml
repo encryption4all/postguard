@@ -32,9 +32,9 @@ aead = { version = "0.5", features = ["alloc"], optional = true }
 aes-gcm = { version = "0.10", optional = true }
 
 # For the Web Crypto backend.
-wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen = { version = "0.2.104", optional = true }
 js-sys = { version = "0.3", optional = true }
-wasm-bindgen-futures = { version = "0.4", optional = true }
+wasm-bindgen-futures = { version = "0.4.54", optional = true }
 web-sys = { version = "0.3", features = [
   "SubtleCrypto",
   "AesGcmParams",

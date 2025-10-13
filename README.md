@@ -10,6 +10,17 @@ proves against a Private Key Generator (PKG) - a trusted third party - that he
 is indeed the correct recipient. Upon succesfully doing so, the receiver
 obtains a key that can be used to decrypt the message.
 
+### Getting started
+Install Rust and Cargo
+```
+curl https://sh.rustup.rs -sSf | shD
+```
+
+Build the repository using
+```
+cargo build --release  
+```
+
 ### About this repository
 
 The repository consists of a workspace with four members:

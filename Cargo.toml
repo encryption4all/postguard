@@ -1,5 +1,6 @@
 [workspace]
 members = ["pg-core", "pg-cli", "pg-pkg", "pg-wasm"]
+default-members = ["pg-core", "pg-cli", "pg-pkg"]
 
 resolver = "2"
 
