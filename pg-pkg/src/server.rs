@@ -57,6 +57,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         host,
         port,
         irma,
+        irma_token,
         ibe_secret_path,
         ibe_public_path,
         ibs_secret_path,
@@ -124,12 +125,13 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                         scope("/{_:(irma|request)}")
                             .service(
                                 resource("/start")
-                                    .app_data(Data::new(irma.clone()))
+                                    .app_data(Data::new(IrmaUrl(irma.clone())))
+                                    .app_data(Data::new(IrmaToken(irma_token.clone())))
                                     .route(web::post().to(handlers::start)),
                             )
                             .service(
                                 resource("/jwt/{token}")
-                                    .app_data(Data::new(irma.clone()))
+                                    .app_data(Data::new(IrmaUrl(irma.clone())))
                                     .route(web::get().to(handlers::jwt)),
                             )
                             .service(
@@ -140,6 +142,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             )
                             .service(
                                 resource("/sign/key")
+                                    .app_data(Data::new(irma_token.clone()))
                                     .app_data(Data::new(ibs_sk.clone()))
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::post().to(handlers::signing_key)),

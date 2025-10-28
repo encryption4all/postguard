@@ -56,8 +56,11 @@ pub struct ServerOpts {
     pub port: String,
 
     /// IRMA server used to verify identities.
-    #[clap(short, long, default_value = "https://irmacrypt.nl/irma", value_hint = ValueHint::Url)]
+    #[clap(short, long, default_value = "https://yivi.app", value_hint = ValueHint::Url)]
     pub irma: String,
+    
+    #[clap(short = 't', long, required = true)]
+    pub irma_token: String,
 
     /// Path to store the IBS private key.
     #[clap(long, default_value = "./pkg_ibe.sec", value_hint = ValueHint::FilePath)]

@@ -15,6 +15,19 @@ For its usage, see the help:
 irmaseal-pkg --help
 ```
 
+## Running the server
+First generate of make your ibe and ibs keys use 
+```bash 
+cargo run --release --bin pg-pkg gen
+```
+
+Then run the server using:
+```bash
+cargo run --release --bin pg-pkg server
+```
+
+
+
 ## API description
 
 ### `GET /v2/parameters`
