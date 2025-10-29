@@ -58,7 +58,7 @@ pub struct ServerOpts {
     /// IRMA server used to verify identities.
     #[clap(short, long, default_value = "https://yivi.app", value_hint = ValueHint::Url)]
     pub irma: String,
-    
+
     #[clap(short = 't', long, required = true)]
     pub irma_token: String,
 

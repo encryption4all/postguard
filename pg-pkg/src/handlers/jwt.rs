@@ -1,7 +1,7 @@
+use crate::util::IrmaUrl;
 use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{web::Data, HttpResponse};
-use crate::util::IrmaUrl;
 
 pub async fn jwt(irma: Data<IrmaUrl>, req: HttpRequest) -> Result<HttpResponse, crate::Error> {
     let token = req.match_info().query("token");
