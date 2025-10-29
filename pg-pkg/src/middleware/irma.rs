@@ -216,7 +216,7 @@ where
     fn new_transform(&self, service: S) -> Self::Future {
         let url = self.irma_url.clone();
         let auth_type = self.method.clone();
-
+        
         async move {
             let auth_data = match auth_type {
                 IrmaAuthType::Jwt => {

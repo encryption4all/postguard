@@ -1,0 +1,16 @@
+services:
+    pg-pkg:
+        build:
+            context: .
+            dockerfile: Dockerfile
+            args:
+                TOKEN: { YOUR_TOKEN_HERE }
+                IRMA_SERVER: https://yivi.app
+        container_name: pg-pkg
+        ports:
+            - "8087:8087"
+        networks:
+            - pg-network
+networks:
+    pg-network:
+        driver: bridge
