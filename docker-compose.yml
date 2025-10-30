@@ -1,0 +1,15 @@
+services:
+    pg-pkg:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: pg-pkg
+        ports:
+            - "8087:8087"
+        networks:
+            - pg-network
+        env_file: ".env"
+
+networks:
+    pg-network:
+        driver: bridge
