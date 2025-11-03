@@ -108,6 +108,10 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
             )
             .service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(
+                resource("/health")
+                .route(web::get().to(handlers::health)),
+            )
+            .service(
                 scope("/v2")
                     .wrap_fn(collect_metrics)
                     .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
