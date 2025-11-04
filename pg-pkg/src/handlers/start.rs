@@ -48,14 +48,14 @@ pub async fn start(
     };
 
     let client = IrmaClientBuilder::new(&irma_url)
-        .map_err(|_e | Error::Unexpected)?
+        .map_err(|_e | Error::ClientInvalid)?
         .token_authentication(irma_token)
         .build();
 
     let session = client
         .request_extended(&er)
         .await
-        .or(Err(Error::Unexpected))?;
+        .or(Err(Error::SessionCreationError))?;
 
     Ok(HttpResponse::Ok().json(session))
 }
