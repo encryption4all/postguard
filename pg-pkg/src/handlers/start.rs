@@ -55,10 +55,6 @@ pub async fn start(
         .token_authentication(irma_token)
         .build();
     
-    log::info!("Starting IRMA session with request: {:?}", er);
-    log::info!("Using IRMA server at: {}", irma_url);
-    log::info!("Using IRMA token: {}", logirma_token);
-    
     let session = client
         .request_extended(&er)
         .await
