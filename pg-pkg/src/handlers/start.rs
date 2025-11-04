@@ -48,8 +48,6 @@ pub async fn start(
         request: dr,
     };
 
-    let logirma_token = irma_token.clone();
-
     let client = IrmaClientBuilder::new(&irma_url)
         .map_err(|_e | Error::ClientInvalid)?
         .token_authentication(irma_token)
