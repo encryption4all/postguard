@@ -2,6 +2,7 @@ use crate::util::{IrmaToken, IrmaUrl};
 use crate::Error;
 use actix_web::{web::Data, web::Json, HttpResponse};
 use irma::*;
+use log::log;
 use pg_core::api::IrmaAuthRequest;
 
 /// Maximum allowed valitidy (in seconds) of a JWT (1 day).
@@ -47,11 +48,17 @@ pub async fn start(
         request: dr,
     };
 
+    let logirma_token = irma_token.clone();
+
     let client = IrmaClientBuilder::new(&irma_url)
         .map_err(|_e | Error::ClientInvalid)?
         .token_authentication(irma_token)
         .build();
-
+    
+    log::info!("Starting IRMA session with request: {:?}", er);
+    log::info!("Using IRMA server at: {}", irma_url);
+    log::info!("Using IRMA token: {}", logirma_token);
+    
     let session = client
         .request_extended(&er)
         .await
