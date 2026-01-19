@@ -32,7 +32,7 @@ pub async fn exec(enc_opts: EncOpts) {
 
     let timestamp = now();
 
-    let x: BTreeMap<String, Vec<Attribute>> = serde_json::from_str(&identity).unwrap();
+    let x: BTreeMap<String, Vec<Attribute>> = serde_json::from_str(identity.as_str()).unwrap();
     let identifiers: Vec<String> = x.keys().cloned().collect();
     let policies: BTreeMap<String, Policy> = x
         .iter()
