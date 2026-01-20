@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 use std::time::SystemTime;
+use pg_core::artifacts::SigningKeyExt;
 
 fn now() -> u64 {
     SystemTime::now()
@@ -27,6 +28,7 @@ pub async fn exec(enc_opts: EncOpts) {
         identity,
         pub_sign_id: pub_sign_id_str,
         priv_sign_id,
+        api_key,
         pkg,
     } = enc_opts;
 
@@ -75,27 +77,47 @@ pub async fn exec(enc_opts: EncOpts) {
     );
 
     eprintln!("Retrieving signing keys...");
+    
+    let pub_sign_key: Option<SigningKeyExt>;
+    let priv_sign_key: Option<SigningKeyExt>;
+    if api_key.is_some() {
+        eprintln!("Using API key");
 
-    let sd = client
-        .request_start(&IrmaAuthRequest {
-            con: total_id,
-            validity: None,
-        })
-        .await
-        .unwrap();
+        SigningKeyResponse {
+            pub_sign_key,
+            priv_sign_key,
+            ..
+        } = client.request_signing_key(
+            &api_key.unwrap(),
+            &SigningKeyRequest {
+                pub_sign_id,
+                priv_sign_id,
+            },
+        ).await.unwrap();
+    } else {
+        eprintln!("Using app auth...");
+        
+        let sd = client
+            .request_start(&IrmaAuthRequest {
+                con: total_id,
+                validity: None,
+            })
+            .await
+            .unwrap();
 
-    print_qr(&sd.session_ptr);
+        print_qr(&sd.session_ptr);
 
-    let skr = SigningKeyRequest {
-        pub_sign_id,
-        priv_sign_id,
-    };
+        let skr = SigningKeyRequest {
+            pub_sign_id,
+            priv_sign_id,
+        };
 
-    let SigningKeyResponse {
-        pub_sign_key,
-        priv_sign_key,
-        ..
-    } = client.wait_on_signing_keys(&sd, &skr).await.unwrap();
+        SigningKeyResponse {
+            pub_sign_key,
+            priv_sign_key,
+            ..
+        } = client.wait_on_signing_keys(&sd, &skr).await.unwrap();
+    }
 
     let input_path = Path::new(&input);
     let file_name_path = input_path.file_name().unwrap();
@@ -123,7 +145,7 @@ pub async fn exec(enc_opts: EncOpts) {
         &pub_sign_key.expect("no public signing key"),
         &mut rng,
     )
-    .unwrap();
+        .unwrap();
 
     if let Some(psk) = priv_sign_key {
         sealer = sealer.with_priv_signing_key(psk);

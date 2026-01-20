@@ -38,6 +38,9 @@ pub struct EncOpts {
     #[clap(short = 'S', long)]
     pub priv_sign_id: Option<String>,
 
+    #[clap(short = 'K', long)]
+    pub api_key: Option<String>,
+
     /// Private key generator (PKG) server URL.
     #[clap(short, long, default_value = "https://stable.irmaseal-pkg.ihub.ru.nl", value_hint = ValueHint::Url)]
     pub pkg: String,
