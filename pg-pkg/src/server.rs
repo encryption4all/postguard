@@ -2,6 +2,7 @@ use actix_cors::Cors;
 use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
 use actix_web::{
+    guard::Guard,
     http::header,
     middleware::Logger,
     web,
@@ -37,6 +38,26 @@ lazy_static! {
         ]
     )
     .expect("could not initialize metrics");
+}
+
+/// Guard that checks if the Authorization header contains an API key (starts with "PG-API-")
+struct ApiKeyGuard;
+
+impl Guard for ApiKeyGuard {
+    fn check(&self, ctx: &actix_web::guard::GuardContext) -> bool {
+        ctx.head()
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .map(|auth| {
+                // Check if it's a Bearer token and starts with "PG-API-"
+                auth.strip_prefix("Bearer ")
+                    .or_else(|| auth.strip_prefix("bearer "))
+                    .map(|token| token.starts_with("PG-API-"))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    }
 }
 
 /// Precomputed parameter data.
@@ -172,18 +193,28 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::get().to(handlers::key::<CGWKV>)),
                             )
+                            // API Key authentication (when header starts with "PG-API-")
                             .service(
                                 resource("/sign/key")
+                                    .guard(ApiKeyGuard)
                                     .app_data(Data::new(irma_token.clone()))
                                     .app_data(Data::new(ibs_sk.clone()))
                                     .wrap({
-                                        let auth = IrmaAuth::new(irma.clone(), IrmaAuthType::Key);// TODO: make this dynamically JWT or key
+                                        let auth = IrmaAuth::new(irma.clone(), IrmaAuthType::Key);
                                         if let Some(ref pool) = db_pool {
                                             auth.with_db_pool(Data::clone(pool))
                                         } else {
                                             auth
                                         }
                                     })
+                                    .route(web::post().to(handlers::signing_key)),
+                            )
+                            // JWT authentication (fallback for all other tokens)
+                            .service(
+                                resource("/sign/key")
+                                    .app_data(Data::new(irma_token.clone()))
+                                    .app_data(Data::new(ibs_sk.clone()))
+                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::post().to(handlers::signing_key)),
                             ),
                     ),

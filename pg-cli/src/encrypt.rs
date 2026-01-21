@@ -80,6 +80,7 @@ pub async fn exec(enc_opts: EncOpts) {
     
     let pub_sign_key: Option<SigningKeyExt>;
     let priv_sign_key: Option<SigningKeyExt>;
+    
     if api_key.is_some() {
         eprintln!("Using API key");
 
