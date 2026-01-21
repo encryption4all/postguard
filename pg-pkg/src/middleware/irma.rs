@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use irma::*;
 use pg_core::identity::Attribute;
+use sqlx::PgPool;
 
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 
@@ -52,6 +53,8 @@ struct Claims {
 enum Auth {
     // Check the ongoing session using a token from the request.
     Token(String),
+
+    Key(actix_web::web::Data<sqlx::PgPool>),
 
     // Check the session by decoding a JWT from the request.
     Jwt(DecodingKey),
@@ -98,6 +101,50 @@ where
                         .map_err(|_e| crate::Error::Unexpected)?;
 
                     res
+                }
+                Auth::Key(pool) => {
+                    let auth = req.extract::<BearerAuth>().await?;
+                    let api_key = auth.token();
+
+                    if api_key.is_empty() {
+                        return Err(crate::Error::Unexpected.into());
+                    }
+
+                    // Query database for API key
+                    let result = sqlx::query!(
+                        r#"
+        SELECT email, attributes
+        FROM api_keys
+        WHERE key = $1 AND expires_at > NOW()
+        "#,
+                        api_key
+                    )
+                    .fetch_optional(pool.as_ref())
+                    .await
+                    .map_err(|_| crate::Error::Unexpected)?;
+
+                    let key_data = result.ok_or(crate::Error::DecodingError)?;
+
+                    // Convert stored attributes to Vec<Attribute>
+                    let attributes: Vec<Attribute> =
+                        serde_json::from_value(key_data.attributes).unwrap_or_default();
+
+                    SessionResult {
+                        token: SessionToken(api_key.to_string()),
+                        sessiontype: SessionType::Disclosing,
+                        status: SessionStatus::Done,
+                        proof_status: Some(ProofStatus::Valid),
+                        disclosed: vec![attributes
+                            .into_iter()
+                            .map(|a| DisclosedAttribute {
+                                raw_value: a.value,
+                                identifier: a.atype.parse().unwrap_or_default(),
+                                status: AttributeStatus::Present,
+                                value: None,
+                            })
+                            .collect()],
+                        signature: None,
+                    }
                 }
                 Auth::Jwt(decoding_key) => {
                     let auth = req.extract::<BearerAuth>().await?;
@@ -178,6 +225,11 @@ pub enum IrmaAuthType {
     /// This method will retrieve the session results from the IRMA server using the supplied
     /// token.
     Token,
+    /// Authenticate using an API key contained in the database
+    ///
+    /// This method will simply check for the presence of a valid API key and get any metadata from
+    /// the database, such as the associated email.
+    Key,
     /// Authenticate using IRMA signed session results (JWTs).
     ///
     /// This method will try to retrieve the public key to verify JWTs from the URL.
@@ -192,6 +244,7 @@ pub struct IrmaAuth {
     irma_url: String,
     /// The authentication method.
     method: IrmaAuthType,
+    db_pool: Option<actix_web::web::Data<sqlx::PgPool>>, // Add optional pool
 }
 
 impl IrmaAuth {
@@ -199,7 +252,11 @@ impl IrmaAuth {
     ///
     /// See [`IrmaAuthType`] for the available methods.
     pub fn new(irma_url: String, method: IrmaAuthType) -> Self {
-        Self { irma_url, method }
+        Self { irma_url, method, db_pool: None }
+    }
+
+    pub fn with_db_pool(mut self, pool: actix_web::web::Data<sqlx::PgPool>) -> () {
+        self.db_pool = Some(pool);
     }
 }
 
@@ -230,6 +287,13 @@ where
                         .expect("could not parse JWT public key");
 
                     Auth::Jwt(decoding_key)
+                }
+                IrmaAuthType::Key => {
+                    let pool = self
+                        .db_pool
+                        .clone()
+                        .expect("database pool required for Key auth");
+                    Auth::Key(pool)
                 }
                 IrmaAuthType::Token => Auth::Token(url),
             };
