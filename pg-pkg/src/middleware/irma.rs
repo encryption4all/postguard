@@ -12,7 +12,6 @@ use std::rc::Rc;
 
 use irma::*;
 use pg_core::identity::Attribute;
-use sqlx::PgPool;
 
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 
@@ -110,15 +109,15 @@ where
                         return Err(crate::Error::Unexpected.into());
                     }
 
-                    // Query database for API key
-                    let result = sqlx::query!(
+                    // Query database for API key using runtime query
+                    let result = sqlx::query_as::<_, (String, serde_json::Value)>(
                         r#"
-        SELECT email, attributes
-        FROM api_keys
-        WHERE key = $1 AND expires_at > NOW()
-        "#,
-                        api_key
+                        SELECT email, attributes
+                        FROM api_keys
+                        WHERE key = $1 AND expires_at > NOW()
+                        "#,
                     )
+                    .bind(api_key)
                     .fetch_optional(pool.as_ref())
                     .await
                     .map_err(|_| crate::Error::Unexpected)?;
@@ -127,7 +126,7 @@ where
 
                     // Convert stored attributes to Vec<Attribute>
                     let attributes: Vec<Attribute> =
-                        serde_json::from_value(key_data.attributes).unwrap_or_default();
+                        serde_json::from_value(key_data.1).unwrap_or_default();
 
                     SessionResult {
                         token: SessionToken(api_key.to_string()),
@@ -255,8 +254,9 @@ impl IrmaAuth {
         Self { irma_url, method, db_pool: None }
     }
 
-    pub fn with_db_pool(mut self, pool: actix_web::web::Data<sqlx::PgPool>) -> () {
+    pub fn with_db_pool(mut self, pool: actix_web::web::Data<sqlx::PgPool>) -> Self {
         self.db_pool = Some(pool);
+        self
     }
 }
 
@@ -273,26 +273,39 @@ where
     fn new_transform(&self, service: S) -> Self::Future {
         let url = self.irma_url.clone();
         let auth_type = self.method.clone();
+        let db_pool = self.db_pool.clone();
 
         async move {
             let auth_data = match auth_type {
                 IrmaAuthType::Jwt => {
                     let jwt_pk_bytes = reqwest::get(&format!("{url}/publickey"))
                         .await
-                        .expect("could not retrieve JWT public key")
+                        .map_err(|e| {
+                            log::error!("Failed to retrieve JWT public key from {url}/publickey: {e}");
+                        })?
                         .bytes()
                         .await
-                        .expect("could not retrieve JWT public key bytes");
+                        .map_err(|e| {
+                            log::error!("Failed to read JWT public key bytes: {e}");
+                        })?;
+                    
                     let decoding_key = DecodingKey::from_rsa_pem(&jwt_pk_bytes)
-                        .expect("could not parse JWT public key");
+                        .map_err(|e| {
+                            log::error!(
+                                "Failed to parse JWT public key as RSA PEM: {e}. \
+                                Received {} bytes from {url}/publickey. \
+                                Content preview: {:?}",
+                                jwt_pk_bytes.len(),
+                                String::from_utf8_lossy(&jwt_pk_bytes[..jwt_pk_bytes.len().min(200)])
+                            );
+                        })?;
 
                     Auth::Jwt(decoding_key)
                 }
                 IrmaAuthType::Key => {
-                    let pool = self
-                        .db_pool
-                        .clone()
-                        .expect("database pool required for Key auth");
+                    let pool = db_pool.ok_or_else(|| {
+                        log::error!("Database pool required for Key auth but not configured");
+                    })?;
                     Auth::Key(pool)
                 }
                 IrmaAuthType::Token => Auth::Token(url),

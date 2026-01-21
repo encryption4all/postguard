@@ -2,7 +2,6 @@ use crate::util::{IrmaToken, IrmaUrl};
 use crate::Error;
 use actix_web::{web::Data, web::Json, HttpResponse};
 use irma::*;
-use log::log;
 use pg_core::api::IrmaAuthRequest;
 
 /// Maximum allowed valitidy (in seconds) of a JWT (1 day).

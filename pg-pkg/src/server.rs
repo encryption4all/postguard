@@ -21,6 +21,7 @@ use pg_core::kem::cgw_kv::CGWKV;
 
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
+use sqlx::postgres::PgPoolOptions;
 
 lazy_static! {
     pub(crate) static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
@@ -56,6 +57,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     let ServerOpts {
         host,
         port,
+        database_url,
         irma,
         irma_token,
         ibe_secret_path,
@@ -63,6 +65,26 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ibs_secret_path,
         ibs_public_path,
     } = server_opts;
+
+    // Create database pool if database_url is provided
+    let db_pool = match &database_url {
+        Some(url) => {
+            let pool = PgPoolOptions::new()
+                .max_connections(5)
+                .connect(url)
+                .await
+                .map_err(|e| {
+                    log::error!("Failed to connect to database: {}", e);
+                    PKGError::Setup(format!("Failed to connect to database: {}", e))
+                })?;
+            log::info!("Connected to PostgreSQL database");
+            Some(Data::new(pool))
+        }
+        None => {
+            log::info!("No database URL provided, running without database");
+            None
+        }
+    };
 
     let (ibe_pk, ibe_sk) = cgwkv_read_key_pair(&ibe_public_path, &ibe_secret_path)?;
     let (ibs_pk, ibs_sk) = gg_read_key_pair(&ibs_public_path, &ibs_secret_path)?;
@@ -86,7 +108,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     HttpServer::new(move || {
-        App::new()
+        let mut app = App::new()
             .wrap(
                 Logger::new(
                     "request=%{PATH}xi, status=%s, client=%{CLIENT_ID}xi, response_time=%D ms",
@@ -105,8 +127,14 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     .allowed_header(header::ETAG)
                     .allowed_header(PG_CLIENT_HEADER)
                     .max_age(86400),
-            )
-            .service(resource("/metrics").route(web::get().to(handlers::metrics)))
+            );
+
+        // Add database pool to app data if available
+        if let Some(ref pool) = db_pool {
+            app = app.app_data(Data::clone(pool));
+        }
+
+        app.service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(
                 resource("/health")
                 .route(web::get().to(handlers::health)),
@@ -148,7 +176,14 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                 resource("/sign/key")
                                     .app_data(Data::new(irma_token.clone()))
                                     .app_data(Data::new(ibs_sk.clone()))
-                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .wrap({
+                                        let auth = IrmaAuth::new(irma.clone(), IrmaAuthType::Key);// TODO: make this dynamically JWT or key
+                                        if let Some(ref pool) = db_pool {
+                                            auth.with_db_pool(Data::clone(pool))
+                                        } else {
+                                            auth
+                                        }
+                                    })
                                     .route(web::post().to(handlers::signing_key)),
                             ),
                     ),
