@@ -6,6 +6,8 @@ services:
             POSTGRES_USER: devuser
             POSTGRES_PASSWORD: devpassword
             POSTGRES_DB: devdb
+        volumes:
+            -  ./api_keys.sql:/docker-entrypoint-initdb.d/api_keys.sql
         ports:
             - "5432:5432"
         networks:
