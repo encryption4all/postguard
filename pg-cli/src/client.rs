@@ -50,7 +50,7 @@ pub struct OwnedKeyChallenge {
 }
 
 impl<'a> Client<'a> {
-    pub fn new(baseurl: &'a str) -> Result<Client, ClientError> {
+    pub fn new(baseurl: &'a str) -> Result<Client<'a>, ClientError> {
         let client = ClientBuilder::new().build()?;
         Ok(Client { baseurl, client })
     }

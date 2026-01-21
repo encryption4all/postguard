@@ -7,11 +7,11 @@ use crate::opts::EncOpts;
 use crate::util::print_qr;
 use futures::io::AllowStdIo;
 use indicatif::{ProgressBar, ProgressStyle};
+use pg_core::artifacts::SigningKeyExt;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 use std::time::SystemTime;
-use pg_core::artifacts::SigningKeyExt;
 
 fn now() -> u64 {
     SystemTime::now()
@@ -37,7 +37,10 @@ pub async fn exec(enc_opts: EncOpts) {
     let x: BTreeMap<String, Vec<Attribute>> = match serde_json::from_str(identity.as_str()) {
         Ok(map) => map,
         Err(e) => {
-            eprintln!("Failed to parse `identity` JSON: {}\nInput was: {}", e, identity);
+            eprintln!(
+                "Failed to parse `identity` JSON: {}\nInput was: {}",
+                e, identity
+            );
             std::process::exit(1);
         }
     };
@@ -77,10 +80,10 @@ pub async fn exec(enc_opts: EncOpts) {
     );
 
     eprintln!("Retrieving signing keys...");
-    
+
     let pub_sign_key: Option<SigningKeyExt>;
     let priv_sign_key: Option<SigningKeyExt>;
-    
+
     if api_key.is_some() {
         eprintln!("Using API key");
 
@@ -88,16 +91,19 @@ pub async fn exec(enc_opts: EncOpts) {
             pub_sign_key,
             priv_sign_key,
             ..
-        } = client.request_signing_key(
-            &api_key.unwrap(),
-            &SigningKeyRequest {
-                pub_sign_id,
-                priv_sign_id,
-            },
-        ).await.unwrap();
+        } = client
+            .request_signing_key(
+                &api_key.unwrap(),
+                &SigningKeyRequest {
+                    pub_sign_id,
+                    priv_sign_id,
+                },
+            )
+            .await
+            .unwrap();
     } else {
         eprintln!("Using app auth...");
-        
+
         let sd = client
             .request_start(&IrmaAuthRequest {
                 con: total_id,
@@ -146,7 +152,7 @@ pub async fn exec(enc_opts: EncOpts) {
         &pub_sign_key.expect("no public signing key"),
         &mut rng,
     )
-        .unwrap();
+    .unwrap();
 
     if let Some(psk) = priv_sign_key {
         sealer = sealer.with_priv_signing_key(psk);
