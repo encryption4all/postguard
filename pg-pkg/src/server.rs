@@ -174,8 +174,8 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             .app_data(Data::new(ibs_pd.clone()))
                             .route(web::get().to(handlers::parameters)),
                     )
-                    .service(
-                        scope("/{_:(irma|request)}")
+                    .service({
+                        let mut irma_scope = scope("/{_:(irma|request)}")
                             .service(
                                 resource("/start")
                                     .app_data(Data::new(IrmaUrl(irma.clone())))
@@ -192,32 +192,33 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                     .app_data(Data::new(ibe_sk))
                                     .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
                                     .route(web::get().to(handlers::key::<CGWKV>)),
-                            )
-                            // API Key authentication (when header starts with "PG-API-")
-                            .service(
+                            );
+
+                        // API Key authentication (when header starts with "PG-API-")
+                        // Only register this service when a database pool is configured
+                        if let Some(ref pool) = db_pool {
+                            irma_scope = irma_scope.service(
                                 resource("/sign/key")
                                     .guard(ApiKeyGuard)
                                     .app_data(Data::new(irma_token.clone()))
                                     .app_data(Data::new(ibs_sk.clone()))
-                                    .wrap({
-                                        let auth = IrmaAuth::new(irma.clone(), IrmaAuthType::Key);
-                                        if let Some(ref pool) = db_pool {
-                                            auth.with_db_pool(Data::clone(pool))
-                                        } else {
-                                            auth
-                                        }
-                                    })
+                                    .wrap(
+                                        IrmaAuth::new(irma.clone(), IrmaAuthType::Key)
+                                            .with_db_pool(Data::clone(pool))
+                                    )
                                     .route(web::post().to(handlers::signing_key)),
-                            )
-                            // JWT authentication (fallback for all other tokens)
-                            .service(
-                                resource("/sign/key")
-                                    .app_data(Data::new(irma_token.clone()))
-                                    .app_data(Data::new(ibs_sk.clone()))
-                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
-                                    .route(web::post().to(handlers::signing_key)),
-                            ),
-                    ),
+                            );
+                        }
+
+                        // JWT authentication (fallback for all other tokens)
+                        irma_scope.service(
+                            resource("/sign/key")
+                                .app_data(Data::new(irma_token.clone()))
+                                .app_data(Data::new(ibs_sk.clone()))
+                                .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
+                                .route(web::post().to(handlers::signing_key)),
+                        )
+                    }),
             )
     })
     .bind(format!("{host}:{port}"))?
