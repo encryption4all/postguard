@@ -87,6 +87,8 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ibs_public_path,
     } = server_opts;
 
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    
     // Create database pool if database_url is provided
     let db_pool = match &database_url {
         Some(url) => {
@@ -125,8 +127,6 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         },
         Some(&ibs_public_path),
     )?;
-
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     HttpServer::new(move || {
         let mut app = App::new()

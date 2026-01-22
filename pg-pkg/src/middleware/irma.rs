@@ -122,7 +122,7 @@ where
                     .await
                     .map_err(|_| crate::Error::Unexpected)?;
 
-                    let key_data = result.ok_or(crate::Error::DecodingError)?;
+                    let key_data = result.ok_or(crate::Error::APIKeyInvalid)?;
 
                     // Convert stored attributes to Vec<Attribute>
                     let attributes: Vec<Attribute> =

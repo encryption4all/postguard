@@ -7,8 +7,7 @@ CREATE TABLE "public"."api_keys" (
     "attributes" json DEFAULT '{}' NOT NULL,
     "expires_at" timestamp NOT NULL,
     CONSTRAINT "api_keys_pkey" PRIMARY KEY ("key")
-)
-WITH (oids = false);
+);
 
 INSERT INTO "api_keys" ("key", "email", "attributes", "expires_at") VALUES
 ('PG-API-hallo',	'test@test.com',	'{}',	'3000-01-08 04:05:06');
