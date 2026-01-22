@@ -128,20 +128,28 @@ where
                     let attributes: Vec<Attribute> = serde_json::from_value(key_data.1)
                         .map_err(|_| crate::Error::DecodingError)?;
 
+                    let disclosed_attributes: Vec<DisclosedAttribute> = attributes
+                        .into_iter()
+                        .map(|a| {
+                            let identifier = a
+                                .atype
+                                .parse()
+                                .map_err(|_| crate::Error::DecodingError)?;
+                            Ok(DisclosedAttribute {
+                                raw_value: a.value,
+                                identifier,
+                                status: AttributeStatus::Present,
+                                value: None,
+                            })
+                        })
+                        .collect::<Result<_, crate::Error>>()?;
+
                     SessionResult {
                         token: SessionToken(api_key.to_string()),
                         sessiontype: SessionType::Disclosing,
                         status: SessionStatus::Done,
                         proof_status: Some(ProofStatus::Valid),
-                        disclosed: vec![attributes
-                            .into_iter()
-                            .map(|a| DisclosedAttribute {
-                                raw_value: a.value,
-                                identifier: a.atype.parse().unwrap_or_default(),
-                                status: AttributeStatus::Present,
-                                value: None,
-                            })
-                            .collect()],
+                        disclosed: vec![disclosed_attributes],
                         signature: None,
                     }
                 }
