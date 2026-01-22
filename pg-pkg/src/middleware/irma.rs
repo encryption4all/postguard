@@ -125,8 +125,8 @@ where
                     let key_data = result.ok_or(crate::Error::APIKeyInvalid)?;
 
                     // Convert stored attributes to Vec<Attribute>
-                    let attributes: Vec<Attribute> =
-                        serde_json::from_value(key_data.1).unwrap_or_default();
+                    let attributes: Vec<Attribute> = serde_json::from_value(key_data.1)
+                        .map_err(|_| crate::Error::DecodingError)?;
 
                     SessionResult {
                         token: SessionToken(api_key.to_string()),
@@ -251,7 +251,11 @@ impl IrmaAuth {
     ///
     /// See [`IrmaAuthType`] for the available methods.
     pub fn new(irma_url: String, method: IrmaAuthType) -> Self {
-        Self { irma_url, method, db_pool: None }
+        Self {
+            irma_url,
+            method,
+            db_pool: None,
+        }
     }
 
     pub fn with_db_pool(mut self, pool: actix_web::web::Data<sqlx::PgPool>) -> Self {
@@ -281,7 +285,9 @@ where
                     let jwt_pk_bytes = reqwest::get(&format!("{url}/publickey"))
                         .await
                         .map_err(|e| {
-                            log::error!("Failed to retrieve JWT public key from {url}/publickey: {e}");
+                            log::error!(
+                                "Failed to retrieve JWT public key from {url}/publickey: {e}"
+                            );
                         })?
                         .bytes()
                         .await
@@ -289,16 +295,16 @@ where
                             log::error!("Failed to read JWT public key bytes: {e}");
                         })?;
                     
-                    let decoding_key = DecodingKey::from_rsa_pem(&jwt_pk_bytes)
-                        .map_err(|e| {
-                            log::error!(
-                                "Failed to parse JWT public key as RSA PEM: {e}. \
+
+                    let decoding_key = DecodingKey::from_rsa_pem(&jwt_pk_bytes).map_err(|e| {
+                        log::error!(
+                            "Failed to parse JWT public key as RSA PEM: {e}. \
                                 Received {} bytes from {url}/publickey. \
                                 Content preview: {:?}",
-                                jwt_pk_bytes.len(),
-                                String::from_utf8_lossy(&jwt_pk_bytes[..jwt_pk_bytes.len().min(200)])
-                            );
-                        })?;
+                            jwt_pk_bytes.len(),
+                            String::from_utf8_lossy(&jwt_pk_bytes[..jwt_pk_bytes.len().min(200)])
+                        );
+                    })?;
 
                     Auth::Jwt(decoding_key)
                 }
