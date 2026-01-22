@@ -44,6 +44,17 @@ pub async fn exec(enc_opts: EncOpts) {
             std::process::exit(1);
         }
     };
+
+    for (id, con) in &x {
+        if con.is_empty() {
+            eprintln!(
+                "WARNING: Recipient '{}' has no attribute constraints. \
+            It may be impossible to decrypt the file this way.",
+                id
+            );
+        }
+    }
+    
     let identifiers: Vec<String> = x.keys().cloned().collect();
     let policies: BTreeMap<String, Policy> = x
         .iter()
