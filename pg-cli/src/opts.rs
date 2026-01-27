@@ -27,7 +27,7 @@ pub struct EncOpts {
     pub input: String,
 
     /// JSON representation of recipients and policies.
-    #[clap(short = 'I', long)]
+    #[clap(short, long)]
     pub identity: String,
 
     /// JSON representation of public signing identity.
@@ -38,7 +38,7 @@ pub struct EncOpts {
     #[clap(short = 'S', long)]
     pub priv_sign_id: Option<String>,
 
-    #[clap(short = 'K', long)]
+    #[clap(short, long)]
     pub api_key: Option<String>,
 
     /// Private key generator (PKG) server URL.

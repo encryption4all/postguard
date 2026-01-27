@@ -23,9 +23,19 @@ cargo run --release --bin pg-pkg gen
 
 Then run the server using:
 ```bash
-cargo run --release --bin pg-pkg server
+cargo run --release --bin pg-pkg server -t your_token_here
 ```
 
+### Allowed args.
+Only the token is required to run the server.
+
+Rest can be found in the help command or `/src/opts.rs` (you're unlikely to need them for development).
+- `--irma` (`-i`)
+  - This sets the irma server url, make sure its doesn't have a trailing slash. Default: `https://is.yivi.app`
+- `--token` (`-t`) [required]
+  - This sets the token for the aforementioned irma server.
+- `--database_url` (`-d`)
+  - This sets the postgres database url if you wanna use API keys must be something like: `postgres://USER:PASSWORD@HOST/DATABASE`
 
 
 ## API description
@@ -108,7 +118,7 @@ was valid and all the claimed attributes were present. A key is derived from the
 ### `POST /v2/irma/sign/key`
 
 Retrieves signing key(s). The request must include a HTTP Authorization header
-`Authorization: Bearer <JWT>`. The body must include under which identities a user wants to sign.
+`Authorization: Bearer <JWT>` or `Authorization: Bearer PG-API-<API KEY HERE>`. The body must include under which identities a user wants to sign.
 
 ```JSON
 {

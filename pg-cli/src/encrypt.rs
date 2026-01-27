@@ -54,7 +54,7 @@ pub async fn exec(enc_opts: EncOpts) {
             );
         }
     }
-    
+
     let identifiers: Vec<String> = x.keys().cloned().collect();
     let policies: BTreeMap<String, Policy> = x
         .iter()
@@ -96,7 +96,7 @@ pub async fn exec(enc_opts: EncOpts) {
     let priv_sign_key: Option<SigningKeyExt>;
 
     if api_key.is_some() {
-        eprintln!("Using API key");
+        eprintln!("Using API key...");
 
         SigningKeyResponse {
             pub_sign_key,

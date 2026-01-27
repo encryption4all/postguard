@@ -125,8 +125,8 @@ where
                     let key_data = result.ok_or(crate::Error::APIKeyInvalid)?;
 
                     // Convert stored attributes to Vec<Attribute>
-                    let attributes: Vec<Attribute> = serde_json::from_value(key_data.1)
-                        .map_err(|_| crate::Error::DecodingError)?;
+                    let attributes: Vec<Attribute> =
+                        serde_json::from_value(key_data.1).unwrap_or_default();
 
                     let disclosed_attributes: Vec<DisclosedAttribute> = attributes
                         .into_iter()
