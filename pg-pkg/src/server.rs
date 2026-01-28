@@ -88,7 +88,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     } = server_opts;
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
-    
+
     // Create database pool if database_url is provided
     let db_pool = match &database_url {
         Some(url) => {
@@ -156,10 +156,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         }
 
         app.service(resource("/metrics").route(web::get().to(handlers::metrics)))
-            .service(
-                resource("/health")
-                .route(web::get().to(handlers::health)),
-            )
+            .service(resource("/health").route(web::get().to(handlers::health)))
             .service(
                 scope("/v2")
                     .wrap_fn(collect_metrics)
@@ -204,7 +201,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                     .app_data(Data::new(ibs_sk.clone()))
                                     .wrap(
                                         IrmaAuth::new(irma.clone(), IrmaAuthType::Key)
-                                            .with_db_pool(Data::clone(pool))
+                                            .with_db_pool(pool.as_ref().clone()),
                                     )
                                     .route(web::post().to(handlers::signing_key)),
                             );
@@ -244,6 +241,8 @@ pub(crate) mod tests {
     use pg_core::identity::{Attribute, Policy};
     use pg_core::kem::IBKEM;
 
+    use crate::middleware::irma::tests::MockApiKeyStore;
+    use crate::middleware::irma::ApiKeyData;
     use rand::thread_rng;
     use std::time::SystemTime;
 
@@ -255,7 +254,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn default_setup() -> (
-        impl Service<Request, Response = ServiceResponse, Error = Error>,
+        impl Service<Request, Response=ServiceResponse, Error=Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
         gg::PublicKey,
@@ -273,7 +272,7 @@ pub(crate) mod tests {
             },
             None,
         )
-        .unwrap();
+            .unwrap();
 
         let pds = ParametersData::new(
             &Parameters::<VerifyingKey> {
@@ -282,7 +281,7 @@ pub(crate) mod tests {
             },
             None,
         )
-        .unwrap();
+            .unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
@@ -315,7 +314,7 @@ pub(crate) mod tests {
                         ),
                 ),
         )
-        .await;
+            .await;
 
         (app, ibe_pk, ibe_sk, ibs_pk, ibs_sk)
     }
@@ -556,5 +555,199 @@ pub(crate) mod tests {
         // Make sure a USK retrieved for a different policy cannot decapsulate.
         let ss4 = CGWKV::decaps(None, &key_response_wrong.key.unwrap().0, &ct).unwrap();
         assert_ne!(ss1, ss4);
+    }
+
+    async fn setup_ungaurded_api_key_test_with_mock_store(
+        key: String,
+        email: String,
+    ) -> (
+        impl Service<Request, Response=ServiceResponse, Error=Error>,
+        gg::SecretKey,
+    ) {
+        use crate::middleware::irma::tests::MockApiKeyStore;
+        let (_, _, _, _, ibs_sk) = default_setup().await;
+        let irma = "https://irma.example.org".to_string();
+
+        let mock_store: MockApiKeyStore;
+        if key.is_empty() {
+            mock_store = MockApiKeyStore::new();
+        } else {
+            mock_store = MockApiKeyStore::new().with_key(
+                key,
+                ApiKeyData {
+                    email,
+                    attributes: vec![Attribute::new(
+                        "pbdf.sidn-pbdf.email.email",
+                        Some("test@example.com"),
+                    )],
+                },
+            );
+        }
+
+        let app = test::init_service(
+            App::new().service(
+                scope("/v2").service(
+                    resource("/sign/key")
+                        .app_data(Data::new(ibs_sk.clone()))
+                        .wrap(
+                            IrmaAuth::new(irma.clone(), IrmaAuthType::Key)
+                                .with_api_key_store(mock_store),
+                        )
+                        .route(web::post().to(handlers::signing_key)),
+                ),
+            ),
+        )
+            .await;
+
+        (app, ibs_sk)
+    }
+
+    #[actix_web::test]
+    async fn test_get_usk_signing_with_api_key() {
+        let (app, _) = setup_ungaurded_api_key_test_with_mock_store(
+            "PG-API-valid-key".to_string(),
+            "test@example.com".to_string(),
+        )
+            .await;
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new(
+                "pbdf.sidn-pbdf.email.email",
+                Some("test@example.com"),
+            )],
+            priv_sign_id: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+        assert!(key_response.pub_sign_key.is_some());
+    }
+
+    #[actix_web::test]
+    async fn test_get_usk_signing_with_invalid_api_key() {
+        let (app, _) = setup_ungaurded_api_key_test_with_mock_store(
+            "PG-API-valid-key".to_string(),
+            "test@example.com".to_string(),
+        )
+            .await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            priv_sign_id: None,
+        };
+
+        // Test with invalid API key - should fail
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-invalid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await;
+        assert!(resp.is_err(), "Expected error for invalid API key");
+    }
+
+    #[actix_web::test]
+    async fn test_get_usk_signing_with_no_api_key_in_store() {
+        let (app, _) =
+            setup_ungaurded_api_key_test_with_mock_store("".to_string(), "".to_string()).await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            priv_sign_id: None,
+        };
+
+        // Test with invalid API key - should fail
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-invalid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await;
+        assert!(resp.is_err(), "Expected error for invalid API key");
+    }
+
+    async fn setup_guard_test() -> impl Service<Request, Response=ServiceResponse, Error=Error>
+    {
+        use actix_web::{test, web, App, HttpResponse};
+        let app = test::init_service(
+            App::new().service(
+                resource("/api-key")
+                    .guard(ApiKeyGuard)
+                    .route(web::get().to(|| async { HttpResponse::Ok().body("api-key") })),
+            ),
+        )
+            .await;
+
+        app
+    }
+
+    #[actix_web::test]
+    async fn test_signing_guard_valid_key() {
+        use actix_web::{test, App, HttpResponse};
+
+        let app = setup_guard_test().await;
+
+        let req = test::TestRequest::get()
+            .uri("/api-key")
+            .insert_header(("Authorization", "Bearer PG-API-test-key"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::get()
+            .uri("/api-key")
+            .insert_header(("Authorization", "bearer PG-API-test-key"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+    }
+
+    #[actix_web::test]
+    async fn test_signing_guard_unprefixed_key() {
+        use actix_web::{test, App, HttpResponse};
+
+        let app = setup_guard_test().await;
+
+        let req = test::TestRequest::get()
+            .uri("/api-key")
+            .insert_header(("Authorization", "Bearer test-key"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+    
+    #[actix_web::test]
+    async fn test_signing_guard_no_auth_header() {
+        use actix_web::{test, App, HttpResponse};
+
+        let app = setup_guard_test().await;
+
+        let req = test::TestRequest::get().uri("/api-key").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+    
+    #[actix_web::test]
+    async fn test_signing_guard_empty_bearer() {
+        use actix_web::{test, App, HttpResponse};
+
+        let app = setup_guard_test().await;
+
+        let req = test::TestRequest::get()
+            .uri("/api-key")
+            .insert_header(("Authorization", "Bearer "))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
     }
 }

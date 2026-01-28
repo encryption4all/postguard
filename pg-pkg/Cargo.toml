@@ -14,6 +14,7 @@ actix-rt = "2.7.0"
 actix-web = "4.1.0"
 actix-http = "*"
 actix-web-httpauth = "0.8.0"
+async-trait = "0.1"
 sqlx = { version = "0.8", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
 arrayref = "0.3.5"
 futures-util = "*"
