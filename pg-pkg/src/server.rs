@@ -254,7 +254,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn default_setup() -> (
-        impl Service<Request, Response=ServiceResponse, Error=Error>,
+        impl Service<Request, Response = ServiceResponse, Error = Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
         gg::PublicKey,
@@ -272,7 +272,7 @@ pub(crate) mod tests {
             },
             None,
         )
-            .unwrap();
+        .unwrap();
 
         let pds = ParametersData::new(
             &Parameters::<VerifyingKey> {
@@ -281,7 +281,7 @@ pub(crate) mod tests {
             },
             None,
         )
-            .unwrap();
+        .unwrap();
 
         // Create a simple setup with a pk endpoint and a key service without authentication.
         let app = test::init_service(
@@ -314,7 +314,7 @@ pub(crate) mod tests {
                         ),
                 ),
         )
-            .await;
+        .await;
 
         (app, ibe_pk, ibe_sk, ibs_pk, ibs_sk)
     }
@@ -561,7 +561,7 @@ pub(crate) mod tests {
         key: String,
         email: String,
     ) -> (
-        impl Service<Request, Response=ServiceResponse, Error=Error>,
+        impl Service<Request, Response = ServiceResponse, Error = Error>,
         gg::SecretKey,
     ) {
         use crate::middleware::auth::tests::MockApiKeyStore;
@@ -589,15 +589,12 @@ pub(crate) mod tests {
                 scope("/v2").service(
                     resource("/sign/key")
                         .app_data(Data::new(ibs_sk.clone()))
-                        .wrap(
-                            Auth::new(irma.clone(), AuthType::Key)
-                                .with_api_key_store(mock_store),
-                        )
+                        .wrap(Auth::new(irma.clone(), AuthType::Key).with_api_key_store(mock_store))
                         .route(web::post().to(handlers::signing_key)),
                 ),
             ),
         )
-            .await;
+        .await;
 
         (app, ibs_sk)
     }
@@ -608,7 +605,7 @@ pub(crate) mod tests {
             "PG-API-valid-key".to_string(),
             "test@example.com".to_string(),
         )
-            .await;
+        .await;
         let skr = SigningKeyRequest {
             pub_sign_id: vec![Attribute::new(
                 "pbdf.sidn-pbdf.email.email",
@@ -637,7 +634,7 @@ pub(crate) mod tests {
             "PG-API-valid-key".to_string(),
             "test@example.com".to_string(),
         )
-            .await;
+        .await;
 
         let skr = SigningKeyRequest {
             pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
@@ -676,7 +673,7 @@ pub(crate) mod tests {
         assert!(resp.is_err(), "Expected error for invalid API key");
     }
 
-    async fn setup_guard_test() -> impl Service<Request, Response=ServiceResponse, Error=Error>
+    async fn setup_guard_test() -> impl Service<Request, Response = ServiceResponse, Error = Error>
     {
         use actix_web::{test, web, App, HttpResponse};
         let app = test::init_service(
@@ -686,7 +683,7 @@ pub(crate) mod tests {
                     .route(web::get().to(|| async { HttpResponse::Ok().body("api-key") })),
             ),
         )
-            .await;
+        .await;
 
         app
     }
@@ -725,7 +722,7 @@ pub(crate) mod tests {
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
     }
-    
+
     #[actix_web::test]
     async fn test_signing_guard_no_auth_header() {
         use actix_web::{test, App, HttpResponse};
@@ -736,7 +733,7 @@ pub(crate) mod tests {
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
     }
-    
+
     #[actix_web::test]
     async fn test_signing_guard_empty_bearer() {
         use actix_web::{test, App, HttpResponse};

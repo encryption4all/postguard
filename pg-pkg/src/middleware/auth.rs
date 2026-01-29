@@ -173,10 +173,8 @@ where
                         .attributes
                         .into_iter()
                         .map(|a| {
-                            let identifier = a
-                                .atype
-                                .parse()
-                                .map_err(|_| crate::Error::DecodingError)?;
+                            let identifier =
+                                a.atype.parse().map_err(|_| crate::Error::DecodingError)?;
                             Ok(DisclosedAttribute {
                                 raw_value: a.value,
                                 identifier,
