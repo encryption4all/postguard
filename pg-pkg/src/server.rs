@@ -10,7 +10,7 @@ use actix_web::{
     App, HttpServer,
 };
 
-use crate::middleware::irma::{IrmaAuth, IrmaAuthType};
+use crate::middleware::auth::{Auth, AuthType};
 use crate::middleware::metrics::collect_metrics;
 use crate::opts::*;
 use crate::util::*;
@@ -187,7 +187,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             .service(
                                 resource("/key/{timestamp}")
                                     .app_data(Data::new(ibe_sk))
-                                    .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
+                                    .wrap(Auth::new(irma.clone(), AuthType::Jwt))
                                     .route(web::get().to(handlers::key::<CGWKV>)),
                             );
 
@@ -200,7 +200,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                     .app_data(Data::new(irma_token.clone()))
                                     .app_data(Data::new(ibs_sk.clone()))
                                     .wrap(
-                                        IrmaAuth::new(irma.clone(), IrmaAuthType::Key)
+                                        Auth::new(irma.clone(), AuthType::Key)
                                             .with_db_pool(pool.as_ref().clone()),
                                     )
                                     .route(web::post().to(handlers::signing_key)),
@@ -212,7 +212,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             resource("/sign/key")
                                 .app_data(Data::new(irma_token.clone()))
                                 .app_data(Data::new(ibs_sk.clone()))
-                                .wrap(IrmaAuth::new(irma.clone(), IrmaAuthType::Jwt))
+                                .wrap(Auth::new(irma.clone(), AuthType::Jwt))
                                 .route(web::post().to(handlers::signing_key)),
                         )
                     }),
@@ -241,8 +241,8 @@ pub(crate) mod tests {
     use pg_core::identity::{Attribute, Policy};
     use pg_core::kem::IBKEM;
 
-    use crate::middleware::irma::tests::MockApiKeyStore;
-    use crate::middleware::irma::ApiKeyData;
+    use crate::middleware::auth::tests::MockApiKeyStore;
+    use crate::middleware::auth::ApiKeyData;
     use rand::thread_rng;
     use std::time::SystemTime;
 
@@ -564,7 +564,7 @@ pub(crate) mod tests {
         impl Service<Request, Response=ServiceResponse, Error=Error>,
         gg::SecretKey,
     ) {
-        use crate::middleware::irma::tests::MockApiKeyStore;
+        use crate::middleware::auth::tests::MockApiKeyStore;
         let (_, _, _, _, ibs_sk) = default_setup().await;
         let irma = "https://irma.example.org".to_string();
 
@@ -590,7 +590,7 @@ pub(crate) mod tests {
                     resource("/sign/key")
                         .app_data(Data::new(ibs_sk.clone()))
                         .wrap(
-                            IrmaAuth::new(irma.clone(), IrmaAuthType::Key)
+                            Auth::new(irma.clone(), AuthType::Key)
                                 .with_api_key_store(mock_store),
                         )
                         .route(web::post().to(handlers::signing_key)),

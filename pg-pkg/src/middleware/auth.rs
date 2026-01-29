@@ -1,4 +1,4 @@
-//! IRMA authentication and identity extraction middleware.
+//! Authentication and identity extraction middleware.
 
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
@@ -18,7 +18,7 @@ use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
-pub(crate) struct IrmaAuthResult {
+pub(crate) struct AuthResult {
     pub con: Vec<Attribute>,
     pub status: SessionStatus,
     pub proof_status: Option<ProofStatus>,
@@ -103,7 +103,7 @@ struct Claims {
 }
 
 #[derive(Clone)]
-enum Auth {
+enum AuthMethods {
     // Check the ongoing session using a token from the request.
     Token(String),
 
@@ -115,12 +115,12 @@ enum Auth {
 }
 
 #[doc(hidden)]
-pub struct IrmaAuthService<S> {
+pub struct AuthService<S> {
     service: Rc<S>,
-    auth_data: Rc<Auth>,
+    auth_data: Rc<AuthMethods>,
 }
 
-impl<S> Service<ServiceRequest> for IrmaAuthService<S>
+impl<S> Service<ServiceRequest> for AuthService<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
 {
@@ -138,7 +138,7 @@ where
             let mut exp = None;
 
             let session_result = match &*auth {
-                Auth::Token(url) => {
+                AuthMethods::Token(url) => {
                     let token_str = req.match_info().query("token");
 
                     if token_str.is_empty() {
@@ -156,7 +156,7 @@ where
 
                     res
                 }
-                Auth::Key(store) => {
+                AuthMethods::Key(store) => {
                     let auth = req.extract::<BearerAuth>().await?;
                     let api_key = auth.token();
 
@@ -195,7 +195,7 @@ where
                         signature: None,
                     }
                 }
-                Auth::Jwt(decoding_key) => {
+                AuthMethods::Jwt(decoding_key) => {
                     let auth = req.extract::<BearerAuth>().await?;
                     let jwt = auth.token();
 
@@ -250,7 +250,7 @@ where
                 _ => vec![],
             };
 
-            req.extensions_mut().insert(IrmaAuthResult {
+            req.extensions_mut().insert(AuthResult {
                 con: validated,
                 exp,
                 status: session_result.status,
@@ -267,8 +267,8 @@ where
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-/// IRMA authentication type.
-pub enum IrmaAuthType {
+/// Authentication type.
+pub enum AuthType {
     /// Authenticate using IRMA session tokens.
     ///
     /// This method will retrieve the session results from the IRMA server using the supplied
@@ -286,20 +286,20 @@ pub enum IrmaAuthType {
     Jwt,
 }
 
-/// IRMA Authentication middleware.
+/// Authentication middleware.
 #[derive(Clone)]
-pub struct IrmaAuth {
+pub struct Auth {
     /// The URL to the IRMA server.
     irma_url: String,
     /// The authentication method.
-    method: IrmaAuthType,
+    method: AuthType,
     /// Optional API key store for Key auth method.
     api_key_store: Option<Rc<dyn ApiKeyStore>>,
 }
 
-impl std::fmt::Debug for IrmaAuth {
+impl std::fmt::Debug for Auth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IrmaAuth")
+        f.debug_struct("Auth")
             .field("irma_url", &self.irma_url)
             .field("method", &self.method)
             .field("api_key_store", &self.api_key_store.as_ref().map(|_| "..."))
@@ -307,11 +307,11 @@ impl std::fmt::Debug for IrmaAuth {
     }
 }
 
-impl IrmaAuth {
-    /// Create IRMA authentication middleware used to wrap a key service.
+impl Auth {
+    /// Create authentication middleware used to wrap a key service.
     ///
-    /// See [`IrmaAuthType`] for the available methods.
-    pub fn new(irma_url: String, method: IrmaAuthType) -> Self {
+    /// See [`AuthType`] for the available methods.
+    pub fn new(irma_url: String, method: AuthType) -> Self {
         Self {
             irma_url,
             method,
@@ -332,14 +332,14 @@ impl IrmaAuth {
     }
 }
 
-impl<S> Transform<S, ServiceRequest> for IrmaAuth
+impl<S> Transform<S, ServiceRequest> for Auth
 where
     S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
 {
     type Response = ServiceResponse;
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Transform, Self::InitError>>;
-    type Transform = IrmaAuthService<S>;
+    type Transform = AuthService<S>;
     type InitError = ();
 
     fn new_transform(&self, service: S) -> Self::Future {
@@ -349,7 +349,7 @@ where
 
         async move {
             let auth_data = match auth_type {
-                IrmaAuthType::Jwt => {
+                AuthType::Jwt => {
                     let jwt_pk_bytes = reqwest::get(&format!("{url}/publickey"))
                         .await
                         .map_err(|e| {
@@ -373,18 +373,18 @@ where
                         );
                     })?;
 
-                    Auth::Jwt(decoding_key)
+                    AuthMethods::Jwt(decoding_key)
                 }
-                IrmaAuthType::Key => {
+                AuthType::Key => {
                     let store = api_key_store.ok_or_else(|| {
                         log::error!("API key store required for Key auth but not configured");
                     })?;
-                    Auth::Key(store)
+                    AuthMethods::Key(store)
                 }
-                IrmaAuthType::Token => Auth::Token(url),
+                AuthType::Token => AuthMethods::Token(url),
             };
 
-            Ok(IrmaAuthService {
+            Ok(AuthService {
                 service: Rc::new(service),
                 auth_data: Rc::new(auth_data),
             })

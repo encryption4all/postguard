@@ -8,7 +8,7 @@ Run these commands in a UNIX shell (Linux, MacOS, WSL, etc). from the root of th
 To encrypt a file and have the recipient (recipient@example.com) prove their email attribute
 using IRMA, run the following command:
 ```shell
-cargo run --bin pg-cli --release enc -i '{"recipient@example.com": [{"t": "pbdf.sidn-pbdf.email.email", "v": "recipient@example.com"}]}' <filename>
+cargo run --bin pg-cli --release enc -i '{"recipient@example.com": [{"t": "pbdf.sidn-pbdf.email.email", "v": "recipient@example.com"}]}' --pub-sign-id '[{"t": "pbdf.sidn-pbdf.email.email"}]' <filename>
 ```
 
 This will prompt the recipient to complete an IRMA session to prove their email attribute via a QR code (make sure you use terminal that renders it well, [Wezterm](https://wezterm.org/index.html) and [Terminus](https://termius.com/index.html) worked.)
