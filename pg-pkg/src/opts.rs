@@ -55,8 +55,12 @@ pub struct ServerOpts {
     #[clap(short, long, default_value = "8087")]
     pub port: String,
 
+    /// PostgreSQL database connection URL.
+    #[clap(short, long, env = "DATABASE_URL", value_hint = ValueHint::Url)]
+    pub database_url: Option<String>,
+
     /// IRMA server used to verify identities.
-    #[clap(short, long, default_value = "https://yivi.app", value_hint = ValueHint::Url)]
+    #[clap(short, long, default_value = "https://is.yivi.app", value_hint = ValueHint::Url)]
     pub irma: String,
 
     #[clap(short = 't', long, required = true)]

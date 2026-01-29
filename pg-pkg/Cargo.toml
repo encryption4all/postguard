@@ -14,6 +14,8 @@ actix-rt = "2.7.0"
 actix-web = "4.1.0"
 actix-http = "*"
 actix-web-httpauth = "0.8.0"
+async-trait = "0.1"
+sqlx = { version = "0.8", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
 arrayref = "0.3.5"
 futures-util = "*"
 irma = "0.2.1"
@@ -31,9 +33,10 @@ base64 = "0.21.0"
 jsonwebtoken = { version = "8.0", features = ["use_pem"] }
 prometheus = { version = "0.13", default-features = false }
 bincode = "1.3.3"
+tokio = "1.47.1"
 
 [dependencies.clap]
-features = ["derive"]
+features = ["derive", "env"]
 version = "3.0.10"
 
 [dependencies.futures]
