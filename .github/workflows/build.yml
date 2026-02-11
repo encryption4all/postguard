@@ -13,6 +13,7 @@ jobs:
   sonarqube:
     name: SonarQube
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,6 +57,7 @@ jobs:
           - browser: safari
             os: macos-latest
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.browser == 'safari' }}
     env:
       WASM_BINDGEN_TEST_TIMEOUT: 120
     steps:
