@@ -1,3 +1,4 @@
+mod health;
 mod jwt;
 mod key;
 mod metrics;
@@ -5,6 +6,7 @@ mod parameters;
 mod signing_key;
 mod start;
 
+pub use health::*;
 pub use jwt::*;
 pub use key::*;
 pub use metrics::*;

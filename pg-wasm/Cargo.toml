@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pg-core = { path = "../pg-core", features = ["web", "stream"] }
-wasm-bindgen = { version = "0.2" }
+wasm-bindgen = { version = "0.2.104" }
 js-sys = "0.3"
 web-sys = "0.3"
 rand = { version = "0.8.4" }
@@ -24,11 +24,11 @@ serde = "*"
 wasm-streams = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 futures = "0.3"
-wasm-bindgen-futures = "0.4"
-serde-wasm-bindgen = "0.5.0"
+wasm-bindgen-futures = "0.4.54"
+serde-wasm-bindgen = "0.6.5"
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3"
+wasm-bindgen-test = "0.3.54"
 pg-core = { path = "../pg-core", features = ["rust", "web", "stream", "test"] }
 web-sys = { version = "0.3", features = ["console", "Window", "Performance"] }
 

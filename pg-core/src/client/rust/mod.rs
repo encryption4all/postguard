@@ -114,7 +114,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         let m_sig = signer.chain(&message).sign(&m_sig_key.key.0, self.rng);
 
         let aead = Aes128Gcm::new_from_slice(&self.config.key)?;
-        let nonce = Nonce::from_slice(&self.config.nonce);
+        let nonce = Nonce::from(self.config.nonce);
 
         let enc_input = bincode::serialize(&MessageAndSignature {
             message: message.as_ref().to_vec(),
@@ -124,7 +124,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
             },
         })?;
 
-        let ciphertext = aead.encrypt(nonce, enc_input.as_ref())?;
+        let ciphertext = aead.encrypt(&nonce, enc_input.as_ref())?;
 
         out.extend_from_slice(&ciphertext);
 
@@ -188,9 +188,9 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
         let Algorithm::Aes128Gcm(iv) = self.header.algo;
 
         let aead = Aes128Gcm::new_from_slice(key)?;
-        let nonce = Nonce::from_slice(&iv.0);
+        let nonce = Nonce::from(iv.0);
 
-        let plain = aead.decrypt(nonce, &*self.r)?;
+        let plain = aead.decrypt(&nonce, &*self.r)?;
 
         let msg: MessageAndSignature = bincode::deserialize(&plain)?;
         let id = msg.sig.pol.derive_ibs()?;

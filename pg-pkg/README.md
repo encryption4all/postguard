@@ -15,6 +15,42 @@ For its usage, see the help:
 irmaseal-pkg --help
 ```
 
+## Running the server
+First generate of make your ibe and ibs keys use 
+```bash 
+cargo run --release --bin pg-pkg gen
+```
+
+Then run the server using:
+```bash
+cargo run --release --bin pg-pkg server -t your_token_here
+```
+
+### Allowed args.
+Only the token is required to run the server.
+
+Rest can be found in the help command or `/src/opts.rs` (you're unlikely to need them for development).
+- `--irma` (`-i`)
+  - This sets the irma server url, make sure its doesn't have a trailing slash. Default: `https://is.yivi.app`
+- `--token` (`-t`) [required]
+  - This sets the token for the aforementioned irma server to allow you to request it see more [here](https://docs.yivi.app/irma-server#requestor-authentication).
+- `--database_url` (`-d`)
+  - This sets the postgres database url if you wanna use API keys must be something like: `postgres://USER:PASSWORD@HOST/DATABASE`
+
+## Development setup for API keys with Docker
+You can use the provided `docker-compose.dev.yml` file to quickly spin up a development environment with Postgres and an IRMA server.
+Make sure you have Docker and Docker Compose installed on your machine.
+run the following command in the root of the repository:
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+Then simply run the server with
+```bash
+cargo run --release --bin pg-pkg server -d postgres://devuser:devpassword@localhost/devdb -t your_token_here -i https://youryiviserverhere
+```
+
 ## API description
 
 ### `GET /v2/parameters`
@@ -95,7 +131,7 @@ was valid and all the claimed attributes were present. A key is derived from the
 ### `POST /v2/irma/sign/key`
 
 Retrieves signing key(s). The request must include a HTTP Authorization header
-`Authorization: Bearer <JWT>`. The body must include under which identities a user wants to sign.
+`Authorization: Bearer <JWT>` or `Authorization: Bearer PG-API-<API KEY HERE>`. The body must include under which identities a user wants to sign.
 
 ```JSON
 {
@@ -128,3 +164,14 @@ The response looks similar as `GET /v2/irma/key/{timestamp}`, except with signin
   }
 }
 ```
+
+
+## Adding API keys
+To add API keys you need to manually run Postgres SQL for now.
+Connect to your database and run:
+```sql
+INSERT INTO "api_keys" ("key", "email", "attributes", "expires_at")
+VALUES ('PG-API-hello', 'test@test.com', '{"t": "pbdf.sidn-pbdf.email.email", "v": "example@example.com"}',
+        '3000-01-08 04:05:06');
+```
+this command is also ran on the development docker compose file. 

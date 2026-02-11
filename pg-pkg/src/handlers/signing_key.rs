@@ -7,7 +7,7 @@ use pg_core::artifacts::{SigningKey, SigningKeyExt};
 use pg_core::ibs::gg::{keygen, SecretKey};
 use pg_core::identity::{Attribute, Policy};
 
-use crate::middleware::irma::IrmaAuthResult;
+use crate::middleware::auth::AuthResult;
 use crate::util::current_time_u64;
 
 pub async fn signing_key(
@@ -18,14 +18,14 @@ pub async fn signing_key(
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();
 
-    let IrmaAuthResult {
+    let AuthResult {
         con,
         status,
         proof_status,
         ..
     } = req
         .extensions()
-        .get::<IrmaAuthResult>()
+        .get::<AuthResult>()
         .cloned()
         .ok_or(crate::Error::Unexpected)?;
 
