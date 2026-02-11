@@ -18,6 +18,9 @@ pub enum Error {
     NoTimestampError,
     ValidityError,
     Unexpected,
+    ClientInvalid,
+    SessionCreationError,
+    APIKeyInvalid,
 }
 
 /// Errors that can occur during setup/running of the PKG.
@@ -69,7 +72,10 @@ impl ResponseError for Error {
             Error::NoAttributesError => StatusCode::FORBIDDEN,
             Error::ValidityError => StatusCode::BAD_REQUEST,
             Error::Unexpected => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ClientInvalid => StatusCode::INTERNAL_SERVER_ERROR,
             Error::NoTimestampError => StatusCode::BAD_REQUEST,
+            Error::SessionCreationError => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::APIKeyInvalid => StatusCode::UNAUTHORIZED,
         }
     }
 }
@@ -88,6 +94,9 @@ impl Display for Error {
             Error::NoAttributesError => write!(f, "no valid attributes were disclosed"),
             Error::Prometheus(e) => write!(f, "prometheus error: {e}"),
             Error::Unexpected => write!(f, "unexpected"),
+            Error::ClientInvalid => write!(f, "client couldn't be made properly"),
+            Error::SessionCreationError => write!(f, "couldn't create session"),
+            Error::APIKeyInvalid => write!(f, "API key is invalid"),
         }
     }
 }

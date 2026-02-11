@@ -6,7 +6,6 @@ use pg_core::kem::cgw_kv::CGWKV;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -43,14 +42,8 @@ impl From<reqwest::Error> for ClientError {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OwnedKeyChallenge {
-    pub qr: String,
-    pub token: String,
-}
-
 impl<'a> Client<'a> {
-    pub fn new(baseurl: &'a str) -> Result<Client, ClientError> {
+    pub fn new(baseurl: &'a str) -> Result<Client<'a>, ClientError> {
         let client = ClientBuilder::new().build()?;
         Ok(Client { baseurl, client })
     }

@@ -4,18 +4,21 @@ use pg_core::{kem::IBKEM, Compress};
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 use crate::{opts::*, PKGError};
 
 fn write_owned<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> std::io::Result<()> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?
-        .write_all(contents.as_ref())
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+
+    #[cfg(unix)]
+    opts.mode(0o600);
+
+    opts.open(path)?.write_all(contents.as_ref())
 }
 
 pub fn exec(gen_opts: &GenOpts) -> Result<(), PKGError> {

@@ -11,7 +11,7 @@
 //!
 //! The metrics middleware collects Prometheus metrics.
 
-pub mod irma;
+pub mod auth;
 pub mod metrics;
 
 #[cfg(test)]

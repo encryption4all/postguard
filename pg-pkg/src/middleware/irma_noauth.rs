@@ -15,7 +15,7 @@ use futures::FutureExt;
 use futures_util::{future::LocalBoxFuture, StreamExt};
 use std::rc::Rc;
 
-use crate::middleware::irma::IrmaAuthResult;
+use crate::middleware::auth::AuthResult;
 use irma::ProofStatus;
 use pg_core::{api::SigningKeyRequest, identity::Policy};
 
@@ -68,7 +68,7 @@ where
             };
 
             // Pass the result to the key service, which expects it in the extensions.
-            req.extensions_mut().insert(IrmaAuthResult {
+            req.extensions_mut().insert(AuthResult {
                 con: pol.con,
                 status: irma::SessionStatus::Done,
                 proof_status: Some(ProofStatus::Valid),

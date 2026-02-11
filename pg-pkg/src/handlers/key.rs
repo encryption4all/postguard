@@ -6,7 +6,7 @@ use pg_core::artifacts::UserSecretKey;
 use pg_core::identity::Policy;
 use pg_core::kem::IBKEM;
 
-use crate::middleware::irma::IrmaAuthResult;
+use crate::middleware::auth::AuthResult;
 use crate::util::current_time_u64;
 
 use serde::Serialize;
@@ -25,14 +25,14 @@ where
         .parse::<u64>()
         .map_err(|_e| crate::Error::NoTimestampError)?;
 
-    let IrmaAuthResult {
+    let AuthResult {
         con,
         status,
         proof_status,
         exp,
     } = req
         .extensions()
-        .get::<IrmaAuthResult>()
+        .get::<AuthResult>()
         .cloned()
         .ok_or(crate::Error::Unexpected)?;
 

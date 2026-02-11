@@ -20,6 +20,13 @@ use twox_hash::XxHash64;
 
 pub(crate) const PG_CLIENT_HEADER: &str = "X-POSTGUARD-CLIENT-VERSION";
 
+// Strongly-typed wrappers for IRMA URL and token so actix-web can store both as distinct Data<T>.
+#[derive(Debug, Clone)]
+pub(crate) struct IrmaUrl(pub String);
+
+#[derive(Debug, Clone)]
+pub(crate) struct IrmaToken(pub String);
+
 pub(crate) fn client_version(req: &ServiceRequest) -> String {
     if let Some(Ok(x)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
         x.to_string()

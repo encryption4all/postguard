@@ -1,3 +1,4 @@
+use crate::util::{IrmaToken, IrmaUrl};
 use crate::Error;
 use actix_web::{web::Data, web::Json, HttpResponse};
 use irma::*;
@@ -10,10 +11,12 @@ const MAX_VALIDITY: u64 = 60 * 60 * 24;
 const DEFAULT_VALIDITY: u64 = 60 * 5;
 
 pub async fn start(
-    url: Data<String>,
+    url: Data<IrmaUrl>,
+    irma_token: Data<IrmaToken>,
     value: Json<IrmaAuthRequest>,
-) -> Result<HttpResponse, crate::Error> {
-    let irma_url = url.get_ref().clone();
+) -> Result<HttpResponse, Error> {
+    let irma_url = url.get_ref().0.clone();
+    let irma_token = irma_token.get_ref().0.clone();
     let kr = value.into_inner();
 
     let dr = DisclosureRequestBuilder::new()
@@ -45,13 +48,14 @@ pub async fn start(
     };
 
     let client = IrmaClientBuilder::new(&irma_url)
-        .map_err(|_e| Error::Unexpected)?
+        .map_err(|_e| Error::ClientInvalid)?
+        .token_authentication(irma_token)
         .build();
 
     let session = client
         .request_extended(&er)
         .await
-        .or(Err(crate::Error::Unexpected))?;
+        .or(Err(Error::SessionCreationError))?;
 
     Ok(HttpResponse::Ok().json(session))
 }
