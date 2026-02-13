@@ -63,7 +63,7 @@ pub struct ServerOpts {
     #[clap(short, long, default_value = "https://is.yivi.app", value_hint = ValueHint::Url)]
     pub irma: String,
 
-    #[clap(short = 't', long, required = true)]
+    #[clap(short = 't', long)]
     pub irma_token: String,
 
     /// Path to store the IBS private key.
