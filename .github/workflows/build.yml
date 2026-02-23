@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
@@ -73,7 +73,5 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - name: Enable Safari WebDriver
-        run: sudo safaridriver --enable
+        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: wasm-pack test --release --headless --safari ./pg-wasm
