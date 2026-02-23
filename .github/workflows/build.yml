@@ -75,5 +75,5 @@ jobs:
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Enable Safari WebDriver
-        run: safaridriver --enable
+        run: sudo safaridriver --enable
       - run: wasm-pack test --release --headless --safari ./pg-wasm
