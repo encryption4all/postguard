@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install
-        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack
 
       - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
@@ -73,5 +73,5 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install
-        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack
       - run: wasm-pack test --release --headless --safari ./pg-wasm
