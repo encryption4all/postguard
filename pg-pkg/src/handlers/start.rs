@@ -47,8 +47,7 @@ pub async fn start(
         request: dr,
     };
 
-    let mut builder = IrmaClientBuilder::new(&irma_url)
-        .map_err(|_e| Error::ClientInvalid)?;
+    let mut builder = IrmaClientBuilder::new(&irma_url).map_err(|_e| Error::ClientInvalid)?;
 
     if let Some(token) = irma_token {
         builder = builder.token_authentication(token);
