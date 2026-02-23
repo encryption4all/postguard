@@ -1,0 +1,7 @@
+target
+img
+.git
+*.md
+docker-compose.yml
+sonar-project.properties
+LICENSE

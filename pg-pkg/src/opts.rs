@@ -64,7 +64,7 @@ pub struct ServerOpts {
     pub irma: String,
 
     #[clap(short = 't', long)]
-    pub irma_token: String,
+    pub irma_token: Option<String>,
 
     /// Path to store the IBS private key.
     #[clap(long, default_value = "./pkg_ibe.sec", value_hint = ValueHint::FilePath)]

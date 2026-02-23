@@ -25,7 +25,7 @@ pub(crate) const PG_CLIENT_HEADER: &str = "X-POSTGUARD-CLIENT-VERSION";
 pub(crate) struct IrmaUrl(pub String);
 
 #[derive(Debug, Clone)]
-pub(crate) struct IrmaToken(pub String);
+pub(crate) struct IrmaToken(pub Option<String>);
 
 pub(crate) fn client_version(req: &ServiceRequest) -> String {
     if let Some(Ok(x)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
