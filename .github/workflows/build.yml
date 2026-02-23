@@ -74,4 +74,6 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Enable Safari WebDriver
+        run: safaridriver --enable
       - run: wasm-pack test --release --headless --safari ./pg-wasm
