@@ -21,8 +21,7 @@ COPY --from=builder /usr/local/cargo/bin/pg-pkg /usr/local/bin/pg-pkg
 RUN mkdir -p /app && chown nonroot:nonroot /app
 WORKDIR /app
 USER nonroot
-RUN pg-pkg gen
 
 EXPOSE 8087
 
-CMD ["/bin/sh", "-c", "/usr/local/bin/pg-pkg server -t ${PG_TOKEN} -i ${IRMA_SERVER}"]
+CMD ["/bin/sh", "-c", "/usr/local/bin/pg-pkg server ${IRMA_TOKEN:+-t $IRMA_TOKEN} -i ${IRMA_SERVER}"]
