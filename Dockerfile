@@ -20,7 +20,7 @@ RUN apt-get update && apt-get --no-install-recommends install -y ca-certificates
 COPY --from=builder /usr/local/cargo/bin/pg-pkg /usr/local/bin/pg-pkg
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-RUN mkdir -p /app /keys && chown nonroot:nonroot /app /keys
+RUN mkdir -p /app && chown nonroot:nonroot /app
 WORKDIR /app
 USER nonroot
 
