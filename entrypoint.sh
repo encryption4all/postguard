@@ -7,6 +7,10 @@ mkdir -p "$KEYS_DIR"
 
 if [ -f "$KEYS_DIR/pkg_ibe.sec" ] && [ -f "$KEYS_DIR/pkg_ibe.pub" ] && [ -f "$KEYS_DIR/pkg_ibs.sec" ] && [ -f "$KEYS_DIR/pkg_ibs.pub" ]; then
     echo "Keys found in $KEYS_DIR, using existing keys..."
+    echo "=== pkg_ibe.pub ($(wc -c < "$KEYS_DIR/pkg_ibe.pub") bytes) ==="
+    cat "$KEYS_DIR/pkg_ibe.pub"
+    echo "=== pkg_ibe.sec ($(wc -c < "$KEYS_DIR/pkg_ibe.sec") bytes) ==="
+    cat "$KEYS_DIR/pkg_ibe.sec"
 else
     echo "No keys found in $KEYS_DIR. Generating new keys..."
     /usr/local/bin/pg-pkg gen \
