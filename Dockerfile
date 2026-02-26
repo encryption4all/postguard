@@ -16,12 +16,14 @@ RUN cp target/release/pg-pkg /usr/local/cargo/bin/pg-pkg
 FROM debian:trixie-slim
 RUN groupadd -r nonroot \
     && useradd -r -g nonroot nonroot
-RUN apt-get update && apt-get --no-install-recommends install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get --no-install-recommends install -y ca-certificates libssl3 curl && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/cargo/bin/pg-pkg /usr/local/bin/pg-pkg
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 RUN mkdir -p /app && chown nonroot:nonroot /app
 WORKDIR /app
 USER nonroot
 
 EXPOSE 8087
 
-CMD ["/bin/sh", "-c", "/usr/local/bin/pg-pkg server ${IRMA_TOKEN:+-t $IRMA_TOKEN} -i ${IRMA_SERVER}"]
+ENTRYPOINT ["/entrypoint.sh"]
