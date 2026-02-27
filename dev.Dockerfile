@@ -25,5 +25,6 @@ COPY --from=planner /app/pkg_ibs.pub /keys/
 
 EXPOSE 8087
 
-CMD ["/bin/sh", "-c", "cargo watch -s 'cargo run --bin pg-pkg -- server ${IRMA_TOKEN:+-t $IRMA_TOKEN} -i $IRMA_SERVER --ibe-secret-path /keys/pkg_ibe.sec --ibe-public-path /keys/pkg_ibe.pub --ibs-secret-path /keys/pkg_ibs.sec --ibs-public-path /keys/pkg_ibs.pub'"]
+# --poll so Claude Code file changes are picked up by cargo-watch
+CMD ["/bin/sh", "-c", "cargo watch --poll -s 'cargo run --bin pg-pkg -- server ${IRMA_TOKEN:+-t $IRMA_TOKEN} -i $IRMA_SERVER --ibe-secret-path /keys/pkg_ibe.sec --ibe-public-path /keys/pkg_ibe.pub --ibs-secret-path /keys/pkg_ibs.sec --ibs-public-path /keys/pkg_ibs.pub'"]
 
