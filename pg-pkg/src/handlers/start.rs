@@ -20,13 +20,11 @@ pub async fn start(
     let kr = value.into_inner();
 
     // Required: email address.
-    let mandatory: Vec<Vec<Vec<AttributeRequest>>> = vec![vec![vec![
-        AttributeRequest::Compound {
-            attr_type: "pbdf.sidn-pbdf.email.email".to_string(),
-            value: None,
-            not_null: true,
-        },
-    ]]];
+    let mandatory: Vec<Vec<Vec<AttributeRequest>>> = vec![vec![vec![AttributeRequest::Compound {
+        attr_type: "pbdf.sidn-pbdf.email.email".to_string(),
+        value: None,
+        not_null: true,
+    }]]];
 
     // Optional disjunctions: each starts with an empty conjunction so the user may skip it.
     let optional: Vec<Vec<Vec<AttributeRequest>>> = vec![
@@ -43,24 +41,60 @@ pub async fn start(
         vec![
             vec![],
             vec![
-                AttributeRequest::Compound { attr_type: "pbdf.pbdf.drivinglicence.firstName".to_string(), value: None, not_null: true },
-                AttributeRequest::Compound { attr_type: "pbdf.pbdf.drivinglicence.lastName".to_string(), value: None, not_null: true },
+                AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.drivinglicence.firstName".to_string(),
+                    value: None,
+                    not_null: true,
+                },
+                AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.drivinglicence.lastName".to_string(),
+                    value: None,
+                    not_null: true,
+                },
             ],
             vec![
-                AttributeRequest::Compound { attr_type: "pbdf.pbdf.idcard.firstName".to_string(), value: None, not_null: true },
-                AttributeRequest::Compound { attr_type: "pbdf.pbdf.idcard.lastName".to_string(), value: None, not_null: true },
+                AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.idcard.firstName".to_string(),
+                    value: None,
+                    not_null: true,
+                },
+                AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.idcard.lastName".to_string(),
+                    value: None,
+                    not_null: true,
+                },
             ],
             vec![
-                AttributeRequest::Compound { attr_type: "pbdf.pbdf.passport.firstName".to_string(), value: None, not_null: true },
-                AttributeRequest::Compound { attr_type: "pbdf.pbdf.passport.lastName".to_string(), value: None, not_null: true },
+                AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.passport.firstName".to_string(),
+                    value: None,
+                    not_null: true,
+                },
+                AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.passport.lastName".to_string(),
+                    value: None,
+                    not_null: true,
+                },
             ],
         ],
         // Date of birth: driving licence, ID card, or passport
         vec![
             vec![],
-            vec![AttributeRequest::Compound { attr_type: "pbdf.pbdf.drivinglicence.dateOfBirth".to_string(), value: None, not_null: true }],
-            vec![AttributeRequest::Compound { attr_type: "pbdf.pbdf.idcard.dateOfBirth".to_string(), value: None, not_null: true }],
-            vec![AttributeRequest::Compound { attr_type: "pbdf.pbdf.passport.dateOfBirth".to_string(), value: None, not_null: true }],
+            vec![AttributeRequest::Compound {
+                attr_type: "pbdf.pbdf.drivinglicence.dateOfBirth".to_string(),
+                value: None,
+                not_null: true,
+            }],
+            vec![AttributeRequest::Compound {
+                attr_type: "pbdf.pbdf.idcard.dateOfBirth".to_string(),
+                value: None,
+                not_null: true,
+            }],
+            vec![AttributeRequest::Compound {
+                attr_type: "pbdf.pbdf.passport.dateOfBirth".to_string(),
+                value: None,
+                not_null: true,
+            }],
         ],
     ];
 
@@ -68,7 +102,10 @@ pub async fn start(
         .add_discons([mandatory, optional].concat())
         .build();
 
-    log::debug!("disclosure request: {}", serde_json::to_string_pretty(&dr).unwrap_or_default());
+    log::debug!(
+        "disclosure request: {}",
+        serde_json::to_string_pretty(&dr).unwrap_or_default()
+    );
 
     let validity = match kr.validity {
         Some(validity) if validity > MAX_VALIDITY => Err(Error::ValidityError),
