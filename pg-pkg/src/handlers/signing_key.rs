@@ -72,17 +72,11 @@ pub async fn signing_key(
     };
 
     let priv_sign_key = body.priv_sign_id.as_ref().map(|priv_sign_id| {
-        let priv_con: Vec<_> = con
+        let priv_con = con
             .clone()
             .into_iter()
             .filter(|a| priv_sign_id.contains(&Attribute::new(&a.atype, None)))
             .collect();
-
-        // If no optional attributes were disclosed, skip deriving a private key.
-        if priv_con.is_empty() {
-            return Ok(None);
-        }
-
         let policy = Policy {
             timestamp: iat,
             con: priv_con,
@@ -91,13 +85,13 @@ pub async fn signing_key(
         let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
         let key = keygen(sk, &id, &mut rng);
 
-        Ok(Some(SigningKeyExt {
+        Ok(SigningKeyExt {
             key: SigningKey(key),
             policy,
-        }))
+        })
     });
 
-    let priv_sign_key = priv_sign_key.map_or(Ok(None), |r| r)?;
+    let priv_sign_key = priv_sign_key.map_or(Ok(None), |r| r.map(Some))?;
 
     Ok(HttpResponse::Ok().json(SigningKeyResponse {
         status,
