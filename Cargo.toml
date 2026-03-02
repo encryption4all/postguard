@@ -9,7 +9,7 @@ lto = true
 
 [profile.edge]
 inherits = "release"
-lto = "thin"
+lto = false
 
 [profile.release.package.pg-wasm]
 opt-level = "s"
