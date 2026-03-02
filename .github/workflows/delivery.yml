@@ -41,7 +41,7 @@ jobs:
                   tags: |
                       type=semver,pattern={{version}},event=tag
                       type=semver,pattern={{major}}.{{minor}},event=tag
-                      type=edge,branch=main
+                      type=edge,enable=${{ github.event_name != 'release' }}
                       type=ref,event=pr
                       type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
 
