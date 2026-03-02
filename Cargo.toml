@@ -7,5 +7,9 @@ resolver = "2"
 [profile.release]
 lto = true
 
+[profile.edge]
+inherits = "release"
+lto = "thin"
+
 [profile.release.package.pg-wasm]
 opt-level = "s"
