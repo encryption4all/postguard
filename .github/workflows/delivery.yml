@@ -15,15 +15,14 @@ permissions:
     security-events: write
 
 jobs:
-    publish-docker-image:
+    build-amd64:
         runs-on: ubuntu-latest
+        outputs:
+            digest: ${{ steps.build.outputs.digest }}
         steps:
             - name: Checkout
               uses: actions/checkout@v4
 
-            # Published releases use the full 'release' profile (lto = true) and are
-            # tagged with the version number. All other events use the faster 'edge'
-            # profile (lto = "thin") and are tagged as edge / pr-N / branch name.
             - name: Select build profile
               id: config
               run: |
@@ -33,6 +32,90 @@ jobs:
                       echo "profile=edge" >> "$GITHUB_OUTPUT"
                   fi
 
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build and push (linux/amd64)
+              id: build
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  platforms: linux/amd64
+                  push: true
+                  provenance: false
+                  tags: ghcr.io/${{ github.repository }}:build-${{ github.run_id }}-amd64
+                  build-args: CARGO_PROFILE=${{ steps.config.outputs.profile }}
+                  cache-from: type=gha,scope=build-amd64
+                  cache-to: type=gha,mode=max,scope=build-amd64
+
+            - name: Scan image
+              uses: anchore/scan-action@v3
+              id: scan
+              with:
+                  image: ghcr.io/${{ github.repository }}:build-${{ github.run_id }}-amd64
+                  only-fixed: true
+                  fail-build: true
+                  severity-cutoff: critical
+                  output-format: sarif
+
+            - name: Upload Anchore scan SARIF report
+              uses: github/codeql-action/upload-sarif@v3
+              if: ${{ !cancelled() }}
+              with:
+                  sarif_file: ${{ steps.scan.outputs.sarif }}
+
+    build-arm64:
+        runs-on: ubuntu-24.04-arm
+        outputs:
+            digest: ${{ steps.build.outputs.digest }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Select build profile
+              id: config
+              run: |
+                  if [ "${{ github.event_name }}" = "release" ]; then
+                      echo "profile=release" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "profile=edge" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build and push (linux/arm64)
+              id: build
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  platforms: linux/arm64
+                  push: true
+                  provenance: false
+                  tags: ghcr.io/${{ github.repository }}:build-${{ github.run_id }}-arm64
+                  build-args: CARGO_PROFILE=${{ steps.config.outputs.profile }}
+                  cache-from: type=gha,scope=build-arm64
+                  cache-to: type=gha,mode=max,scope=build-arm64
+
+    merge:
+        runs-on: ubuntu-latest
+        needs: [build-amd64, build-arm64]
+        steps:
+            # No checkout needed: docker/metadata-action reads from the GitHub Actions context.
             - name: Docker meta
               id: meta
               uses: docker/metadata-action@v5
@@ -45,9 +128,6 @@ jobs:
                       type=ref,event=pr
                       type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
-
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
 
@@ -58,45 +138,11 @@ jobs:
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
-            # Build amd64-only first so we can load it locally for the security scan.
-            # GHA cache is populated here; the multi-platform push below reuses it.
-            - name: Build and load for scanning (amd64)
-              uses: docker/build-push-action@v6
-              with:
-                  context: .
-                  load: true
-                  platforms: linux/amd64
-                  tags: local/postguard:scan
-                  build-args: CARGO_PROFILE=${{ steps.config.outputs.profile }}
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
-
-            - name: Scan image
-              uses: anchore/scan-action@v3
-              id: scan
-              with:
-                  image: local/postguard:scan
-                  only-fixed: true
-                  fail-build: true
-                  severity-cutoff: critical
-                  output-format: sarif
-
-            - name: Upload Anchore scan SARIF report
-              uses: github/codeql-action/upload-sarif@v3
-              if: ${{ !cancelled() }}
-              with:
-                  sarif_file: ${{ steps.scan.outputs.sarif }}
-
-            # Push multi-platform image. amd64 layers are fully cached from the scan
-            # build above; arm64 layers are cached from previous runs via type=gha.
-            - name: Push multi-platform image
-              uses: docker/build-push-action@v6
-              with:
-                  context: .
-                  push: true
-                  platforms: linux/amd64,linux/arm64
-                  tags: ${{ steps.meta.outputs.tags }}
-                  labels: ${{ steps.meta.outputs.labels }}
-                  build-args: CARGO_PROFILE=${{ steps.config.outputs.profile }}
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+            # Combine the two platform-specific images into a single multi-arch manifest.
+            # DOCKER_METADATA_OUTPUT_JSON is set automatically by docker/metadata-action.
+            - name: Create and push multi-arch manifest
+              run: |
+                  docker buildx imagetools create \
+                      $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+                      "ghcr.io/${{ github.repository }}@${{ needs.build-amd64.outputs.digest }}" \
+                      "ghcr.io/${{ github.repository }}@${{ needs.build-arm64.outputs.digest }}"
