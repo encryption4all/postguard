@@ -53,6 +53,17 @@ where
 
     let policy = Policy { timestamp, con };
 
+    log::debug!(
+        "Deriving USK for policy: timestamp={}, attributes=[{}]",
+        policy.timestamp,
+        policy
+            .con
+            .iter()
+            .map(|a| format!("{}={:?}", a.atype, a.value))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
     let id = policy
         .derive_kem::<K>()
         .map_err(|_e| crate::Error::Unexpected)?;

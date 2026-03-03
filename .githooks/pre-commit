@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run cargo fmt and re-stage any files it changed so the commit is always formatted.
+cargo fmt --all
+
+# Re-add any .rs files that cargo fmt modified
+git diff --name-only -- '*.rs' | xargs -r git add

@@ -171,6 +171,12 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             .app_data(Data::new(ibs_pd.clone()))
                             .route(web::get().to(handlers::parameters)),
                     )
+                    .service(
+                        resource("/sign/start")
+                            .app_data(Data::new(IrmaUrl(irma.clone())))
+                            .app_data(Data::new(IrmaToken(irma_token.clone())))
+                            .route(web::post().to(handlers::start_sign)),
+                    )
                     .service({
                         let mut irma_scope = scope("/{_:(irma|request)}")
                             .service(
