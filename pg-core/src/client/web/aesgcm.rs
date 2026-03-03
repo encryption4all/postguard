@@ -53,9 +53,9 @@ pub async fn encrypt(
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
-    pars.additional_data(aad);
-    pars.tag_length((TAG_SIZE * 8).try_into().unwrap()); // This can never fail, since the input is
-                                                         // constant.
+    pars.set_additional_data(aad);
+    pars.set_tag_length((TAG_SIZE * 8).try_into().unwrap()); // This can never fail, since the input is
+                                                             // constant.
 
     let result = subtle.encrypt_with_object_and_buffer_source(&pars, key, data)?;
     let array_buffer = JsFuture::from(result).await?;
@@ -77,8 +77,8 @@ pub async fn decrypt(
     let subtle = get_crypto().subtle();
 
     let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
-    pars.additional_data(aad);
-    pars.tag_length((TAG_SIZE * 8).try_into().unwrap());
+    pars.set_additional_data(aad);
+    pars.set_tag_length((TAG_SIZE * 8).try_into().unwrap());
 
     let result = subtle.decrypt_with_object_and_buffer_source(&pars, key, data)?;
     let array_buffer = JsFuture::from(result).await?;
