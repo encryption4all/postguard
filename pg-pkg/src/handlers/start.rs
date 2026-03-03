@@ -14,7 +14,7 @@ const DEFAULT_VALIDITY: u64 = 60 * 5;
 async fn create_irma_session(
     url: &IrmaUrl,
     irma_token: &IrmaToken,
-    dr: DisclosureRequest,
+    dr: IrmaRequest,
     validity: Option<u64>,
 ) -> Result<HttpResponse, Error> {
     let validity = match validity {
