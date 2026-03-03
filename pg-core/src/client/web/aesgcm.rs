@@ -52,7 +52,7 @@ pub async fn encrypt(
 ) -> Result<Uint8Array, Error> {
     let subtle = get_crypto().subtle();
 
-    let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
+    let pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
     pars.set_additional_data(aad);
     pars.set_tag_length((TAG_SIZE * 8).try_into().unwrap()); // This can never fail, since the input is
                                                              // constant.
@@ -76,7 +76,7 @@ pub async fn decrypt(
 ) -> Result<Uint8Array, Error> {
     let subtle = get_crypto().subtle();
 
-    let mut pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
+    let pars = AesGcmParams::new(MODE, &Uint8Array::from(iv));
     pars.set_additional_data(aad);
     pars.set_tag_length((TAG_SIZE * 8).try_into().unwrap());
 
