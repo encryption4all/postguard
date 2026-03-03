@@ -19,88 +19,116 @@ pub async fn start(
     let irma_token = irma_token.get_ref().0.clone();
     let kr = value.into_inner();
 
-    // Required: email address.
-    let mandatory: Vec<Vec<Vec<AttributeRequest>>> = vec![vec![vec![AttributeRequest::Compound {
-        attr_type: "pbdf.sidn-pbdf.email.email".to_string(),
-        value: None,
-        not_null: true,
-    }]]];
+    const EMAIL_ATTR: &str = "pbdf.sidn-pbdf.email.email";
 
-    // Optional disjunctions: each starts with an empty conjunction so the user may skip it.
-    let optional: Vec<Vec<Vec<AttributeRequest>>> = vec![
-        // Phone number
-        vec![
-            vec![],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
-                value: None,
-                not_null: true,
-            }],
-        ],
-        // Full name: driving licence, ID card, or passport
-        vec![
-            vec![],
-            vec![
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.drivinglicence.firstName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.drivinglicence.lastName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-            ],
-            vec![
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.idcard.firstName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.idcard.lastName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-            ],
-            vec![
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.passport.firstName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.passport.lastName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-            ],
-        ],
-        // Date of birth: driving licence, ID card, or passport
-        vec![
-            vec![],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.pbdf.drivinglicence.dateOfBirth".to_string(),
-                value: None,
-                not_null: true,
-            }],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.pbdf.idcard.dateOfBirth".to_string(),
-                value: None,
-                not_null: true,
-            }],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.pbdf.passport.dateOfBirth".to_string(),
-                value: None,
-                not_null: true,
-            }],
-        ],
-    ];
+    // Determine whether this is a decryption request (kr.con contains non-email attributes
+    // from the encrypted policy) or a signing request (email-only or empty con).
+    let has_policy_attrs = kr.con.iter().any(|a| a.atype != EMAIL_ATTR);
 
-    let dr = DisclosureRequestBuilder::new()
-        .add_discons([mandatory, optional].concat())
-        .build();
+    let dr = if has_policy_attrs {
+        // Decryption flow: make every attribute from the policy mandatory so the
+        // recipient must disclose the exact combination that was used for encryption.
+        let discons: Vec<Vec<Vec<AttributeRequest>>> = kr
+            .con
+            .iter()
+            .map(|attr| {
+                vec![vec![AttributeRequest::Compound {
+                    attr_type: attr.atype.clone(),
+                    value: None,
+                    not_null: true,
+                }]]
+            })
+            .collect();
+
+        DisclosureRequestBuilder::new()
+            .add_discons(discons)
+            .build()
+    } else {
+        // Signing flow: email is required, the rest are optional so the sender can
+        // choose what extra attributes to include in their signing identity.
+        let mandatory: Vec<Vec<Vec<AttributeRequest>>> =
+            vec![vec![vec![AttributeRequest::Compound {
+                attr_type: EMAIL_ATTR.to_string(),
+                value: None,
+                not_null: true,
+            }]]];
+
+        // Optional disjunctions: each starts with an empty conjunction so the user may skip it.
+        let optional: Vec<Vec<Vec<AttributeRequest>>> = vec![
+            // Phone number
+            vec![
+                vec![],
+                vec![AttributeRequest::Compound {
+                    attr_type: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
+                    value: None,
+                    not_null: true,
+                }],
+            ],
+            // Full name: driving licence, ID card, or passport
+            vec![
+                vec![],
+                vec![
+                    AttributeRequest::Compound {
+                        attr_type: "pbdf.pbdf.drivinglicence.firstName".to_string(),
+                        value: None,
+                        not_null: true,
+                    },
+                    AttributeRequest::Compound {
+                        attr_type: "pbdf.pbdf.drivinglicence.lastName".to_string(),
+                        value: None,
+                        not_null: true,
+                    },
+                ],
+                vec![
+                    AttributeRequest::Compound {
+                        attr_type: "pbdf.pbdf.idcard.firstName".to_string(),
+                        value: None,
+                        not_null: true,
+                    },
+                    AttributeRequest::Compound {
+                        attr_type: "pbdf.pbdf.idcard.lastName".to_string(),
+                        value: None,
+                        not_null: true,
+                    },
+                ],
+                vec![
+                    AttributeRequest::Compound {
+                        attr_type: "pbdf.pbdf.passport.firstName".to_string(),
+                        value: None,
+                        not_null: true,
+                    },
+                    AttributeRequest::Compound {
+                        attr_type: "pbdf.pbdf.passport.lastName".to_string(),
+                        value: None,
+                        not_null: true,
+                    },
+                ],
+            ],
+            // Date of birth: driving licence, ID card, or passport
+            vec![
+                vec![],
+                vec![AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.drivinglicence.dateOfBirth".to_string(),
+                    value: None,
+                    not_null: true,
+                }],
+                vec![AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.idcard.dateOfBirth".to_string(),
+                    value: None,
+                    not_null: true,
+                }],
+                vec![AttributeRequest::Compound {
+                    attr_type: "pbdf.pbdf.passport.dateOfBirth".to_string(),
+                    value: None,
+                    not_null: true,
+                }],
+            ],
+        ];
+
+        DisclosureRequestBuilder::new()
+            .add_discons([mandatory, optional].concat())
+            .build()
+    };
 
     log::debug!(
         "disclosure request: {}",
