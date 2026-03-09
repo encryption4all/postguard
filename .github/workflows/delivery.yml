@@ -11,6 +11,7 @@ on:
 
 permissions:
     contents: read
+    id-token: write
     packages: write
     security-events: write
 
@@ -187,9 +188,9 @@ jobs:
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
-                  node-version: 20
+                  node-version: 24
                   registry-url: https://registry.npmjs.org
 
             - name: Publish to npm
-              run: npm publish --access public --provenance
+              run: npm publish --access public
               working-directory: pg-wasm/pkg
