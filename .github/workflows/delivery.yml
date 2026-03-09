@@ -150,3 +150,49 @@ jobs:
                       $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
                       "ghcr.io/${{ github.repository }}@${{ needs.build-amd64.outputs.digest }}" \
                       "ghcr.io/${{ github.repository }}@${{ needs.build-arm64.outputs.digest }}"
+
+    publish-pg-wasm:
+        name: Publish pg-wasm to npm
+        runs-on: ubuntu-latest
+        if: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'pg-wasm-v') }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Extract version from tag
+              id: version
+              run: echo "version=${GITHUB_REF_NAME#pg-wasm-v}" >> "$GITHUB_OUTPUT"
+
+            - name: Verify Cargo.toml version matches tag
+              run: |
+                  cargo_version=$(grep '^version' pg-wasm/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+                  tag_version="${{ steps.version.outputs.version }}"
+                  if [ "$cargo_version" != "$tag_version" ]; then
+                      echo "::error::Version mismatch: Cargo.toml has $cargo_version but tag says $tag_version"
+                      exit 1
+                  fi
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Install wasm-pack
+              run: cargo install wasm-pack
+
+            - name: Build pg-wasm
+              run: wasm-pack build --release -d pkg/ --out-name index --scope e4a --target web ./pg-wasm
+
+            - name: Set version from tag
+              run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+              working-directory: pg-wasm/pkg
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  registry-url: https://registry.npmjs.org
+
+            - name: Publish to npm
+              run: npm publish --access public
+              working-directory: pg-wasm/pkg
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
