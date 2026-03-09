@@ -163,6 +163,15 @@ jobs:
               id: version
               run: echo "version=${GITHUB_REF_NAME#pg-wasm-v}" >> "$GITHUB_OUTPUT"
 
+            - name: Verify Cargo.toml version matches tag
+              run: |
+                  cargo_version=$(grep '^version' pg-wasm/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+                  tag_version="${{ steps.version.outputs.version }}"
+                  if [ "$cargo_version" != "$tag_version" ]; then
+                      echo "::error::Version mismatch: Cargo.toml has $cargo_version but tag says $tag_version"
+                      exit 1
+                  fi
+
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
 
@@ -170,7 +179,7 @@ jobs:
               run: cargo install wasm-pack
 
             - name: Build pg-wasm
-              run: wasm-pack build --release -d pkg/ --out-name index --scope e4a --target bundler ./pg-wasm
+              run: wasm-pack build --release -d pkg/ --out-name index --scope e4a --target web ./pg-wasm
 
             - name: Set version from tag
               run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
