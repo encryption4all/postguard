@@ -82,6 +82,11 @@ impl TestSetup {
                     Some("Charlie"),
                 )],
             },
+            // Default policy (used by skipEncryption)
+            Policy {
+                timestamp: 0,
+                con: vec![Attribute::new("default", Some("Default"))],
+            },
         ];
 
         // Encrypts for Bob (email + name) and Charlie (email + name).

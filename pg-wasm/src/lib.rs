@@ -10,7 +10,7 @@ use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
 use pg_core::client::web::stream::{StreamSealerConfig, StreamUnsealerConfig};
 use pg_core::client::web::{SealerMemoryConfig, UnsealerMemoryConfig};
 use pg_core::client::{Header, Sealer, Unsealer};
-use pg_core::identity::{EncryptionPolicy, HiddenPolicy};
+use pg_core::identity::{Attribute, EncryptionPolicy, HiddenPolicy, Policy};
 use pg_core::kem::cgw_kv::CGWKV;
 
 use wasm_bindgen::prelude::*;
@@ -26,7 +26,8 @@ use std::collections::BTreeMap;
 #[wasm_bindgen(typescript_custom_section)]
 const TS_APPEND_CONTENT: &'static str = r#"
 interface ISealOptions {
-  policy: EncryptionPolicy;
+  skipEncryption?: boolean;
+  policy?: EncryptionPolicy;
   pubSignKey: ISigningKey;
   privSignKey?: ISigningKey;
 }
@@ -57,8 +58,11 @@ extern "C" {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SealOptions {
+    /// Whether a default enc policy is used to "skip" enc.
+    pub skip_encryption: Option<bool>,
+
     /// The encryption policy.
-    pub policy: EncryptionPolicy,
+    pub policy: Option<EncryptionPolicy>,
 
     /// The public signing key plus identity.
     pub pub_sign_key: SigningKeyExt,
@@ -110,12 +114,27 @@ pub async fn js_seal(
     let mpk: PublicKey<CGWKV> = serde_wasm_bindgen::from_value(mpk)?;
 
     let SealOptions {
+        skip_encryption,
         policy,
         pub_sign_key,
         priv_sign_key,
     } = serde_wasm_bindgen::from_value(options.into())?;
 
-    let mut sealer = Sealer::<_, SealerMemoryConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)?;
+    let skip_encryption = skip_encryption.unwrap_or(false);
+
+    // if skip_encryption is true, then use a default policy such that everyone can decrypt
+    let mut sealer = if skip_encryption {
+        let policy = EncryptionPolicy::from([(
+            String::from("Default"),
+            Policy {
+                timestamp: 0,
+                con: vec![Attribute::new("default", Some("Default"))],
+            },
+        )]);
+        Sealer::<_, SealerMemoryConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)?
+    } else {
+        Sealer::<_, SealerMemoryConfig>::new(&mpk, &policy.unwrap(), &pub_sign_key, &mut rng)?
+    };
 
     if let Some(priv_sign_key) = priv_sign_key {
         sealer = sealer.with_priv_signing_key(priv_sign_key);
@@ -151,6 +170,7 @@ pub async fn js_stream_seal(
     let mpk: PublicKey<CGWKV> = serde_wasm_bindgen::from_value(mpk)?;
 
     let SealOptions {
+        skip_encryption,
         policy,
         pub_sign_key,
         priv_sign_key,
@@ -160,7 +180,20 @@ pub async fn js_stream_seal(
     let mut stream = read.into_stream();
     let mut sink = WritableStream::from_raw(writable).into_sink();
 
-    let mut sealer = Sealer::<_, StreamSealerConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)?;
+    let skip_encryption = skip_encryption.unwrap_or(false);
+
+    let mut sealer = if skip_encryption {
+        let policy = EncryptionPolicy::from([(
+            String::from("Default"),
+            Policy {
+                timestamp: 0,
+                con: vec![Attribute::new("default", Some("Default"))],
+            },
+        )]);
+        Sealer::<_, StreamSealerConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)?
+    } else {
+        Sealer::<_, StreamSealerConfig>::new(&mpk, &policy.unwrap(), &pub_sign_key, &mut rng)?
+    };
 
     if let Some(priv_sign_key) = priv_sign_key {
         sealer = sealer.with_priv_signing_key(priv_sign_key);
