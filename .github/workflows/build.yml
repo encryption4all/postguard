@@ -10,18 +10,18 @@ on:
 name: Continuous integration
 
 jobs:
-  sonarqube:
-    name: SonarQube
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  # sonarqube:
+  #   name: SonarQube
+  #   runs-on: ubuntu-latest
+  #   continue-on-error: true
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+  #     - name: SonarQube Scan
+  #       uses: SonarSource/sonarqube-scan-action@v6
+  #       env:
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   test:
     name: Test workspace
     strategy:
@@ -48,30 +48,23 @@ jobs:
       - run: cargo fmt --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all -- --check
 
   test-wasm-browsers:
-    name: Run wasm tests in browsers (Chrome, Firefox)
+    name: Run wasm tests in browsers
     strategy:
       matrix:
-        browser: [chrome, firefox]
-    runs-on: ubuntu-latest
+        include:
+          - browser: chrome
+            os: ubuntu-latest
+          - browser: firefox
+            os: ubuntu-latest
+          - browser: safari
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     env:
       WASM_BINDGEN_TEST_TIMEOUT: 120
     steps:
       - uses: actions/checkout@v2
       - name: Install
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
+        run: cargo install wasm-pack
       - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
       - run: wasm-pack test --release --headless --${{ matrix.browser }} ./pg-wasm
-
-  test-wasm-safari:
-    name: Run wasm tests in Safari
-    runs-on: macos-latest
-    continue-on-error: true
-    env:
-      WASM_BINDGEN_TEST_TIMEOUT: 120
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - run: wasm-pack test --release --headless --safari ./pg-wasm

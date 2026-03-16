@@ -171,6 +171,12 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             .app_data(Data::new(ibs_pd.clone()))
                             .route(web::get().to(handlers::parameters)),
                     )
+                    .service(
+                        resource("/sign/start")
+                            .app_data(Data::new(IrmaUrl(irma.clone())))
+                            .app_data(Data::new(IrmaToken(irma_token.clone())))
+                            .route(web::post().to(handlers::start_sign)),
+                    )
                     .service({
                         let mut irma_scope = scope("/{_:(irma|request)}")
                             .service(
@@ -197,7 +203,6 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             irma_scope = irma_scope.service(
                                 resource("/sign/key")
                                     .guard(ApiKeyGuard)
-                                    .app_data(Data::new(irma_token.clone()))
                                     .app_data(Data::new(ibs_sk.clone()))
                                     .wrap(
                                         Auth::new(irma.clone(), AuthType::Key)
@@ -210,7 +215,6 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                         // JWT authentication (fallback for all other tokens)
                         irma_scope.service(
                             resource("/sign/key")
-                                .app_data(Data::new(irma_token.clone()))
                                 .app_data(Data::new(ibs_sk.clone()))
                                 .wrap(Auth::new(irma.clone(), AuthType::Jwt))
                                 .route(web::post().to(handlers::signing_key)),

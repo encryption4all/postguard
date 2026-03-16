@@ -23,7 +23,7 @@ pub enum Subcommand {
 #[clap(name = "Gen")]
 pub struct GenOpts {
     /// Version of the protocol.
-    #[clap(short = 's', long, possible_values = &["3"], default_value = "3")]
+    #[clap(short = 's', long, value_parser = ["3"], default_value = "3")]
     pub scheme: String,
 
     /// Path to store the IBE private key.
@@ -64,7 +64,7 @@ pub struct ServerOpts {
     pub irma: String,
 
     #[clap(short = 't', long)]
-    pub irma_token: String,
+    pub irma_token: Option<String>,
 
     /// Path to store the IBS private key.
     #[clap(long, default_value = "./pkg_ibe.sec", value_hint = ValueHint::FilePath)]
