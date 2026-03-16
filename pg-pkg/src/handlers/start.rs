@@ -3,7 +3,6 @@ use crate::Error;
 use actix_web::{web::Data, web::Json, HttpResponse};
 use irma::*;
 use pg_core::api::IrmaAuthRequest;
-use serde::Deserialize;
 
 /// Maximum allowed validity (in seconds) of a JWT (1 day).
 const MAX_VALIDITY: u64 = 60 * 60 * 24;
@@ -44,8 +43,8 @@ async fn create_irma_session(
     Ok(HttpResponse::Ok().json(session))
 }
 
-// Starts a Yivi disclosure session for decryption.
-// Builds a mandatory disclosure for every attribute in the encrypted file's policy.
+// Starts a Yivi disclosure session.
+// Builds a disclosure request for every attribute in the request's policy.
 pub async fn start(
     url: Data<IrmaUrl>,
     irma_token: Data<IrmaToken>,
@@ -73,108 +72,4 @@ pub async fn start(
     );
 
     create_irma_session(&url, &irma_token, dr, kr.validity).await
-}
-
-#[derive(Deserialize, Default)]
-pub struct SignStartRequest {
-    pub validity: Option<u64>,
-}
-
-// Starts a Yivi disclosure session for signing.
-// Email is mandatory; phone number, full name, and date of birth are optional.
-pub async fn start_sign(
-    url: Data<IrmaUrl>,
-    irma_token: Data<IrmaToken>,
-    value: Json<SignStartRequest>,
-) -> Result<HttpResponse, Error> {
-    const EMAIL_ATTR: &str = "pbdf.sidn-pbdf.email.email";
-
-    let mandatory: Vec<Vec<Vec<AttributeRequest>>> = vec![vec![vec![AttributeRequest::Compound {
-        attr_type: EMAIL_ATTR.to_string(),
-        value: None,
-        not_null: true,
-    }]]];
-
-    // Optional disjunctions: each starts with an empty conjunction so the user may skip it.
-    let optional: Vec<Vec<Vec<AttributeRequest>>> = vec![
-        // Phone number
-        vec![
-            vec![],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.sidn-pbdf.mobilenumber.mobilenumber".to_string(),
-                value: None,
-                not_null: true,
-            }],
-        ],
-        // Full name: driving licence, ID card, or passport
-        vec![
-            vec![],
-            vec![
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.drivinglicence.firstName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.drivinglicence.lastName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-            ],
-            vec![
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.idcard.firstName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.idcard.lastName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-            ],
-            vec![
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.passport.firstName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-                AttributeRequest::Compound {
-                    attr_type: "pbdf.pbdf.passport.lastName".to_string(),
-                    value: None,
-                    not_null: true,
-                },
-            ],
-        ],
-        // Date of birth: driving licence, ID card, or passport
-        vec![
-            vec![],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.pbdf.drivinglicence.dateOfBirth".to_string(),
-                value: None,
-                not_null: true,
-            }],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.pbdf.idcard.dateOfBirth".to_string(),
-                value: None,
-                not_null: true,
-            }],
-            vec![AttributeRequest::Compound {
-                attr_type: "pbdf.pbdf.passport.dateOfBirth".to_string(),
-                value: None,
-                not_null: true,
-            }],
-        ],
-    ];
-
-    let dr = DisclosureRequestBuilder::new()
-        .add_discons([mandatory, optional].concat())
-        .build();
-
-    log::debug!(
-        "signing disclosure request: {}",
-        serde_json::to_string_pretty(&dr).unwrap_or_default()
-    );
-
-    create_irma_session(&url, &irma_token, dr, value.validity).await
 }
