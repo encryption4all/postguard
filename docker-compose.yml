@@ -2,14 +2,72 @@ services:
     pg-pkg:
         build:
             context: .
-            dockerfile: Dockerfile
+            dockerfile: dev.Dockerfile
         container_name: pg-pkg
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+            interval: 1m30s
+            timeout: 5s
+            retries: 3
+            start_interval: 1s
+            start_period: 30s
         ports:
             - "8087:8087"
+        volumes:
+            - .:/app
+            - pg-pkg-target:/app/target
+        environment:
+            - RUST_LOG=debug
+            - RUST_BACKTRACE=1
+            - IRMA_SERVER=http://irma-server:8088
+            - DATABASE_URL=postgres://devuser:devpassword@postgres:5432/devdb
         networks:
             - pg-network
-        env_file: ".env"
+        depends_on:
+            - irma-server
+            - postgres
+
+    # IRMA/Yivi server (unauthenticated, for development only)
+    irma-server:
+        image: ghcr.io/privacybydesign/irma:latest
+        container_name: pg-irma-server
+        command: server --no-auth -v --url http://localhost:8088 --jwt-privkey-file /etc/irma/jwt_privkey.pem
+        ports:
+            - "8088:8088"
+        volumes:
+            - ./docker/irma/jwt_privkey.pem:/etc/irma/jwt_privkey.pem:ro
+        networks:
+            - pg-network
+
+    postgres:
+        image: postgres:18
+        container_name: pg-postgres
+        environment:
+            POSTGRES_USER: devuser
+            POSTGRES_PASSWORD: devpassword
+            POSTGRES_DB: devdb
+        volumes:
+            - pg-postgres-data:/var/lib/postgresql/data
+        ports:
+            - "5432:5432"
+        networks:
+            - pg-network
+
+    adminer:
+        image: adminer
+        container_name: pg-adminer
+        restart: always
+        depends_on:
+            - postgres
+        ports:
+            - "8080:8080"
+        networks:
+            - pg-network
 
 networks:
     pg-network:
         driver: bridge
+
+volumes:
+    pg-pkg-target:
+    pg-postgres-data:
