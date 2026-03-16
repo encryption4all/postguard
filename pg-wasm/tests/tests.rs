@@ -490,8 +490,8 @@ mod stream {
             sealer_input,
             sealer_output.stream(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         let unsealer_input: Vec<u8> = sealer_output
             .written()
