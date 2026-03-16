@@ -181,10 +181,6 @@ jobs:
             - name: Build pg-wasm
               run: wasm-pack build --release -d pkg/ --out-name index --scope e4a --target web ./pg-wasm
 
-            - name: Set version from tag
-              run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
-              working-directory: pg-wasm/pkg
-
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
