@@ -44,8 +44,8 @@ async fn create_irma_session(
     Ok(HttpResponse::Ok().json(session))
 }
 
-/// Starts a Yivi disclosure session for decryption.
-/// Builds a mandatory disclosure for every attribute in the encrypted file's policy.
+// Starts a Yivi disclosure session for decryption.
+// Builds a mandatory disclosure for every attribute in the encrypted file's policy.
 pub async fn start(
     url: Data<IrmaUrl>,
     irma_token: Data<IrmaToken>,
@@ -80,8 +80,8 @@ pub struct SignStartRequest {
     pub validity: Option<u64>,
 }
 
-/// Starts a Yivi disclosure session for signing.
-/// Email is mandatory; phone number, full name, and date of birth are optional.
+// Starts a Yivi disclosure session for signing.
+// Email is mandatory; phone number, full name, and date of birth are optional.
 pub async fn start_sign(
     url: Data<IrmaUrl>,
     irma_token: Data<IrmaToken>,

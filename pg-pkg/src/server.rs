@@ -100,7 +100,14 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     log::error!("Failed to connect to database: {}", e);
                     PKGError::Setup(format!("Failed to connect to database: {}", e))
                 })?;
-            log::info!("Connected to PostgreSQL database");
+            sqlx::migrate!("./migrations")
+                .run(&pool)
+                .await
+                .map_err(|e| {
+                    log::error!("Failed to run database migrations: {}", e);
+                    PKGError::Setup(format!("Failed to run database migrations: {}", e))
+                })?;
+            log::info!("Connected to PostgreSQL database and ran migrations");
             Some(Data::new(pool))
         }
         None => {
@@ -171,14 +178,14 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             .app_data(Data::new(ibs_pd.clone()))
                             .route(web::get().to(handlers::parameters)),
                     )
-                    .service(
-                        resource("/sign/start")
-                            .app_data(Data::new(IrmaUrl(irma.clone())))
-                            .app_data(Data::new(IrmaToken(irma_token.clone())))
-                            .route(web::post().to(handlers::start_sign)),
-                    )
                     .service({
                         let mut irma_scope = scope("/{_:(irma|request)}")
+                            .service(
+                                resource("/sign/start")
+                                    .app_data(Data::new(IrmaUrl(irma.clone())))
+                                    .app_data(Data::new(IrmaToken(irma_token.clone())))
+                                    .route(web::post().to(handlers::start_sign)),
+                            )
                             .service(
                                 resource("/start")
                                     .app_data(Data::new(IrmaUrl(irma.clone())))
