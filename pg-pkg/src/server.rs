@@ -193,6 +193,12 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             )
                             .service(
                                 resource("/key/{timestamp}")
+                                    .app_data(Data::new(ibe_sk.clone()))
+                                    .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                                    .route(web::get().to(handlers::key::<CGWKV>)),
+                            )
+                            .service(
+                                resource("/key")
                                     .app_data(Data::new(ibe_sk))
                                     .wrap(Auth::new(irma.clone(), AuthType::Jwt))
                                     .route(web::get().to(handlers::key::<CGWKV>)),
@@ -307,6 +313,12 @@ pub(crate) mod tests {
                         )
                         .service(
                             resource("/key/{timestamp}")
+                                .app_data(Data::new(ibe_sk.clone()))
+                                .wrap(NoAuth::Decryption)
+                                .route(web::get().to(handlers::key::<CGWKV>)),
+                        )
+                        .service(
+                            resource("/key")
                                 .app_data(Data::new(ibe_sk))
                                 .wrap(NoAuth::Decryption)
                                 .route(web::get().to(handlers::key::<CGWKV>)),
@@ -381,6 +393,28 @@ pub(crate) mod tests {
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+    }
+
+    #[actix_web::test]
+    async fn test_get_usk_no_timestamp() {
+        let (app, _, _, _, _) = default_setup().await;
+
+        let pol = Policy {
+            timestamp: now(),
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+
+        let req = test::TestRequest::get()
+            .uri("/v2/key")
+            .set_json(pol)
+            .to_request();
+
+        let key_response: KeyResponse<UserSecretKey<CGWKV>> =
+            test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
+        assert!(key_response.key.is_some());
     }
 
     #[actix_web::test]
