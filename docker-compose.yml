@@ -24,8 +24,10 @@ services:
         networks:
             - pg-network
         depends_on:
-            - irma-server
-            - postgres
+            irma-healthcheck:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
 
     # IRMA/Yivi server (unauthenticated, for development only)
     irma-server:
@@ -39,15 +41,38 @@ services:
         networks:
             - pg-network
 
+    irma-healthcheck:
+        image: alpine:latest
+        container_name: pg-irma-healthcheck
+        entrypoint: ["sleep", "infinity"]
+        healthcheck:
+            test: ["CMD", "wget", "--spider", "-q", "http://irma-server:8088/health"]
+            interval: 1m30s
+            timeout: 5s
+            retries: 3
+            start_interval: 1s
+            start_period: 10s
+        depends_on:
+            - irma-server
+        networks:
+            - pg-network
+
     postgres:
         image: postgres:18
         container_name: pg-postgres
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U devuser -d devdb"]
+            interval: 1m30s
+            timeout: 5s
+            retries: 3
+            start_interval: 1s
+            start_period: 10s
         environment:
             POSTGRES_USER: devuser
             POSTGRES_PASSWORD: devpassword
             POSTGRES_DB: devdb
         volumes:
-            - pg-postgres-data:/var/lib/postgresql/data
+            - pg-postgres-data:/var/lib/postgresql
         ports:
             - "5432:5432"
         networks:
@@ -57,6 +82,8 @@ services:
         image: adminer
         container_name: pg-adminer
         restart: always
+        environment:
+            ADMINER_DEFAULT_SERVER: postgres
         depends_on:
             - postgres
         ports:
