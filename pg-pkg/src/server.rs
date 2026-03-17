@@ -562,32 +562,33 @@ pub(crate) mod tests {
         assert_ne!(ss1, ss4);
     }
 
-    async fn setup_ungaurded_api_key_test_with_mock_store(
+    fn default_api_key_data(email: &str) -> ApiKeyData {
+        ApiKeyData {
+            email: email.to_string(),
+            organisation_name: None,
+            phone_number: None,
+            kvk_number: None,
+            organisation_name_public: false,
+            phone_number_public: false,
+            kvk_number_public: false,
+        }
+    }
+
+    async fn setup_api_key_test_with_mock_store(
         key: String,
-        email: String,
+        data: ApiKeyData,
     ) -> (
         impl Service<Request, Response = ServiceResponse, Error = Error>,
-        gg::SecretKey,
+        gg::PublicKey,
     ) {
-        use crate::middleware::auth::tests::MockApiKeyStore;
-        let (_, _, _, _, ibs_sk) = default_setup().await;
+        let (_, _, _, ibs_pk, ibs_sk) = default_setup().await;
         let irma = "https://irma.example.org".to_string();
 
-        let mock_store: MockApiKeyStore;
-        if key.is_empty() {
-            mock_store = MockApiKeyStore::new();
+        let mock_store = if key.is_empty() {
+            MockApiKeyStore::new()
         } else {
-            mock_store = MockApiKeyStore::new().with_key(
-                key,
-                ApiKeyData {
-                    email,
-                    attributes: vec![Attribute::new(
-                        "pbdf.sidn-pbdf.email.email",
-                        Some("test@example.com"),
-                    )],
-                },
-            );
-        }
+            MockApiKeyStore::new().with_key(key, data)
+        };
 
         let app = test::init_service(
             App::new().service(
@@ -601,21 +602,19 @@ pub(crate) mod tests {
         )
         .await;
 
-        (app, ibs_sk)
+        (app, ibs_pk)
     }
 
     #[actix_web::test]
-    async fn test_get_usk_signing_with_api_key() {
-        let (app, _) = setup_ungaurded_api_key_test_with_mock_store(
+    async fn test_api_key_signing_email_only() {
+        let (app, _) = setup_api_key_test_with_mock_store(
             "PG-API-valid-key".to_string(),
-            "test@example.com".to_string(),
+            default_api_key_data("test@example.com"),
         )
         .await;
+
         let skr = SigningKeyRequest {
-            pub_sign_id: vec![Attribute::new(
-                "pbdf.sidn-pbdf.email.email",
-                Some("test@example.com"),
-            )],
+            pub_sign_id: vec![],
             priv_sign_id: None,
         };
 
@@ -630,23 +629,27 @@ pub(crate) mod tests {
 
         assert_eq!(key_response.status, SessionStatus::Done);
         assert_eq!(key_response.proof_status, Some(ProofStatus::Valid));
-        assert!(key_response.pub_sign_key.is_some());
+
+        // Email is always public
+        let pub_key = key_response.pub_sign_key.unwrap();
+        assert_eq!(pub_key.policy.con.len(), 1);
+        assert_eq!(pub_key.policy.con[0].atype, "pbdf.sidn-pbdf.email.email");
+        assert!(key_response.priv_sign_key.is_none());
     }
 
     #[actix_web::test]
-    async fn test_get_usk_signing_with_invalid_api_key() {
-        let (app, _) = setup_ungaurded_api_key_test_with_mock_store(
+    async fn test_api_key_signing_invalid_key() {
+        let (app, _) = setup_api_key_test_with_mock_store(
             "PG-API-valid-key".to_string(),
-            "test@example.com".to_string(),
+            default_api_key_data("test@example.com"),
         )
         .await;
 
         let skr = SigningKeyRequest {
-            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            pub_sign_id: vec![],
             priv_sign_id: None,
         };
 
-        // Test with invalid API key - should fail
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
             .insert_header(("Authorization", "Bearer PG-API-invalid-key"))
@@ -658,16 +661,15 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
-    async fn test_get_usk_signing_with_no_api_key_in_store() {
+    async fn test_api_key_signing_empty_store() {
         let (app, _) =
-            setup_ungaurded_api_key_test_with_mock_store("".to_string(), "".to_string()).await;
+            setup_api_key_test_with_mock_store("".to_string(), default_api_key_data("")).await;
 
         let skr = SigningKeyRequest {
-            pub_sign_id: vec![Attribute::new("testattribute", Some("testvalue"))],
+            pub_sign_id: vec![],
             priv_sign_id: None,
         };
 
-        // Test with invalid API key - should fail
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
             .insert_header(("Authorization", "Bearer PG-API-invalid-key"))
@@ -676,6 +678,190 @@ pub(crate) mod tests {
 
         let resp = test::try_call_service(&app, req).await;
         assert!(resp.is_err(), "Expected error for invalid API key");
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_signing_round_trip() {
+        let mut rng = thread_rng();
+        let (app, ibs_pk) = setup_api_key_test_with_mock_store(
+            "PG-API-valid-key".to_string(),
+            default_api_key_data("test@example.com"),
+        )
+        .await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![],
+            priv_sign_id: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let key_response: SigningKeyResponse = test::call_and_read_body_json(&app, req).await;
+        let pub_sign_key = key_response.pub_sign_key.unwrap();
+        let id = pub_sign_key.policy.derive_ibs().unwrap();
+
+        let message = b"message signed with api key";
+        let sig = gg::Signer::new()
+            .chain(message)
+            .sign(&pub_sign_key.key.0, &mut rng);
+
+        assert!(gg::Verifier::new()
+            .chain(message)
+            .verify(&ibs_pk, &sig, &id));
+        assert!(!gg::Verifier::new()
+            .chain("tampered message")
+            .verify(&ibs_pk, &sig, &id));
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_signing_with_public_phone() {
+        let (app, _) = setup_api_key_test_with_mock_store(
+            "PG-API-valid-key".to_string(),
+            ApiKeyData {
+                email: "test@example.com".to_string(),
+                organisation_name: None,
+                phone_number: Some("+31612345678".to_string()),
+                kvk_number: None,
+                organisation_name_public: false,
+                phone_number_public: true,
+                kvk_number_public: false,
+            },
+        )
+        .await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![],
+            priv_sign_id: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
+
+        let pub_key = key_response.pub_sign_key.unwrap();
+        assert_eq!(pub_key.policy.con.len(), 2);
+        assert!(pub_key
+            .policy
+            .con
+            .iter()
+            .any(|a| a.atype == "pbdf.sidn-pbdf.email.email"));
+        assert!(pub_key
+            .policy
+            .con
+            .iter()
+            .any(|a| a.atype == "pbdf.sidn-pbdf.mobilenumber.mobilenumber"));
+        assert!(key_response.priv_sign_key.is_none());
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_signing_with_private_phone() {
+        let (app, _) = setup_api_key_test_with_mock_store(
+            "PG-API-valid-key".to_string(),
+            ApiKeyData {
+                email: "test@example.com".to_string(),
+                organisation_name: None,
+                phone_number: Some("+31612345678".to_string()),
+                kvk_number: None,
+                organisation_name_public: false,
+                phone_number_public: false,
+                kvk_number_public: false,
+            },
+        )
+        .await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![],
+            priv_sign_id: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
+
+        // Email is public
+        let pub_key = key_response.pub_sign_key.unwrap();
+        assert_eq!(pub_key.policy.con.len(), 1);
+        assert_eq!(pub_key.policy.con[0].atype, "pbdf.sidn-pbdf.email.email");
+
+        // Phone is private
+        let priv_key = key_response.priv_sign_key.unwrap();
+        assert_eq!(priv_key.policy.con.len(), 1);
+        assert_eq!(
+            priv_key.policy.con[0].atype,
+            "pbdf.sidn-pbdf.mobilenumber.mobilenumber"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_signing_all_fields() {
+        let (app, _) = setup_api_key_test_with_mock_store(
+            "PG-API-valid-key".to_string(),
+            ApiKeyData {
+                email: "test@example.com".to_string(),
+                organisation_name: Some("Acme Corp".to_string()),
+                phone_number: Some("+31612345678".to_string()),
+                kvk_number: Some("12345678".to_string()),
+                organisation_name_public: true,
+                phone_number_public: false,
+                kvk_number_public: true,
+            },
+        )
+        .await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![],
+            priv_sign_id: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
+
+        // Public: email + organisation_name + kvk_number
+        let pub_key = key_response.pub_sign_key.unwrap();
+        assert_eq!(pub_key.policy.con.len(), 3);
+        assert!(pub_key
+            .policy
+            .con
+            .iter()
+            .any(|a| a.atype == "pbdf.sidn-pbdf.email.email"));
+        assert!(pub_key
+            .policy
+            .con
+            .iter()
+            .any(|a| a.atype == "pbdf.pbdf.kvk.displayName"));
+        assert!(pub_key
+            .policy
+            .con
+            .iter()
+            .any(|a| a.atype == "pbdf.pbdf.kvk.kvkNumber"));
+
+        // Private: phone_number only
+        let priv_key = key_response.priv_sign_key.unwrap();
+        assert_eq!(priv_key.policy.con.len(), 1);
+        assert_eq!(
+            priv_key.policy.con[0].atype,
+            "pbdf.sidn-pbdf.mobilenumber.mobilenumber"
+        );
     }
 
     async fn setup_guard_test() -> impl Service<Request, Response = ServiceResponse, Error = Error>
