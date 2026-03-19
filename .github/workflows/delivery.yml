@@ -154,7 +154,7 @@ jobs:
     publish-pg-wasm:
         name: Publish pg-wasm to npm
         runs-on: ubuntu-latest
-        if: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'pg-wasm-v') }}
+        if: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v') }}
         permissions:
             contents: read
             id-token: write
@@ -164,7 +164,7 @@ jobs:
 
             - name: Extract version from tag
               id: version
-              run: echo "version=${GITHUB_REF_NAME#pg-wasm-v}" >> "$GITHUB_OUTPUT"
+              run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
             - name: Verify Cargo.toml version matches tag
               run: |
