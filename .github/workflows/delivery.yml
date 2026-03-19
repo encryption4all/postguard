@@ -9,6 +9,10 @@ on:
         types: [published]
     workflow_dispatch:
 
+env:
+    # True when this run was triggered by a pg-pkg release (Docker image release)
+    IS_PKG_RELEASE: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'pg-pkg-v') }}
+
 permissions:
     contents: read
     packages: write
@@ -16,6 +20,7 @@ permissions:
 
 jobs:
     build-amd64:
+        if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'pg-wasm-v')) }}
         runs-on: ubuntu-latest
         outputs:
             digest: ${{ steps.build.outputs.digest }}
@@ -26,7 +31,7 @@ jobs:
             - name: Select build profile
               id: config
               run: |
-                  if [ "${{ github.event_name }}" = "release" ]; then
+                  if [ "${{ env.IS_PKG_RELEASE }}" = "true" ]; then
                       echo "profile=release" >> "$GITHUB_OUTPUT"
                   else
                       echo "profile=edge" >> "$GITHUB_OUTPUT"
@@ -56,6 +61,7 @@ jobs:
                   cache-to: type=gha,mode=max,scope=build-amd64
 
     build-arm64:
+        if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'pg-wasm-v')) }}
         runs-on: ubuntu-24.04-arm
         outputs:
             digest: ${{ steps.build.outputs.digest }}
@@ -66,7 +72,7 @@ jobs:
             - name: Select build profile
               id: config
               run: |
-                  if [ "${{ github.event_name }}" = "release" ]; then
+                  if [ "${{ env.IS_PKG_RELEASE }}" = "true" ]; then
                       echo "profile=release" >> "$GITHUB_OUTPUT"
                   else
                       echo "profile=edge" >> "$GITHUB_OUTPUT"
@@ -126,9 +132,9 @@ jobs:
               with:
                   images: ghcr.io/${{ github.repository }}
                   tags: |
-                      type=semver,pattern={{version}},event=tag
-                      type=semver,pattern={{major}}.{{minor}},event=tag
-                      type=edge,enable=${{ github.event_name != 'release' }}
+                      type=match,pattern=pg-pkg-v(.*),group=1,event=tag
+                      type=match,pattern=pg-pkg-v(\d+\.\d+),group=1,event=tag
+                      type=edge,enable=${{ !fromJSON(env.IS_PKG_RELEASE) }}
                       type=ref,event=pr
                       type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
 
@@ -154,7 +160,7 @@ jobs:
     publish-pg-wasm:
         name: Publish pg-wasm to npm
         runs-on: ubuntu-latest
-        if: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v') }}
+        if: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'pg-wasm-v') }}
         permissions:
             contents: read
             id-token: write
@@ -164,7 +170,7 @@ jobs:
 
             - name: Extract version from tag
               id: version
-              run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+              run: echo "version=${GITHUB_REF_NAME#pg-wasm-v}" >> "$GITHUB_OUTPUT"
 
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
