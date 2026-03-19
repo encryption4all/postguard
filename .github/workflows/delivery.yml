@@ -178,14 +178,56 @@ jobs:
             - name: Install wasm-pack
               run: cargo install wasm-pack
 
-            - name: Build pg-wasm
-              run: wasm-pack build --release -d pkg/ --out-name index --scope e4a --target web ./pg-wasm
+            - name: Build pg-wasm (bundler)
+              run: wasm-pack build --release -d pkg/bundler --out-name index --scope e4a --target bundler ./pg-wasm
+
+            - name: Build pg-wasm (web)
+              run: wasm-pack build --release -d pkg/web --out-name index --scope e4a --target web ./pg-wasm
+
+            - name: Assemble package
+              working-directory: pg-wasm/pkg
+              run: |
+                  # Clean up wasm-pack generated files from subdirectories
+                  rm -f bundler/package.json bundler/.gitignore bundler/README.md
+                  rm -f web/package.json web/.gitignore web/README.md
+
+                  # Write the combined package.json using node to ensure valid JSON
+                  node -e "
+                  const pkg = {
+                    name: '@e4a/pg-wasm',
+                    type: 'module',
+                    collaborators: [
+                      'Leon Botros <l.botros@cs.ru.nl>',
+                      'Bas Westerbaan <bas@westerbaan.name>'
+                    ],
+                    description: 'PostGuard WebAssembly bindings for the browser',
+                    version: '0.0.0',
+                    license: 'MIT',
+                    repository: {
+                      type: 'git',
+                      url: 'https://github.com/encryption4all/postguard/tree/main/pg-wasm'
+                    },
+                    exports: {
+                      '.': { types: './bundler/index.d.ts', import: './bundler/index.js' },
+                      './web': { types: './web/index.d.ts', import: './web/index.js' }
+                    },
+                    main: './bundler/index.js',
+                    types: './bundler/index.d.ts',
+                    sideEffects: ['./bundler/index.js', './snippets/*'],
+                    keywords: ['ibe', 'encryption', 'ecc']
+                  };
+                  require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+                  "
 
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
                   node-version: 20
                   registry-url: https://registry.npmjs.org
+
+            - name: Set version from tag
+              run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+              working-directory: pg-wasm/pkg
 
             - name: Publish to npm
               run: npm publish --access public
