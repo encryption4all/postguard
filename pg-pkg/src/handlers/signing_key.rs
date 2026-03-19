@@ -7,7 +7,7 @@ use pg_core::artifacts::{SigningKey, SigningKeyExt};
 use pg_core::ibs::gg::{keygen, SecretKey};
 use pg_core::identity::{Attribute, Policy};
 
-use crate::middleware::auth::AuthResult;
+use crate::middleware::auth::{ApiKeySigningInfo, AuthResult};
 use crate::util::current_time_u64;
 
 pub async fn signing_key(
@@ -29,6 +29,9 @@ pub async fn signing_key(
         .cloned()
         .ok_or(crate::Error::Unexpected)?;
 
+    // If present, the API key flow determined the pub/priv split server-side.
+    let api_key_info = req.extensions().get::<ApiKeySigningInfo>().cloned();
+
     req.extensions_mut().clear();
 
     // The PKG gets to decide the timestamp in the policy.
@@ -47,17 +50,32 @@ pub async fn signing_key(
         }
     }
 
-    let pub_con = con
-        .clone()
-        .into_iter()
-        .filter(|attr| {
-            body.pub_sign_id
-                .iter()
-                .map(|a| a.atype.clone())
-                .collect::<Vec<String>>()
-                .contains(&attr.atype)
-        })
-        .collect();
+    // Determine public and private attributes:
+    // - API key auth: use the server-side split from the database configuration.
+    // - JWT/IRMA auth: use the client-provided SigningKeyRequest body.
+    let (pub_con, priv_con): (Vec<Attribute>, Option<Vec<Attribute>>) =
+        if let Some(info) = api_key_info {
+            let priv_attrs = if info.priv_attributes.is_empty() {
+                None
+            } else {
+                Some(info.priv_attributes)
+            };
+            (info.pub_attributes, priv_attrs)
+        } else {
+            let pub_con = con
+                .clone()
+                .into_iter()
+                .filter(|attr| body.pub_sign_id.iter().any(|a| a.atype == attr.atype))
+                .collect();
+
+            let priv_con = body.priv_sign_id.as_ref().map(|priv_sign_id| {
+                con.into_iter()
+                    .filter(|a| priv_sign_id.contains(&Attribute::new(&a.atype, None)))
+                    .collect()
+            });
+
+            (pub_con, priv_con)
+        };
 
     let policy = Policy {
         timestamp: iat,
@@ -71,27 +89,22 @@ pub async fn signing_key(
         policy,
     };
 
-    let priv_sign_key = body.priv_sign_id.as_ref().map(|priv_sign_id| {
-        let priv_con = con
-            .clone()
-            .into_iter()
-            .filter(|a| priv_sign_id.contains(&Attribute::new(&a.atype, None)))
-            .collect();
-        let policy = Policy {
-            timestamp: iat,
-            con: priv_con,
-        };
+    let priv_sign_key = priv_con
+        .map(|priv_attrs| {
+            let policy = Policy {
+                timestamp: iat,
+                con: priv_attrs,
+            };
 
-        let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
-        let key = keygen(sk, &id, &mut rng);
+            let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
+            let key = keygen(sk, &id, &mut rng);
 
-        Ok(SigningKeyExt {
-            key: SigningKey(key),
-            policy,
+            Ok(SigningKeyExt {
+                key: SigningKey(key),
+                policy,
+            })
         })
-    });
-
-    let priv_sign_key = priv_sign_key.map_or(Ok(None), |r| r.map(Some))?;
+        .map_or(Ok(None), |r| r.map(Some))?;
 
     Ok(HttpResponse::Ok().json(SigningKeyResponse {
         status,

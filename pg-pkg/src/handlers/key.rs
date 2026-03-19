@@ -19,11 +19,12 @@ where
     let sk = msk.get_ref();
     let mut rng = rand::thread_rng();
 
-    let timestamp = req
-        .match_info()
-        .query("timestamp")
-        .parse::<u64>()
-        .map_err(|_e| crate::Error::NoTimestampError)?;
+    let timestamp = match req.match_info().get("timestamp") {
+        Some(ts) => ts
+            .parse::<u64>()
+            .map_err(|_e| crate::Error::NoTimestampError)?,
+        None => current_time_u64()?,
+    };
 
     let AuthResult {
         con,
@@ -52,6 +53,17 @@ where
     req.extensions_mut().clear();
 
     let policy = Policy { timestamp, con };
+
+    log::debug!(
+        "Deriving USK for policy: timestamp={}, attributes=[{}]",
+        policy.timestamp,
+        policy
+            .con
+            .iter()
+            .map(|a| format!("{}={:?}", a.atype, a.value))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     let id = policy
         .derive_kem::<K>()

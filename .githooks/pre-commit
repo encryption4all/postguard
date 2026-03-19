@@ -1,0 +1,8 @@
+#!/bin/sh
+# Run cargo fmt only on staged .rs files, then re-stage them.
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+
+if [ -n "$STAGED_RS" ]; then
+    cargo fmt --all
+    echo "$STAGED_RS" | xargs git add
+fi

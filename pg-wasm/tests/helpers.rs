@@ -41,7 +41,7 @@ impl RecordingWritableStream {
     pub fn written(&self) -> Vec<String> {
         self.raw
             .written()
-            .into_iter()
+            .iter()
             .map(|x| x.as_string().unwrap())
             .collect::<Vec<_>>()
     }

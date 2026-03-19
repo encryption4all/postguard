@@ -29,7 +29,21 @@ pub(crate) struct AuthResult {
 #[derive(Debug, Clone)]
 pub struct ApiKeyData {
     pub email: String,
-    pub attributes: Vec<Attribute>, // TODO: make attributes for api key less hacky. issue: #45
+    pub organisation_name: Option<String>,
+    pub phone_number: Option<String>,
+    pub kvk_number: Option<String>,
+    pub organisation_name_public: bool,
+    pub phone_number_public: bool,
+    pub kvk_number_public: bool,
+}
+
+/// Pub/priv attribute split determined by the API key's database configuration.
+/// When present in request extensions, the signing_key handler uses this
+/// instead of the client-provided SigningKeyRequest body.
+#[derive(Debug, Clone)]
+pub(crate) struct ApiKeySigningInfo {
+    pub pub_attributes: Vec<Attribute>,
+    pub priv_attributes: Vec<Attribute>,
 }
 
 /// Trait for API key storage/lookup. Implement this trait to provide custom API key validation.
@@ -56,11 +70,23 @@ impl PgApiKeyStore {
 #[async_trait::async_trait(?Send)]
 impl ApiKeyStore for PgApiKeyStore {
     async fn lookup(&self, api_key: &str) -> Result<Option<ApiKeyData>, crate::Error> {
-        let result = sqlx::query_as::<_, (String, serde_json::Value)>(
+        let result = sqlx::query_as::<
+            _,
+            (
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                bool,
+                bool,
+                bool,
+            ),
+        >(
             r#"
-            SELECT email, attributes
+            SELECT email, organisation_name, phone_number, kvk_number,
+                   organisation_name_public, phone_number_public, kvk_number_public
             FROM api_keys
-            WHERE key = $1 AND expires_at > NOW()
+            WHERE api_key = $1 AND expires_at > NOW()
             "#,
         )
         .bind(api_key)
@@ -69,11 +95,23 @@ impl ApiKeyStore for PgApiKeyStore {
         .map_err(|_| crate::Error::Unexpected)?;
 
         match result {
-            Some((email, attrs_json)) => {
-                let attributes: Vec<Attribute> =
-                    serde_json::from_value(attrs_json).unwrap_or_default();
-                Ok(Some(ApiKeyData { email, attributes }))
-            }
+            Some((
+                email,
+                organisation_name,
+                phone_number,
+                kvk_number,
+                organisation_name_public,
+                phone_number_public,
+                kvk_number_public,
+            )) => Ok(Some(ApiKeyData {
+                email,
+                organisation_name,
+                phone_number,
+                kvk_number,
+                organisation_name_public,
+                phone_number_public,
+                kvk_number_public,
+            })),
             None => Ok(None),
         }
     }
@@ -169,8 +207,54 @@ where
                         .await?
                         .ok_or(crate::Error::APIKeyInvalid)?;
 
-                    let disclosed_attributes: Vec<DisclosedAttribute> = key_data
-                        .attributes
+                    // Build pub/priv attribute lists from the structured fields.
+                    // Email is always public.
+                    let mut pub_attrs = vec![Attribute::new(
+                        "pbdf.sidn-pbdf.email.email",
+                        Some(&key_data.email),
+                    )];
+                    let mut priv_attrs: Vec<Attribute> = Vec::new();
+
+                    let optional_fields: &[(Option<&str>, bool, &str)] = &[
+                        (
+                            key_data.organisation_name.as_deref(),
+                            key_data.organisation_name_public,
+                            "pbdf.pbdf.kvk.displayName",
+                        ),
+                        (
+                            key_data.phone_number.as_deref(),
+                            key_data.phone_number_public,
+                            "pbdf.sidn-pbdf.mobilenumber.mobilenumber",
+                        ),
+                        (
+                            key_data.kvk_number.as_deref(),
+                            key_data.kvk_number_public,
+                            "pbdf.pbdf.kvk.kvkNumber",
+                        ),
+                    ];
+
+                    for (value, is_public, attr_type) in optional_fields {
+                        if let Some(val) = value {
+                            let attr = Attribute::new(attr_type, Some(val));
+                            if *is_public {
+                                pub_attrs.push(attr);
+                            } else {
+                                priv_attrs.push(attr);
+                            }
+                        }
+                    }
+
+                    // Store the pub/priv split for the signing_key handler.
+                    req.extensions_mut().insert(ApiKeySigningInfo {
+                        pub_attributes: pub_attrs.clone(),
+                        priv_attributes: priv_attrs.clone(),
+                    });
+
+                    // Build all attributes as disclosed for the session result.
+                    let all_attrs: Vec<Attribute> =
+                        pub_attrs.into_iter().chain(priv_attrs).collect();
+
+                    let disclosed_attributes: Vec<DisclosedAttribute> = all_attrs
                         .into_iter()
                         .map(|a| {
                             let identifier =
@@ -427,7 +511,12 @@ pub mod tests {
             "valid-key",
             ApiKeyData {
                 email: "user@example.com".to_string(),
-                attributes: vec![],
+                organisation_name: None,
+                phone_number: None,
+                kvk_number: None,
+                organisation_name_public: false,
+                phone_number_public: false,
+                kvk_number_public: false,
             },
         );
 

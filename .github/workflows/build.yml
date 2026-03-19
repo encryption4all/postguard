@@ -48,29 +48,23 @@ jobs:
       - run: cargo fmt --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all -- --check
 
   test-wasm-browsers:
-    name: Run wasm tests in browsers (Chrome, Firefox)
+    name: Run wasm tests in browsers
     strategy:
       matrix:
-        browser: [chrome, firefox]
-    runs-on: ubuntu-latest
+        include:
+          - browser: chrome
+            os: ubuntu-latest
+          - browser: firefox
+            os: ubuntu-latest
+          - browser: safari
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     env:
       WASM_BINDGEN_TEST_TIMEOUT: 120
     steps:
       - uses: actions/checkout@v2
       - name: Install
         run: cargo install wasm-pack
-
       - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
       - run: wasm-pack test --release --headless --${{ matrix.browser }} ./pg-wasm
-
-  test-wasm-safari:
-    name: Run wasm tests in Safari
-    runs-on: macos-latest
-    env:
-      WASM_BINDGEN_TEST_TIMEOUT: 120
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install
-        run: cargo install wasm-pack
-      - run: wasm-pack test --release --headless --safari ./pg-wasm
