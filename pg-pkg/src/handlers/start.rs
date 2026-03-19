@@ -26,7 +26,7 @@ pub async fn start(
                 .map(|attr| {
                     vec![vec![AttributeRequest::Compound {
                         attr_type: attr.atype.clone(),
-                        value: attr.value.clone(),
+                        value: attr.value.clone().filter(|v| !v.is_empty()),
                         not_null: true,
                     }]]
                 })
