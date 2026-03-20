@@ -1,0 +1,3 @@
+[workspace]
+publish = false
+git_release_enable = true
