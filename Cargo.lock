@@ -2399,7 +2399,7 @@ dependencies = [
 
 [[package]]
 name = "pg-wasm"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "futures 0.3.32",
  "getrandom 0.2.17",
