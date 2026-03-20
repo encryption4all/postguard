@@ -16,30 +16,11 @@ async fn create_irma_session(
     dr: IrmaRequest,
     validity: Option<u64>,
 ) -> Result<HttpResponse, Error> {
-    let irma_url = url.get_ref().0.clone();
-    let irma_token = irma_token.get_ref().0.clone();
-    let kr = value.into_inner();
-
-    let dr = DisclosureRequestBuilder::new()
-        .add_discons(
-            kr.con
-                .iter()
-                .map(|attr| {
-                    vec![vec![AttributeRequest::Compound {
-                        attr_type: attr.atype.clone(),
-                        value: attr.value.clone().filter(|v| !v.is_empty()),
-                        not_null: true,
-                    }]]
-                })
-                .collect(),
-        )
-        .build();
-
-    let validity = match kr.validity {
-        Some(validity) if validity > MAX_VALIDITY => Err(Error::ValidityError),
-        Some(validity) => Ok(validity),
-        None => Ok(DEFAULT_VALIDITY),
-    }?;
+    let validity = match validity {
+        Some(v) if v > MAX_VALIDITY => return Err(Error::ValidityError),
+        Some(v) => v,
+        None => DEFAULT_VALIDITY,
+    };
 
     let er = ExtendedIrmaRequest {
         timeout: None,
@@ -77,7 +58,7 @@ pub async fn start(
         .map(|attr| {
             vec![vec![AttributeRequest::Compound {
                 attr_type: attr.atype.clone(),
-                value: None,
+                value: attr.value.clone().filter(|v: &String| !v.is_empty()),
                 not_null: true,
             }]]
         })
