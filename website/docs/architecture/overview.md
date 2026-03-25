@@ -8,40 +8,29 @@ PostGuard implements a **Sign-then-Encrypt (StE)** hybrid protocol combining Ide
 
 ## Component Diagram
 
-```
-┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│   Sender    │         │     PKG     │         │  Recipient  │
-│ (pg-cli /   │         │  (pg-pkg)   │         │ (pg-cli /   │
-│  pg-wasm)   │         │             │         │  pg-wasm)   │
-└──────┬──────┘         └──────┬──────┘         └──────┬──────┘
-       │                       │                       │
-       │  1. GET /v2/parameters│                       │
-       │──────────────────────>│                       │
-       │  master public key    │                       │
-       │<──────────────────────│                       │
-       │                       │                       │
-       │  2. POST /v2/irma/start (signing keys)       │
-       │──────────────────────>│                       │
-       │  Yivi session + keys  │                       │
-       │<──────────────────────│                       │
-       │                       │                       │
-       │  3. Encrypt locally   │                       │
-       │  (IBE + AES-128-GCM) │                       │
-       │                       │                       │
-       │  4. Send ciphertext ──────────────────────────>
-       │                       │                       │
-       │                       │  5. POST /v2/irma/start
-       │                       │<──────────────────────│
-       │                       │  Yivi session         │
-       │                       │──────────────────────>│
-       │                       │                       │
-       │                       │  6. GET /v2/irma/key/{ts}
-       │                       │<──────────────────────│
-       │                       │  User Secret Key      │
-       │                       │──────────────────────>│
-       │                       │                       │
-       │                       │  7. Decrypt locally   │
-       │                       │                       │
+```mermaid
+sequenceDiagram
+    participant Sender as Sender<br/>(pg-cli / pg-wasm)
+    participant PKG as PKG<br/>(pg-pkg)
+    participant Recipient as Recipient<br/>(pg-cli / pg-wasm)
+
+    Sender->>PKG: 1. GET /v2/parameters
+    PKG-->>Sender: Master public key
+
+    Sender->>PKG: 2. POST /v2/irma/start (signing keys)
+    PKG-->>Sender: Yivi session + keys
+
+    Note over Sender: 3. Encrypt locally<br/>(IBE + AES-128-GCM)
+
+    Sender->>Recipient: 4. Send ciphertext
+
+    Recipient->>PKG: 5. POST /v2/irma/start
+    PKG-->>Recipient: Yivi session
+
+    Recipient->>PKG: 6. GET /v2/irma/key/{ts}
+    PKG-->>Recipient: User Secret Key
+
+    Note over Recipient: 7. Decrypt locally
 ```
 
 ## Crate Responsibilities
