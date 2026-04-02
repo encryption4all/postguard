@@ -10,6 +10,7 @@ edition = "2021"
 license = "MIT"
 keywords = ["ibe", "encryption", "ecc"]
 homepage = "https://github.com/encryption4all/postguard/tree/main/pg-core"
+repository = "https://github.com/encryption4all/postguard"
 categories = ["cryptography"]
 
 [dependencies]
