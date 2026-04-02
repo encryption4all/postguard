@@ -5,7 +5,6 @@ authors = [
 ]
 description = "HTTP API server for a PostGuard Private Key Generator (PKG) instance"
 edition = "2021"
-homepage = "https://github.com/encryption4all/postguard/tree/main/pg-pkg"
 license = "MIT"
 name = "pg-pkg"
 version = "0.3.0"
