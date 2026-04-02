@@ -8,10 +8,10 @@ edition = "2021"
 homepage = "https://github.com/encryption4all/postguard/tree/main/pg-cli"
 license = "MIT"
 name = "pg-cli"
-version = "0.3.1"
+version = "0.3.2"
 
 [dependencies]
-pg-core = { path = "../pg-core", version = "0.3.1", features = ["stream"] }
+pg-core = { path = "../pg-core", version = "0.3.2", features = ["stream"] }
 futures = "0.3.27"
 rand = "0.8.4"
 clap = { version = "4", features = ["derive"] }
