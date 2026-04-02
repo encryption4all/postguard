@@ -5,6 +5,7 @@ authors = [
 ]
 description = "Commandline interface for PostGuard"
 edition = "2021"
+homepage = "https://github.com/encryption4all/postguard/tree/main/pg-cli"
 license = "MIT"
 name = "pg-cli"
 version = "0.3.1"
