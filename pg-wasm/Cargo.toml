@@ -7,6 +7,7 @@ authors = [
 ]
 edition = "2021"
 license = "MIT"
+homepage = "https://github.com/encryption4all/postguard/tree/main/pg-wasm"
 description = "PostGuard WebAssembly bindings for the browser"
 repository = "https://github.com/encryption4all/postguard/tree/main/pg-wasm"
 keywords = ["ibe", "encryption", "ecc"]
