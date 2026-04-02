@@ -20,7 +20,7 @@ wasm-bindgen = { version = "0.2.104" }
 js-sys = "0.3"
 web-sys = "0.3"
 rand = { version = "0.8.4" }
-serde = "*"
+serde = "1.0"
 wasm-streams = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 futures = "0.3"
