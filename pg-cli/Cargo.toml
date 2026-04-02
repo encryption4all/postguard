@@ -10,7 +10,7 @@ name = "pg-cli"
 version = "0.3.0"
 
 [dependencies]
-pg-core = { path = "../pg-core", features = ["stream"] }
+pg-core = { path = "../pg-core", version = "0.3.0", features = ["stream"] }
 futures = "0.3.27"
 rand = "0.8.4"
 clap = { version = "4", features = ["derive"] }
