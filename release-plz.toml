@@ -1,0 +1,22 @@
+[workspace]
+git_tag_name = "{{ package }}-v{{ version }}"
+
+# pg-core: publish to crates.io
+[[package]]
+name = "pg-core"
+publish = true
+
+# pg-cli: publish to crates.io
+[[package]]
+name = "pg-cli"
+publish = true
+
+# pg-pkg: Docker only, no crates.io publish
+[[package]]
+name = "pg-pkg"
+publish = false
+
+# pg-wasm: npm only, no crates.io publish
+[[package]]
+name = "pg-wasm"
+publish = false
