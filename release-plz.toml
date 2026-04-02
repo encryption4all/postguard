@@ -12,11 +12,15 @@ name = "pg-cli"
 publish = true
 
 # pg-pkg: Docker only, no crates.io publish
+# git_only uses git tags (not the cargo registry) to determine the current version
 [[package]]
 name = "pg-pkg"
 publish = false
+git_only = true
 
 # pg-wasm: npm only, no crates.io publish
+# git_only uses git tags (not the cargo registry) to determine the current version
 [[package]]
 name = "pg-wasm"
 publish = false
+git_only = true
