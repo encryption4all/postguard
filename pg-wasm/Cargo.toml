@@ -16,7 +16,7 @@ keywords = ["ibe", "encryption", "ecc"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pg-core = { path = "../pg-core", version = "0.5.6", features = ["web", "stream"] }
+pg-core = { path = "../pg-core", version = "0.5.7", features = ["web", "stream"] }
 wasm-bindgen = { version = "0.2.104" }
 js-sys = "0.3"
 web-sys = "0.3"

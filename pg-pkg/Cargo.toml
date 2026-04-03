@@ -49,5 +49,5 @@ version = "0.3"
 
 [dependencies.pg-core]
 path = "../pg-core"
-version = "0.5.6"
+version = "0.5.7"
 features = []
