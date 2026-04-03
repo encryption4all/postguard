@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.3.0...pg-pkg-v0.3.1) - 2026-04-03
+
+### Other
+
+- bump pg-core to 0.5.7 with all deps in sync
+- add keywords metadata to pg-pkg
+
 ## [0.3.0](https://github.com/encryption4all/postguard/releases/tag/pg-pkg-v0.3.0) - 2026-04-02
 
 ### Added
