@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.1...pg-cli-v0.3.2) - 2026-04-03
+
+### Added
+
+- sync pg-core and pg-wasm versions, exclude pg-wasm from workspace
+
+### Other
+
+- bump pg-core to 0.5.7 with all deps in sync
+- add repository metadata to pg-cli
+- add keywords metadata to pg-cli
+- add homepage/repository metadata to all crates
+
 ## [0.3.1](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.0...pg-cli-v0.3.1) - 2026-04-02
 
 ### Other

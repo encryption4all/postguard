@@ -10,7 +10,7 @@ keywords = ["ibe", "encryption", "ecc"]
 license = "MIT"
 repository = "https://github.com/encryption4all/postguard"
 name = "pg-cli"
-version = "0.3.1"
+version = "0.3.2"
 
 [dependencies]
 pg-core = { path = "../pg-core", version = "0.5.7", features = ["stream"] }
