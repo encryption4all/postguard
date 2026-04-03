@@ -8,6 +8,7 @@ edition = "2021"
 homepage = "https://github.com/encryption4all/postguard/tree/main/pg-cli"
 keywords = ["ibe", "encryption", "ecc"]
 license = "MIT"
+repository = "https://github.com/encryption4all/postguard"
 name = "pg-cli"
 version = "0.3.1"
 
