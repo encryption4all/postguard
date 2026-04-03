@@ -32,7 +32,7 @@ jobs:
     outputs:
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
       pg_pkg_version: ${{ steps.parse.outputs.pg_pkg_version }}
-      pg_wasm_version: ${{ steps.parse.outputs.pg_wasm_version }}
+      pg_core_version: ${{ steps.parse.outputs.pg_core_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -54,9 +54,9 @@ jobs:
         run: |
           RELEASES='${{ steps.release-plz.outputs.releases }}'
           PG_PKG_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-pkg") | .version // empty')
-          PG_WASM_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-wasm") | .version // empty')
+          PG_CORE_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-core") | .version // empty')
           echo "pg_pkg_version=$PG_PKG_VERSION" >> "$GITHUB_OUTPUT"
-          echo "pg_wasm_version=$PG_WASM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "pg_core_version=$PG_CORE_VERSION" >> "$GITHUB_OUTPUT"
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:
@@ -228,10 +228,14 @@ jobs:
   # npm: publish pg-wasm to npmjs
   # ---------------------------------------------------------------------------
 
+  # pg-wasm is excluded from the workspace because pg-core's "web" feature
+  # uses compile_error! on non-wasm32 targets, making cargo package fail.
+  # pg-wasm's npm version is kept in sync with pg-core: when pg-core is
+  # released, pg-wasm is published at the same version.
   publish-wasm:
     name: Publish pg-wasm to npm
     needs: release-plz-release
-    if: needs.release-plz-release.outputs.pg_wasm_version != ''
+    if: needs.release-plz-release.outputs.pg_core_version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -296,7 +300,7 @@ jobs:
       - name: Set version and publish
         working-directory: pg-wasm/pkg
         run: |
-          npm version "${{ needs.release-plz-release.outputs.pg_wasm_version }}" --no-git-tag-version
+          npm version "${{ needs.release-plz-release.outputs.pg_core_version }}" --no-git-tag-version
           npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
