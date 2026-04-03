@@ -8,6 +8,7 @@ edition = "2021"
 homepage = "https://github.com/encryption4all/postguard/tree/main/pg-pkg"
 keywords = ["ibe", "encryption", "pkg"]
 license = "MIT"
+categories = ["cryptography"]
 repository = "https://github.com/encryption4all/postguard"
 name = "pg-pkg"
 version = "0.3.1"
