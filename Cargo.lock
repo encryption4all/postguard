@@ -2286,7 +2286,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pg-cli"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "clap",
  "futures 0.3.32",
@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "pg-core"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "pg-pkg"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "actix-cors",
  "actix-http",
