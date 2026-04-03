@@ -8,10 +8,6 @@ name: Delivery
 # versioned Docker image must be built in the same run that release-plz
 # creates the release, using its job outputs to pass the version through.
 #
-# pg-wasm is excluded from the workspace (cdylib can't be packaged on native
-# runners), so it is not managed by release-plz. Its npm publish is triggered
-# when the version in pg-wasm/Cargo.toml is bumped manually.
-#
 
 on:
   push:
@@ -36,6 +32,7 @@ jobs:
     outputs:
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
       pg_pkg_version: ${{ steps.parse.outputs.pg_pkg_version }}
+      pg_wasm_version: ${{ steps.parse.outputs.pg_wasm_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -57,7 +54,9 @@ jobs:
         run: |
           RELEASES='${{ steps.release-plz.outputs.releases }}'
           PG_PKG_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-pkg") | .version // empty')
+          PG_WASM_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-wasm") | .version // empty')
           echo "pg_pkg_version=$PG_PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "pg_wasm_version=$PG_WASM_VERSION" >> "$GITHUB_OUTPUT"
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:
@@ -228,12 +227,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # npm: publish pg-wasm to npmjs
   # ---------------------------------------------------------------------------
-  # pg-wasm is not managed by release-plz (excluded from workspace).
-  # Publishing is triggered when the version in pg-wasm/Cargo.toml changes.
 
   publish-wasm:
     name: Publish pg-wasm to npm
-    if: github.ref == 'refs/heads/main'
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.pg_wasm_version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -242,37 +240,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Check if pg-wasm version changed
-        id: check
-        run: |
-          CARGO_VERSION=$(grep '^version' pg-wasm/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          NPM_VERSION=$(npm view @e4a/pg-wasm version 2>/dev/null || echo "0.0.0")
-          echo "cargo_version=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
-          echo "npm_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
-          if [ "$CARGO_VERSION" != "$NPM_VERSION" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Install Rust toolchain
-        if: steps.check.outputs.changed == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install wasm-pack
-        if: steps.check.outputs.changed == 'true'
         run: cargo install wasm-pack
 
       - name: Build pg-wasm (bundler)
-        if: steps.check.outputs.changed == 'true'
         run: wasm-pack build --release -d pkg/bundler --out-name index --scope e4a --target bundler ./pg-wasm
 
       - name: Build pg-wasm (web)
-        if: steps.check.outputs.changed == 'true'
         run: wasm-pack build --release -d pkg/web --out-name index --scope e4a --target web ./pg-wasm
 
       - name: Assemble package
-        if: steps.check.outputs.changed == 'true'
         working-directory: pg-wasm/pkg
         run: |
           # Clean up wasm-pack generated files from subdirectories
@@ -308,17 +288,15 @@ jobs:
           "
 
       - name: Setup Node.js
-        if: steps.check.outputs.changed == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Set version and publish
-        if: steps.check.outputs.changed == 'true'
         working-directory: pg-wasm/pkg
         run: |
-          npm version "${{ steps.check.outputs.cargo_version }}" --no-git-tag-version
+          npm version "${{ needs.release-plz-release.outputs.pg_wasm_version }}" --no-git-tag-version
           npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
