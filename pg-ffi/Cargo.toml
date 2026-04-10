@@ -1,6 +1,6 @@
 [package]
 name = "pg-ffi"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "C ABI wrapper around pg-core for PostGuard .NET SDK"
 license = "MIT"
