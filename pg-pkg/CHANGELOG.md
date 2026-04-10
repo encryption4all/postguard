@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.7...pg-pkg-v0.5.8) - 2026-04-10
+
+### Added
+
+- support optional attributes in Yivi disclosure sessions
+
 ## [0.5.7](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.6...pg-pkg-v0.5.7) - 2026-04-03
 
 ### Other
