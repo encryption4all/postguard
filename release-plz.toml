@@ -16,3 +16,9 @@ publish = true
 name = "pg-pkg"
 publish = false
 git_only = true
+
+# pg-ffi: native binaries only, no crates.io publish
+[[package]]
+name = "pg-ffi"
+publish = false
+git_only = true

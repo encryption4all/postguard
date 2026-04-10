@@ -33,6 +33,7 @@ jobs:
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
       pg_pkg_version: ${{ steps.parse.outputs.pg_pkg_version }}
       pg_core_version: ${{ steps.parse.outputs.pg_core_version }}
+      pg_ffi_version: ${{ steps.parse.outputs.pg_ffi_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -57,6 +58,8 @@ jobs:
           PG_CORE_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-core") | .version // empty')
           echo "pg_pkg_version=$PG_PKG_VERSION" >> "$GITHUB_OUTPUT"
           echo "pg_core_version=$PG_CORE_VERSION" >> "$GITHUB_OUTPUT"
+          PG_FFI_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-ffi") | .version // empty')
+          echo "pg_ffi_version=$PG_FFI_VERSION" >> "$GITHUB_OUTPUT"
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:
@@ -223,6 +226,70 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+
+  # ---------------------------------------------------------------------------
+  # pg-ffi: build native libraries for all platforms
+  # ---------------------------------------------------------------------------
+
+  # Build pg-ffi native libraries and upload as GitHub release assets.
+  build-ffi:
+    name: Build pg-ffi (${{ matrix.name }})
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.pg_ffi_version != ''
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            name: linux-x64
+            lib: libpg_ffi.so
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            name: linux-arm64
+            lib: libpg_ffi.so
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            name: osx-arm64
+            lib: libpg_ffi.dylib
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            name: osx-x64
+            lib: libpg_ffi.dylib
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            name: win-x64
+            lib: pg_ffi.dll
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build pg-ffi
+        run: cargo build --release --target ${{ matrix.target }} -p pg-ffi
+      - name: Package artifact (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/${{ matrix.lib }} staging/
+          cd staging && tar czf ../pg-ffi-${{ matrix.name }}.tar.gz *
+      - name: Package artifact (windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir staging
+          cp target/${{ matrix.target }}/release/${{ matrix.lib }} staging/
+          Compress-Archive -Path staging/* -DestinationPath pg-ffi-${{ matrix.name }}.zip
+      - name: Upload to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="pg-ffi-v${{ needs.release-plz-release.outputs.pg_ffi_version }}"
+          gh release upload "$TAG" pg-ffi-${{ matrix.name }}.* --clobber
 
   # ---------------------------------------------------------------------------
   # npm: publish pg-wasm to npmjs
