@@ -11,7 +11,7 @@ license = "MIT"
 categories = ["cryptography"]
 repository = "https://github.com/encryption4all/postguard"
 name = "pg-pkg"
-version = "0.5.7"
+version = "0.5.8"
 
 [dependencies]
 actix-cors = "0.6.1"
@@ -50,5 +50,5 @@ version = "0.3"
 
 [dependencies.pg-core]
 path = "../pg-core"
-version = "0.5.8"
+version = "0.5.9"
 features = []
