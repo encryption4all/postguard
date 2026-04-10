@@ -56,18 +56,25 @@ pub async fn start(
         .con
         .iter()
         .map(|attr| {
-            vec![vec![AttributeRequest::Compound {
+            let ar = AttributeRequest::Compound {
                 attr_type: attr.atype.clone(),
                 value: attr.value.clone().filter(|v: &String| !v.is_empty()),
                 not_null: true,
-            }]]
+            };
+
+            if attr.optional {
+                // Empty first option means the user may skip this attribute
+                vec![vec![], vec![ar]]
+            } else {
+                vec![vec![ar]]
+            }
         })
         .collect();
 
     let dr = DisclosureRequestBuilder::new().add_discons(discons).build();
 
     log::debug!(
-        "decryption disclosure request: {}",
+        "disclosure request: {}",
         serde_json::to_string_pretty(&dr).unwrap_or_default()
     );
 

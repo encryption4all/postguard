@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "pg-pkg"
-version = "0.5.7"
+version = "0.5.6"
 dependencies = [
  "actix-cors",
  "actix-http",

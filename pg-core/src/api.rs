@@ -1,6 +1,7 @@
 //! Definitions of the PostGuard protocol REST API.
 
 use crate::{artifacts::SigningKeyExt, identity::Attribute};
+use alloc::string::String;
 use alloc::vec::Vec;
 use irma::{ProofStatus, SessionStatus};
 use serde::{Deserialize, Serialize};
@@ -16,11 +17,32 @@ pub struct Parameters<T> {
     pub public_key: T,
 }
 
+/// An attribute in a disclosure request, extending [`Attribute`] with an `optional` flag.
+///
+/// When `optional` is true, the PKG wraps this attribute in a disjunction with an empty
+/// first option, allowing the user to skip disclosing it in the Yivi app.
+///
+/// This type is only used in API requests (JSON), not in the binary wire format.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DisclosureAttribute {
+    /// Attribute type.
+    #[serde(rename = "t")]
+    pub atype: String,
+
+    /// Attribute value.
+    #[serde(rename = "v")]
+    pub value: Option<String>,
+
+    /// Whether this attribute is optional in the disclosure session.
+    #[serde(default, skip_serializing_if = "crate::util::is_false")]
+    pub optional: bool,
+}
+
 /// An authentication request for a IRMA identity.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IrmaAuthRequest {
-    /// The conjunction of [`Attribute`].
-    pub con: Vec<Attribute>,
+    /// The conjunction of attributes for the disclosure request.
+    pub con: Vec<DisclosureAttribute>,
     #[serde(skip_serializing_if = "Option::is_none")]
     /// The validity (in seconds) of the JWT response.
     pub validity: Option<u64>,
