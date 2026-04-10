@@ -1,0 +1,15 @@
+[package]
+name = "pg-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI wrapper around pg-core for PostGuard .NET SDK"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+pg-core = { path = "../pg-core", features = ["rust"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+ibe = { version = "0.3.0", features = ["cgwkv", "mkem"] }
