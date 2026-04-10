@@ -2345,6 +2345,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pg-ffi"
+version = "0.1.0"
+dependencies = [
+ "ibe",
+ "pg-core",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pg-pkg"
 version = "0.5.8"
 dependencies = [

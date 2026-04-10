@@ -12,6 +12,7 @@ FROM chef AS planner
 COPY pg-core ./pg-core
 COPY pg-pkg  ./pg-pkg
 COPY pg-cli  ./pg-cli
+COPY pg-ffi  ./pg-ffi
 COPY pg-wasm ./pg-wasm
 COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
@@ -27,6 +28,7 @@ RUN cargo chef cook --profile ${CARGO_PROFILE} --bin pg-pkg --recipe-path recipe
 COPY pg-core ./pg-core
 COPY pg-pkg  ./pg-pkg
 COPY pg-cli  ./pg-cli
+COPY pg-ffi  ./pg-ffi
 COPY pg-wasm ./pg-wasm
 COPY Cargo.toml Cargo.lock ./
 RUN cargo build --profile ${CARGO_PROFILE} --bin pg-pkg
