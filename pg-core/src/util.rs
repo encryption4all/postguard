@@ -2,6 +2,11 @@ use crate::consts::*;
 use crate::error::Error;
 use alloc::string::String;
 
+/// Serde skip helper: returns true when the value is false.
+pub(crate) fn is_false(v: &bool) -> bool {
+    !v
+}
+
 pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     if bool::from(x.is_some()) {
         Some(x.unwrap())

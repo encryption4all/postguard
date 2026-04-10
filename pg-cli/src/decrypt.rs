@@ -7,7 +7,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use inquire::{Select, Text};
 use pg_core::artifacts::UserSecretKey;
 use pg_core::client::rust::stream::UnsealerStreamConfig;
-use pg_core::identity::Attribute;
 use std::fs::File;
 
 use pg_core::api::*;
@@ -64,9 +63,10 @@ pub async fn exec(dec_opts: DecOpts) {
         con: reconstructed_policy
             .con
             .iter()
-            .map(|attr| Attribute {
+            .map(|attr| DisclosureAttribute {
                 atype: attr.atype.clone(),
                 value: attr.value.clone(),
+                optional: false,
             })
             .collect(),
         validity: None,
