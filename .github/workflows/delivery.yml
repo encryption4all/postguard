@@ -256,7 +256,7 @@ jobs:
             name: osx-arm64
             lib: libpg_ffi.dylib
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
             name: osx-x64
             lib: libpg_ffi.dylib
           - target: x86_64-pc-windows-msvc
@@ -285,6 +285,7 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.lib }} staging/
           Compress-Archive -Path staging/* -DestinationPath pg-ffi-${{ matrix.name }}.zip
       - name: Upload to GitHub release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
