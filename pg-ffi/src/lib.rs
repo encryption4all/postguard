@@ -2,9 +2,10 @@ use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
 use std::slice;
 
+use futures::io::Cursor;
 use ibe::kem::cgw_kv::CGWKV;
 use pg_core::artifacts::{PublicKey, SigningKeyExt};
-use pg_core::client::rust::SealerMemoryConfig;
+use pg_core::client::rust::stream::SealerStreamConfig;
 use pg_core::client::Sealer;
 use pg_core::identity::EncryptionPolicy;
 
@@ -36,7 +37,7 @@ fn seal_impl(
 
     let mut rng = rand::thread_rng();
 
-    let sealer = Sealer::<_, SealerMemoryConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)
+    let sealer = Sealer::<_, SealerStreamConfig>::new(&mpk, &policy, &pub_sign_key, &mut rng)
         .map_err(|e| format!("failed to create sealer: {e}"))?;
 
     let sealer = if let Some(json) = priv_sign_key_json {
@@ -47,12 +48,25 @@ fn seal_impl(
         sealer
     };
 
-    sealer
-        .seal(plaintext)
-        .map_err(|e| format!("seal failed: {e}"))
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("failed to create tokio runtime: {e}"))?;
+
+    rt.block_on(async {
+        let mut input = Cursor::new(plaintext);
+        let mut output = Vec::new();
+
+        sealer
+            .seal(&mut input, &mut output)
+            .await
+            .map_err(|e| format!("seal failed: {e}"))?;
+
+        Ok(output)
+    })
 }
 
-/// Seal (encrypt + sign) plaintext data using PostGuard IBE.
+/// Seal (encrypt + sign) plaintext data using PostGuard IBE (streaming mode).
 ///
 /// # Arguments
 /// - `mpk_json`: JSON string of the master public key (base64-encoded, e.g. `"\"<base64>\""`)

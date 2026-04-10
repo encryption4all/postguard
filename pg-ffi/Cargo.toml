@@ -10,8 +10,10 @@ repository = "https://github.com/encryption4all/postguard"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pg-core = { path = "../pg-core", version = "0.5", features = ["rust"] }
+pg-core = { path = "../pg-core", version = "0.5", features = ["rust", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.8"
 ibe = { version = "0.3.0", features = ["cgwkv", "mkem"] }
+futures = "0.3"
+tokio = { version = "1", features = ["rt"] }
