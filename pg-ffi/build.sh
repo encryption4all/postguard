@@ -40,8 +40,8 @@ echo "Built libpg_ffi.${LIB_EXT} at ${RELEASE_DIR}/"
 
 # Copy to postguard-dotnet runtimes if the repo exists alongside this one
 DOTNET_REPO="${PG_DOTNET_REPO:-../../postguard-dotnet}"
-if [ -d "$DOTNET_REPO/src/E4A.PostGuard" ]; then
-    DEST="${DOTNET_REPO}/src/E4A.PostGuard/runtimes/${RID}/native"
+if [ -d "$DOTNET_REPO/src" ]; then
+    DEST="${DOTNET_REPO}/src/runtimes/${RID}/native"
     mkdir -p "$DEST"
     cp "${RELEASE_DIR}/libpg_ffi.${LIB_EXT}" "$DEST/"
     echo "Copied to ${DEST}/"
