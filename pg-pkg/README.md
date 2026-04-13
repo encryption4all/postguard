@@ -12,11 +12,11 @@ results](https://irma.app/docs/irma-server/#signed-jwt-session-results).
 For its usage, see the help:
 
 ```
-irmaseal-pkg --help
+pg-pkg --help
 ```
 
 ## Running the server
-First generate of make your ibe and ibs keys use 
+First generate or make your ibe and ibs keys use 
 ```bash 
 cargo run --release --bin pg-pkg gen
 ```
