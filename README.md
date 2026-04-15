@@ -1,4 +1,4 @@
-# postguard
+# <p align="center"><img src="./img/pg_logo.svg" height="128px" alt="PostGuard" /></p>
 
 > For full documentation, visit [docs.postguard.eu](https://docs.postguard.eu/repos/postguard).
 
