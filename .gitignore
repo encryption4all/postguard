@@ -7,8 +7,3 @@ pkg_ibs.sec
 .env
 *.pem
 *.patch
-
-# Docusaurus
-website/node_modules
-website/build
-website/.docusaurus
