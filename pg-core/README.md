@@ -38,7 +38,7 @@ by the `web` feature, but only when targeting `wasm32-unknown-unknown`.
 ## Streaming vs In-memory
 
 For large or arbitrary sized data streams, enable the `stream` feature. In this mode, during
-decryption, each segment of the payload is seperately authenticated, this makes the data safe
+decryption, each segment of the payload is separately authenticated, this makes the data safe
 for downstream consumers before the stream has been exhausted. Note that it is up to the
 developer to choose which is suitable for their application. Only use the in-memory variant if
 you are absolutely sure that you are _exclusively_ encrypting small messages.
