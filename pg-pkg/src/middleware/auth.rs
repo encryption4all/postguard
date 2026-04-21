@@ -126,12 +126,11 @@ impl ApiKeyStore for PgApiKeyStore {
 
         // Best-effort touch of last_used_at. Failures here must not prevent
         // the request from succeeding.
-        if let Err(e) = sqlx::query(
-            "UPDATE business_api_keys SET last_used_at = NOW() WHERE key_hash = $1",
-        )
-        .bind(&key_hash)
-        .execute(&self.pool)
-        .await
+        if let Err(e) =
+            sqlx::query("UPDATE business_api_keys SET last_used_at = NOW() WHERE key_hash = $1")
+                .bind(&key_hash)
+                .execute(&self.pool)
+                .await
         {
             log::warn!("failed to update business_api_keys.last_used_at: {e}");
         }
@@ -147,7 +146,11 @@ impl ApiKeyStore for PgApiKeyStore {
         // If the business portal turns off `email` the signing identity simply
         // won't include it; the portal UI enforces "at least one attribute
         // selected" so we do not enforce that again here.
-        let email = if flag("email") { org_email } else { String::new() };
+        let email = if flag("email") {
+            org_email
+        } else {
+            String::new()
+        };
         let organisation_name = if flag("orgName") && !org_name.is_empty() {
             Some(org_name)
         } else {
