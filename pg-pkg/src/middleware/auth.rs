@@ -104,9 +104,10 @@ impl ApiKeyStore for PgApiKeyStore {
             ),
         >(
             r#"
-            SELECT o.email, o.name, o.phone, o.kvk_number, k.signing_attrs
+            SELECT o.signing_email, o.name, u.phone, o.kvk_number, k.signing_attrs
             FROM business_api_keys k
             JOIN organizations o ON o.id = k.org_id
+            LEFT JOIN users u ON u.id = o.contact_user_id
             WHERE k.key_hash = $1
               AND k.expires_at > NOW()
               AND k.revoked_at IS NULL
