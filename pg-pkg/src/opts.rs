@@ -55,7 +55,9 @@ pub struct ServerOpts {
     #[clap(short, long, default_value = "8087")]
     pub port: String,
 
-    /// PostgreSQL database connection URL.
+    /// PostgreSQL connection URL for the postguard-business database.
+    /// When present, enables API-key authentication by validating `PG-`
+    /// prefixed Bearer tokens against `business_api_keys`.
     #[clap(short, long, env = "DATABASE_URL", value_hint = ValueHint::Url)]
     pub database_url: Option<String>,
 

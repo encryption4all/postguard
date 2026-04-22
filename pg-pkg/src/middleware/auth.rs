@@ -8,6 +8,7 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
+use sha2::{Digest, Sha256};
 use std::rc::Rc;
 
 use irma::*;
@@ -25,7 +26,10 @@ pub(crate) struct AuthResult {
     pub exp: Option<u64>,
 }
 
-/// Result of an API key lookup.
+/// Result of an API key lookup. Values populated from the `organizations` row
+/// referenced by the matched `business_api_keys` entry on the postguard-business
+/// database. Which attributes are actually signed is controlled by
+/// `signing_attrs` — see [`PgApiKeyStore::lookup`].
 #[derive(Debug, Clone)]
 pub struct ApiKeyData {
     pub email: String,
@@ -55,7 +59,19 @@ pub trait ApiKeyStore {
     async fn lookup(&self, api_key: &str) -> Result<Option<ApiKeyData>, crate::Error>;
 }
 
-/// PostgreSQL-backed API key store for production use.
+/// PostgreSQL-backed API key store that reads from the postguard-business
+/// schema (`business_api_keys` JOIN `organizations`).
+///
+/// Raw `PG-<base64url>` keys issued by the business portal are SHA-256 hashed
+/// on the business side; the raw key is never stored. This store takes the raw
+/// key from the Authorization header, hashes it, and looks up the hash.
+///
+/// The per-attribute `signing_attrs` JSONB configured in the business portal
+/// determines which organisation attributes are disclosed in the signing
+/// identity. `signing_attrs: true` → attribute is included as public;
+/// `signing_attrs: false` → attribute is omitted. The public/private split
+/// that existed in the legacy pg-pkg `api_keys` schema is not currently
+/// expressible in the business schema — see PR discussion on issue #140.
 #[derive(Clone)]
 pub struct PgApiKeyStore {
     pool: sqlx::PgPool,
@@ -67,53 +83,94 @@ impl PgApiKeyStore {
     }
 }
 
+fn sha256_hex(input: &str) -> String {
+    let digest = Sha256::digest(input.as_bytes());
+    hex::encode(digest)
+}
+
 #[async_trait::async_trait(?Send)]
 impl ApiKeyStore for PgApiKeyStore {
     async fn lookup(&self, api_key: &str) -> Result<Option<ApiKeyData>, crate::Error> {
+        let key_hash = sha256_hex(api_key);
+
         let result = sqlx::query_as::<
             _,
             (
                 String,
+                String,
                 Option<String>,
                 Option<String>,
-                Option<String>,
-                bool,
-                bool,
-                bool,
+                serde_json::Value,
             ),
         >(
             r#"
-            SELECT email, organisation_name, phone_number, kvk_number,
-                   organisation_name_public, phone_number_public, kvk_number_public
-            FROM api_keys
-            WHERE api_key = $1 AND expires_at > NOW()
+            SELECT o.signing_email, o.name, u.phone, o.kvk_number, k.signing_attrs
+            FROM business_api_keys k
+            JOIN organizations o ON o.id = k.org_id
+            LEFT JOIN users u ON u.id = o.contact_user_id
+            WHERE k.key_hash = $1
+              AND k.expires_at > NOW()
+              AND k.revoked_at IS NULL
             "#,
         )
-        .bind(api_key)
+        .bind(&key_hash)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|_| crate::Error::Unexpected)?;
+        .map_err(|e| {
+            log::error!("business_api_keys lookup failed: {e}");
+            crate::Error::Unexpected
+        })?;
 
-        match result {
-            Some((
-                email,
-                organisation_name,
-                phone_number,
-                kvk_number,
-                organisation_name_public,
-                phone_number_public,
-                kvk_number_public,
-            )) => Ok(Some(ApiKeyData {
-                email,
-                organisation_name,
-                phone_number,
-                kvk_number,
-                organisation_name_public,
-                phone_number_public,
-                kvk_number_public,
-            })),
-            None => Ok(None),
+        let Some((org_email, org_name, org_phone, org_kvk, signing_attrs)) = result else {
+            return Ok(None);
+        };
+
+        // Best-effort touch of last_used_at. Failures here must not prevent
+        // the request from succeeding.
+        if let Err(e) =
+            sqlx::query("UPDATE business_api_keys SET last_used_at = NOW() WHERE key_hash = $1")
+                .bind(&key_hash)
+                .execute(&self.pool)
+                .await
+        {
+            log::warn!("failed to update business_api_keys.last_used_at: {e}");
         }
+
+        let flag = |k: &str| -> bool {
+            signing_attrs
+                .get(k)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        };
+
+        // signing_attrs:true → include as public; signing_attrs:false → omit.
+        // If the business portal turns off `email` the signing identity simply
+        // won't include it; the portal UI enforces "at least one attribute
+        // selected" so we do not enforce that again here.
+        let email = if flag("email") {
+            org_email
+        } else {
+            String::new()
+        };
+        let organisation_name = if flag("orgName") && !org_name.is_empty() {
+            Some(org_name)
+        } else {
+            None
+        };
+        let phone_number = org_phone.filter(|v| !v.is_empty() && flag("phone"));
+        let kvk_number = org_kvk.filter(|v| !v.is_empty() && flag("kvkNumber"));
+
+        // The business schema has no public/private split — every enabled
+        // attribute is published in the signing identity.
+        Ok(Some(ApiKeyData {
+            email,
+            organisation_name,
+            phone_number,
+            kvk_number,
+            organisation_name_public: true,
+            phone_number_public: true,
+            kvk_number_public: true,
+        }))
     }
 }
 
@@ -208,11 +265,15 @@ where
                         .ok_or(crate::Error::APIKeyInvalid)?;
 
                     // Build pub/priv attribute lists from the structured fields.
-                    // Email is always public.
-                    let mut pub_attrs = vec![Attribute::new(
-                        "pbdf.sidn-pbdf.email.email",
-                        Some(&key_data.email),
-                    )];
+                    // Email is only included when the business portal enabled
+                    // `signing_attrs.email`; an empty string signals disabled.
+                    let mut pub_attrs: Vec<Attribute> = Vec::new();
+                    if !key_data.email.is_empty() {
+                        pub_attrs.push(Attribute::new(
+                            "pbdf.sidn-pbdf.email.email",
+                            Some(&key_data.email),
+                        ));
+                    }
                     let mut priv_attrs: Vec<Attribute> = Vec::new();
 
                     let optional_fields: &[(Option<&str>, bool, &str)] = &[
@@ -531,5 +592,16 @@ pub mod tests {
 
         let result = store.lookup("nonexistent-key").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_sha256_hex_matches_business_portal_format() {
+        // Matches `createHash('sha256').update(raw).digest('hex')` used by
+        // postguard-business/src/lib/server/services/api-keys.ts. Pinning this
+        // value guarantees both sides agree on the hash encoding.
+        assert_eq!(
+            sha256_hex("PG-test-key"),
+            "85e74a724a8252e6b9feeb05c47e452de5a9ab9eda70ebfa7cdee7dc78b369dd"
+        );
     }
 }

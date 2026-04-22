@@ -40,7 +40,10 @@ lazy_static! {
     .expect("could not initialize metrics");
 }
 
-/// Guard that checks if the Authorization header contains an API key (starts with "PG-API-")
+/// Guard that checks if the Authorization header contains a postguard-business
+/// API key. Business-issued keys are `PG-<base64url>` (see
+/// `postguard-business/src/lib/server/services/api-keys.ts`). JWTs and IRMA
+/// tokens fall through to other routes.
 struct ApiKeyGuard;
 
 impl Guard for ApiKeyGuard {
@@ -50,10 +53,9 @@ impl Guard for ApiKeyGuard {
             .get(header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
             .map(|auth| {
-                // Check if it's a Bearer token and starts with "PG-API-"
                 auth.strip_prefix("Bearer ")
                     .or_else(|| auth.strip_prefix("bearer "))
-                    .map(|token| token.starts_with("PG-API-"))
+                    .map(|token| token.starts_with("PG-"))
                     .unwrap_or(false)
             })
             .unwrap_or(false)
@@ -89,7 +91,10 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // Create database pool if database_url is provided
+    // Connect to the postguard-business database for API-key validation.
+    // pg-pkg does NOT own this schema and does not run migrations — the
+    // `organizations` and `business_api_keys` tables are owned by the
+    // postguard-business service.
     let db_pool = match &database_url {
         Some(url) => {
             let pool = PgPoolOptions::new()
@@ -97,21 +102,16 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                 .connect(url)
                 .await
                 .map_err(|e| {
-                    log::error!("Failed to connect to database: {}", e);
-                    PKGError::Setup(format!("Failed to connect to database: {}", e))
+                    log::error!("Failed to connect to business database: {}", e);
+                    PKGError::Setup(format!("Failed to connect to business database: {}", e))
                 })?;
-            sqlx::migrate!("./migrations")
-                .run(&pool)
-                .await
-                .map_err(|e| {
-                    log::error!("Failed to run database migrations: {}", e);
-                    PKGError::Setup(format!("Failed to run database migrations: {}", e))
-                })?;
-            log::info!("Connected to PostgreSQL database and ran migrations");
+            log::info!("Connected to postguard-business database for API-key validation");
             Some(Data::new(pool))
         }
         None => {
-            log::info!("No database URL provided, running without database");
+            log::info!(
+                "No business database URL provided; API-key authentication will be disabled"
+            );
             None
         }
     };
@@ -204,7 +204,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                                     .route(web::get().to(handlers::key::<CGWKV>)),
                             );
 
-                        // API Key authentication (when header starts with "PG-API-")
+                        // API Key authentication (when header starts with "PG-")
                         // Only register this service when a database pool is configured
                         if let Some(ref pool) = db_pool {
                             irma_scope = irma_scope.service(
@@ -642,7 +642,7 @@ pub(crate) mod tests {
     #[actix_web::test]
     async fn test_api_key_signing_email_only() {
         let (app, _) = setup_api_key_test_with_mock_store(
-            "PG-API-valid-key".to_string(),
+            "PG-valid-key".to_string(),
             default_api_key_data("test@example.com"),
         )
         .await;
@@ -654,7 +654,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -674,7 +674,7 @@ pub(crate) mod tests {
     #[actix_web::test]
     async fn test_api_key_signing_invalid_key() {
         let (app, _) = setup_api_key_test_with_mock_store(
-            "PG-API-valid-key".to_string(),
+            "PG-valid-key".to_string(),
             default_api_key_data("test@example.com"),
         )
         .await;
@@ -686,7 +686,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-invalid-key"))
+            .insert_header(("Authorization", "Bearer PG-invalid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -706,7 +706,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-invalid-key"))
+            .insert_header(("Authorization", "Bearer PG-invalid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -718,7 +718,7 @@ pub(crate) mod tests {
     async fn test_api_key_signing_round_trip() {
         let mut rng = thread_rng();
         let (app, ibs_pk) = setup_api_key_test_with_mock_store(
-            "PG-API-valid-key".to_string(),
+            "PG-valid-key".to_string(),
             default_api_key_data("test@example.com"),
         )
         .await;
@@ -730,7 +730,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -754,7 +754,7 @@ pub(crate) mod tests {
     #[actix_web::test]
     async fn test_api_key_signing_with_public_phone() {
         let (app, _) = setup_api_key_test_with_mock_store(
-            "PG-API-valid-key".to_string(),
+            "PG-valid-key".to_string(),
             ApiKeyData {
                 email: "test@example.com".to_string(),
                 organisation_name: None,
@@ -774,7 +774,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -799,7 +799,7 @@ pub(crate) mod tests {
     #[actix_web::test]
     async fn test_api_key_signing_with_private_phone() {
         let (app, _) = setup_api_key_test_with_mock_store(
-            "PG-API-valid-key".to_string(),
+            "PG-valid-key".to_string(),
             ApiKeyData {
                 email: "test@example.com".to_string(),
                 organisation_name: None,
@@ -819,7 +819,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -843,7 +843,7 @@ pub(crate) mod tests {
     #[actix_web::test]
     async fn test_api_key_signing_all_fields() {
         let (app, _) = setup_api_key_test_with_mock_store(
-            "PG-API-valid-key".to_string(),
+            "PG-valid-key".to_string(),
             ApiKeyData {
                 email: "test@example.com".to_string(),
                 organisation_name: Some("Acme Corp".to_string()),
@@ -863,7 +863,7 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::post()
             .uri("/v2/sign/key")
-            .insert_header(("Authorization", "Bearer PG-API-valid-key"))
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
             .set_json(&skr)
             .to_request();
 
@@ -921,14 +921,14 @@ pub(crate) mod tests {
 
         let req = test::TestRequest::get()
             .uri("/api-key")
-            .insert_header(("Authorization", "Bearer PG-API-test-key"))
+            .insert_header(("Authorization", "Bearer PG-test-key"))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let req = test::TestRequest::get()
             .uri("/api-key")
-            .insert_header(("Authorization", "bearer PG-API-test-key"))
+            .insert_header(("Authorization", "bearer PG-test-key"))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());

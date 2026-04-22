@@ -35,7 +35,11 @@ Rest can be found in the help command or `/src/opts.rs` (you're unlikely to need
 - `--token` (`-t`) [required]
   - This sets the token for the aforementioned irma server to allow you to request it see more [here](https://docs.yivi.app/irma-server#requestor-authentication).
 - `--database_url` (`-d`)
-  - This sets the postgres database url if you wanna use API keys must be something like: `postgres://USER:PASSWORD@HOST/DATABASE`
+  - Postgres connection URL for the **postguard-business** database. When set,
+    the PKG validates `PG-…` API keys against `business_api_keys` (hashing the
+    Bearer token with SHA-256 and joining on `organizations`). Format:
+    `postgres://USER:PASSWORD@HOST/DATABASE`. Migrations for this schema are
+    owned by the postguard-business service, not pg-pkg.
 
 ## Development setup for API keys with Docker
 You can use the provided `docker-compose.dev.yml` file to quickly spin up a development environment with Postgres and an IRMA server.
@@ -131,7 +135,9 @@ was valid and all the claimed attributes were present. A key is derived from the
 ### `POST /v2/irma/sign/key`
 
 Retrieves signing key(s). The request must include a HTTP Authorization header
-`Authorization: Bearer <JWT>` or `Authorization: Bearer PG-API-<API KEY HERE>`. The body must include under which identities a user wants to sign.
+`Authorization: Bearer <JWT>` or `Authorization: Bearer PG-<API KEY>` (API keys
+are issued by the postguard-business portal and begin with the `PG-` prefix).
+The body must include under which identities a user wants to sign.
 
 ```JSON
 {
@@ -167,11 +173,13 @@ The response looks similar as `GET /v2/irma/key/{timestamp}`, except with signin
 
 
 ## Adding API keys
-To add API keys you need to manually run Postgres SQL for now.
-Connect to your database and run:
-```sql
-INSERT INTO "api_keys" ("key", "email", "attributes", "expires_at")
-VALUES ('PG-API-hello', 'test@test.com', '{"t": "pbdf.sidn-pbdf.email.email", "v": "example@example.com"}',
-        '3000-01-08 04:05:06');
-```
-this command is also ran on the development docker compose file. 
+
+API keys are created through the
+[postguard-business](https://github.com/encryption4all/postguard-business)
+portal (Organization → API keys → Create). A newly-created key is shown to
+the user once, never stored in plaintext, and hashed with SHA-256 before
+being written to `business_api_keys.key_hash`.
+
+When the PKG is pointed at the business database (via `DATABASE_URL`), any
+`PG-…` Bearer token will be validated against that table. No SQL migration or
+manual row insertion on the PKG side is required.
