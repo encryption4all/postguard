@@ -89,6 +89,11 @@ pub struct ServerOpts {
     /// default), but is discouraged for production deployments that handle
     /// key material. Example:
     /// `--allowed-origins https://postguard.eu,https://postguard.nl`.
-    #[clap(long, env = "PKG_ALLOWED_ORIGINS", default_value = "*", value_delimiter = ',')]
+    #[clap(
+        long,
+        env = "PKG_ALLOWED_ORIGINS",
+        default_value = "*",
+        value_delimiter = ','
+    )]
     pub allowed_origins: Vec<String>,
 }
