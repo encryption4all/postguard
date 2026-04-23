@@ -136,13 +136,13 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
     /// Create a new [`Unsealer`].
     pub fn new(input: impl AsRef<[u8]>, vk: &VerifyingKey) -> Result<Self, Error> {
         let b = input.as_ref();
-        let (preamble_bytes, b) = b.split_at(PREAMBLE_SIZE);
+        let (preamble_bytes, b) = try_split_at(b, PREAMBLE_SIZE, "preamble")?;
         let (version, header_len) = preamble_checked(preamble_bytes)?;
 
-        let (header_bytes, b) = b.split_at(header_len);
-        let (h_sig_len_bytes, b) = b.split_at(SIG_SIZE_SIZE);
+        let (header_bytes, b) = try_split_at(b, header_len, "header")?;
+        let (h_sig_len_bytes, b) = try_split_at(b, SIG_SIZE_SIZE, "header signature length")?;
         let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into()?);
-        let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);
+        let (h_sig_bytes, ct) = try_split_at(b, h_sig_len as usize, "header signature")?;
 
         let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
         let id = h_sig_ext.pol.derive_ibs()?;
@@ -321,5 +321,54 @@ mod tests {
             .unseal("Daniel", &usk);
 
         assert!(matches!(res, Err(Error::UnknownIdentifier(_))));
+    }
+
+    #[test]
+    fn test_unseal_rejects_empty_input() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let res = Unsealer::<_, UnsealerMemoryConfig>::new(&[] as &[u8], &setup.ibs_pk);
+        // Must not panic — should surface as NotPostGuard / FormatViolation.
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_unseal_rejects_truncated_after_preamble() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let pub_sign_key = &setup.signing_keys[0];
+        let priv_sign_key = &setup.signing_keys[1];
+
+        let sealed = Sealer::<_, SealerMemoryConfig>::new(
+            &setup.ibe_pk,
+            &setup.policy,
+            &pub_sign_key,
+            &mut rng,
+        )
+        .unwrap()
+        .with_priv_signing_key(priv_sign_key.clone())
+        .seal(b"SECRET DATA")
+        .unwrap();
+
+        // Keep the full preamble (so header_len parses) but truncate the body.
+        let mut truncated = sealed;
+        truncated.truncate(PREAMBLE_SIZE + 1);
+
+        let res = Unsealer::<_, UnsealerMemoryConfig>::new(truncated, &setup.ibs_pk);
+        match res {
+            Err(Error::FormatViolation(_)) => {}
+            other => panic!("expected FormatViolation, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unseal_rejects_garbage_input() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        // 1 KiB of zeros — no valid prelude, no valid lengths.
+        let garbage = vec![0u8; 1024];
+        let res = Unsealer::<_, UnsealerMemoryConfig>::new(garbage, &setup.ibs_pk);
+        assert!(res.is_err());
     }
 }

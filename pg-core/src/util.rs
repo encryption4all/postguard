@@ -1,5 +1,6 @@
 use crate::consts::*;
 use crate::error::Error;
+use alloc::format;
 use alloc::string::String;
 
 /// Serde skip helper: returns true when the value is false.
@@ -13,6 +14,23 @@ pub(crate) fn open_ct<T>(x: subtle::CtOption<T>) -> Option<T> {
     } else {
         None
     }
+}
+
+/// Checked variant of slice::split_at: returns a FormatViolation instead of
+/// panicking when `mid` is out of bounds. Use this on any slice derived from
+/// untrusted (attacker-controllable) ciphertext.
+pub(crate) fn try_split_at<'a>(
+    b: &'a [u8],
+    mid: usize,
+    what: &'static str,
+) -> Result<(&'a [u8], &'a [u8]), Error> {
+    if mid > b.len() {
+        return Err(Error::FormatViolation(format!(
+            "{what} truncated: need {mid} bytes, have {}",
+            b.len()
+        )));
+    }
+    Ok(b.split_at(mid))
 }
 
 pub(crate) fn preamble_checked(preamble: &[u8]) -> Result<(u16, usize), Error> {

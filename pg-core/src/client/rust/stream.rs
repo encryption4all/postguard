@@ -274,12 +274,25 @@ where
         let mut pol_id: Option<(Policy, Identity)> = None;
 
         fn extract_policy(buf: &mut Vec<u8>) -> Result<Option<(Policy, Identity)>, Error> {
+            if buf.len() < POL_SIZE_SIZE {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "policy length",
+                )));
+            }
             let pol_len = u32::from_be_bytes(buf[..POL_SIZE_SIZE].try_into()?) as usize;
-            let pol_bytes = &buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len];
+            let pol_end = POL_SIZE_SIZE.checked_add(pol_len).ok_or_else(|| {
+                Error::FormatViolation(alloc::string::String::from("policy length overflow"))
+            })?;
+            if buf.len() < pol_end {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "policy truncated",
+                )));
+            }
+            let pol_bytes = &buf[POL_SIZE_SIZE..pol_end];
             let pol: Policy = bincode::deserialize(pol_bytes)?;
             let id = pol.derive_ibs()?;
 
-            buf.drain(..POL_SIZE_SIZE + pol_len);
+            buf.drain(..pol_end);
 
             Ok(Some((pol, id)))
         }
@@ -292,7 +305,11 @@ where
             counter: u32,
             is_last: bool,
         ) -> Result<&'a [u8], Error> {
-            debug_assert!(seg.len() > SIG_BYTES);
+            if seg.len() < SIG_BYTES {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "segment too short for signature",
+                )));
+            }
 
             let (m, sig_bytes) = seg.split_at(seg.len() - SIG_BYTES);
             let sig: Signature = bincode::deserialize(sig_bytes)?;

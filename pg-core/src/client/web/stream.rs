@@ -347,12 +347,25 @@ where
         fn extract_policy(
             plain: Uint8Array,
         ) -> Result<(Option<(Policy, Identity)>, Uint8Array), Error> {
+            if plain.byte_length() < POL_SIZE_SIZE as u32 {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "policy length",
+                )));
+            }
             let pol_len =
                 u32::from_be_bytes(plain.slice(0, POL_SIZE_SIZE as u32).to_vec()[..].try_into()?);
-            let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, POL_SIZE_SIZE as u32 + pol_len);
+            let pol_end = (POL_SIZE_SIZE as u32).checked_add(pol_len).ok_or_else(|| {
+                Error::FormatViolation(alloc::string::String::from("policy length overflow"))
+            })?;
+            if plain.byte_length() < pol_end {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "policy truncated",
+                )));
+            }
+            let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, pol_end);
             let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
             let id = pol.derive_ibs()?;
-            let new_plain = plain.slice(POL_SIZE_SIZE as u32 + pol_len, plain.byte_length());
+            let new_plain = plain.slice(pol_end, plain.byte_length());
 
             Ok((Some((pol, id)), new_plain))
         }
@@ -393,7 +406,12 @@ where
                         (pol_id, plain) = extract_policy(plain)?;
                     }
 
-                    debug_assert!(plain.byte_length() > SIG_BYTES as u32);
+                    if plain.byte_length() < SIG_BYTES as u32 {
+                        return Err(Error::FormatViolation(alloc::string::String::from(
+                            "segment too short for signature",
+                        ))
+                        .into());
+                    }
 
                     let m = plain.slice(0, plain.byte_length() - SIG_BYTES as u32);
                     let sig =
@@ -432,7 +450,12 @@ where
             (pol_id, final_plain) = extract_policy(final_plain)?;
         }
 
-        debug_assert!(final_plain.byte_length() > SIG_BYTES as u32);
+        if final_plain.byte_length() < SIG_BYTES as u32 {
+            return Err(Error::FormatViolation(alloc::string::String::from(
+                "final segment too short for signature",
+            ))
+            .into());
+        }
         let m = final_plain.slice(0, final_plain.byte_length() - SIG_BYTES as u32);
         let sig = final_plain.slice(
             final_plain.byte_length() - SIG_BYTES as u32,
