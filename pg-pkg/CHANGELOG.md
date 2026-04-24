@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.8...pg-pkg-v0.5.9) - 2026-04-24
+
+### Added
+
+- *(pg-pkg)* validate API keys against postguard-business schema ([#140](https://github.com/encryption4all/postguard/pull/140))
+
+### Fixed
+
+- align API key query with latest business schema
+- correct typos and outdated references in READMEs
+
+### Other
+
+- *(pg-pkg)* apply cargo fmt
+
 ## [0.5.8](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.7...pg-pkg-v0.5.8) - 2026-04-10
 
 ### Added
