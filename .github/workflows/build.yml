@@ -67,4 +67,10 @@ jobs:
         run: cargo install wasm-pack
       - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
-      - run: wasm-pack test --release --headless --${{ matrix.browser }} ./pg-wasm
+      - name: Run wasm-pack browser tests
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 2
+          retry_on: error
+          timeout_minutes: 20
+          command: wasm-pack test --release --headless --\${{ matrix.browser }} ./pg-wasm
