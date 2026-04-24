@@ -371,4 +371,108 @@ mod tests {
         let res = Unsealer::<_, UnsealerMemoryConfig>::new(garbage, &setup.ibs_pk);
         assert!(res.is_err());
     }
+
+    fn seal_memory<R: rand::RngCore + rand::CryptoRng>(setup: &TestSetup, rng: &mut R) -> Vec<u8> {
+        let pub_sign_key = &setup.signing_keys[0];
+        let priv_sign_key = &setup.signing_keys[1];
+        Sealer::<_, SealerMemoryConfig>::new(&setup.ibe_pk, &setup.policy, pub_sign_key, rng)
+            .unwrap()
+            .with_priv_signing_key(priv_sign_key.clone())
+            .seal(b"SECRET DATA")
+            .unwrap()
+    }
+
+    #[test]
+    fn test_unseal_rejects_input_shorter_than_preamble() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        // One byte short of a preamble — preamble split must fail cleanly.
+        let buf = vec![0u8; PREAMBLE_SIZE - 1];
+        match Unsealer::<_, UnsealerMemoryConfig>::new(buf, &setup.ibs_pk) {
+            Err(Error::FormatViolation(msg)) => assert!(msg.contains("preamble")),
+            other => panic!("expected FormatViolation(preamble), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unseal_rejects_truncated_inside_header() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_memory(&setup, &mut rng);
+
+        // Keep preamble intact but drop most of the header.
+        let mut truncated = sealed;
+        truncated.truncate(PREAMBLE_SIZE + 4);
+
+        match Unsealer::<_, UnsealerMemoryConfig>::new(truncated, &setup.ibs_pk) {
+            Err(Error::FormatViolation(msg)) => assert!(msg.contains("header")),
+            other => panic!("expected FormatViolation(header), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unseal_rejects_truncated_before_sig_len() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_memory(&setup, &mut rng);
+
+        // Parse the header length so we know where the sig length begins,
+        // then cut the input right before the sig length bytes.
+        let (_, header_len) =
+            preamble_checked(&sealed[..PREAMBLE_SIZE]).expect("preamble should parse");
+        let cut = PREAMBLE_SIZE + header_len;
+
+        // Ensure we're strictly before the end of the sig-length field.
+        assert!(cut + SIG_SIZE_SIZE <= sealed.len());
+
+        let truncated = sealed[..cut + 1].to_vec();
+
+        match Unsealer::<_, UnsealerMemoryConfig>::new(truncated, &setup.ibs_pk) {
+            Err(Error::FormatViolation(msg)) => {
+                assert!(msg.contains("header signature length"))
+            }
+            other => panic!(
+                "expected FormatViolation(header signature length), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_unseal_rejects_truncated_inside_sig_bytes() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_memory(&setup, &mut rng);
+
+        let (_, header_len) =
+            preamble_checked(&sealed[..PREAMBLE_SIZE]).expect("preamble should parse");
+        // Keep preamble + header + sig-length + 1 byte of sig — sig is then truncated.
+        let cut = PREAMBLE_SIZE + header_len + SIG_SIZE_SIZE + 1;
+        assert!(cut < sealed.len(), "sealed output unexpectedly short");
+
+        let truncated = sealed[..cut].to_vec();
+
+        match Unsealer::<_, UnsealerMemoryConfig>::new(truncated, &setup.ibs_pk) {
+            Err(Error::FormatViolation(msg)) => {
+                assert!(msg.contains("header signature") && !msg.contains("length"))
+            }
+            other => panic!("expected FormatViolation(header signature), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unseal_rejects_wrong_prelude() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let mut sealed = seal_memory(&setup, &mut rng);
+
+        // Flip a byte in the prelude — must fall through as NotPostGuard,
+        // never panic.
+        sealed[0] = sealed[0].wrapping_add(1);
+
+        match Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk) {
+            Err(Error::NotPostGuard) => {}
+            other => panic!("expected NotPostGuard, got {:?}", other),
+        }
+    }
 }

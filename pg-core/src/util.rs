@@ -63,3 +63,66 @@ pub(crate) fn preamble_checked(preamble: &[u8]) -> Result<(u16, usize), Error> {
 
     Ok((version, header_len))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_split_at_splits_on_exact_boundary() {
+        let buf = [1u8, 2, 3, 4];
+        let (a, b) = try_split_at(&buf, 4, "all").unwrap();
+        assert_eq!(a, &buf[..]);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn try_split_at_splits_in_the_middle() {
+        let buf = [1u8, 2, 3, 4];
+        let (a, b) = try_split_at(&buf, 2, "half").unwrap();
+        assert_eq!(a, &[1, 2]);
+        assert_eq!(b, &[3, 4]);
+    }
+
+    #[test]
+    fn try_split_at_zero_is_ok() {
+        let buf = [1u8, 2];
+        let (a, b) = try_split_at(&buf, 0, "zero").unwrap();
+        assert!(a.is_empty());
+        assert_eq!(b, &buf[..]);
+    }
+
+    #[test]
+    fn try_split_at_out_of_bounds_returns_format_violation() {
+        let buf = [1u8, 2, 3];
+        match try_split_at(&buf, 5, "tag") {
+            Err(Error::FormatViolation(msg)) => {
+                assert!(msg.contains("tag"), "expected label in message, got {msg:?}");
+                assert!(msg.contains('5'), "expected requested length in message, got {msg:?}");
+            }
+            other => panic!("expected FormatViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_split_at_empty_slice_nonzero_mid_is_err() {
+        let buf: [u8; 0] = [];
+        assert!(matches!(
+            try_split_at(&buf, 1, "empty"),
+            Err(Error::FormatViolation(_))
+        ));
+    }
+
+    #[test]
+    fn preamble_checked_rejects_short_input() {
+        let short = alloc::vec![0u8; PREAMBLE_SIZE - 1];
+        assert!(matches!(preamble_checked(&short), Err(Error::NotPostGuard)));
+    }
+
+    #[test]
+    fn preamble_checked_rejects_wrong_prelude() {
+        let mut buf = alloc::vec![0u8; PREAMBLE_SIZE];
+        buf[PRELUDE_SIZE - 1] = 0xFF;
+        assert!(matches!(preamble_checked(&buf), Err(Error::NotPostGuard)));
+    }
+}
