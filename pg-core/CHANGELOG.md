@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.10](https://github.com/encryption4all/postguard/compare/pg-core-v0.5.9...pg-core-v0.5.10) - 2026-04-24
+
+### Fixed
+
+- correct typos and outdated references in READMEs
+
+### Other
+
+- fix two spelling typos in crate-level doc comments
+
 ## [0.5.9](https://github.com/encryption4all/postguard/compare/pg-core-v0.5.8...pg-core-v0.5.9) - 2026-04-10
 
 ### Added
