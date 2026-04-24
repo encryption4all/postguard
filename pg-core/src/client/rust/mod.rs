@@ -456,7 +456,10 @@ mod tests {
             Err(Error::FormatViolation(msg)) => {
                 assert!(msg.contains("header signature") && !msg.contains("length"))
             }
-            other => panic!("expected FormatViolation(header signature), got {:?}", other),
+            other => panic!(
+                "expected FormatViolation(header signature), got {:?}",
+                other
+            ),
         }
     }
 

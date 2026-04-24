@@ -97,8 +97,14 @@ mod tests {
         let buf = [1u8, 2, 3];
         match try_split_at(&buf, 5, "tag") {
             Err(Error::FormatViolation(msg)) => {
-                assert!(msg.contains("tag"), "expected label in message, got {msg:?}");
-                assert!(msg.contains('5'), "expected requested length in message, got {msg:?}");
+                assert!(
+                    msg.contains("tag"),
+                    "expected label in message, got {msg:?}"
+                );
+                assert!(
+                    msg.contains('5'),
+                    "expected requested length in message, got {msg:?}"
+                );
             }
             other => panic!("expected FormatViolation, got {other:?}"),
         }
