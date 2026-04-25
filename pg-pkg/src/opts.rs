@@ -83,4 +83,17 @@ pub struct ServerOpts {
     /// Path to store the IBS public key.
     #[clap(long, default_value = "./pkg_ibs.pub", value_hint = ValueHint::FilePath)]
     pub ibs_public_path: String,
+
+    /// Comma-separated list of origins allowed to make cross-origin requests
+    /// to the PKG. The special value `*` allows any origin (the historical
+    /// default), but is discouraged for production deployments that handle
+    /// key material. Example:
+    /// `--allowed-origins https://postguard.eu,https://postguard.nl`.
+    #[clap(
+        long,
+        env = "PKG_ALLOWED_ORIGINS",
+        default_value = "*",
+        value_delimiter = ','
+    )]
+    pub allowed_origins: Vec<String>,
 }

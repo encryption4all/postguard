@@ -87,7 +87,21 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ibe_public_path,
         ibs_secret_path,
         ibs_public_path,
+        allowed_origins,
     } = server_opts;
+
+    let allow_any_origin = allowed_origins.iter().any(|o| o == "*");
+    if allow_any_origin {
+        log::warn!(
+            "PKG CORS: allowing any origin (\"*\"). Set --allowed-origins (or PKG_ALLOWED_ORIGINS) to a comma-separated allowlist for production."
+        );
+    } else {
+        log::info!(
+            "PKG CORS: restricting to {} allowed origin(s): {:?}",
+            allowed_origins.len(),
+            allowed_origins
+        );
+    }
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
@@ -146,16 +160,23 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     req.match_pattern().unwrap_or("-".to_string())
                 }),
             )
-            .wrap(
-                Cors::default()
-                    .allow_any_origin()
+            .wrap({
+                let mut cors = Cors::default()
                     .allowed_methods(vec!["GET", "POST"])
                     .allowed_header(header::CONTENT_TYPE)
                     .allowed_header(header::AUTHORIZATION)
                     .allowed_header(header::ETAG)
                     .allowed_header(PG_CLIENT_HEADER)
-                    .max_age(86400),
-            );
+                    .max_age(86400);
+                if allow_any_origin {
+                    cors = cors.allow_any_origin();
+                } else {
+                    for origin in &allowed_origins {
+                        cors = cors.allowed_origin(origin);
+                    }
+                }
+                cors
+            });
 
         // Add database pool to app data if available
         if let Some(ref pool) = db_pool {
