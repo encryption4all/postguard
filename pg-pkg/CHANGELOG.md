@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.10](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.9...pg-pkg-v0.5.10) - 2026-04-25
+
+### Other
+
+- Merge pull request #149 from encryption4all/fix/pkg-cors-allowlist
+
 ## [0.5.9](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.8...pg-pkg-v0.5.9) - 2026-04-24
 
 ### Added
