@@ -188,7 +188,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
             .service(
                 scope("/v2")
                     .wrap_fn(collect_metrics)
-                    .app_data(Data::new(web::JsonConfig::default().limit(1024 * 4096)))
+                    .app_data(Data::new(web::JsonConfig::default().limit(64 * 1024)))
                     .service(
                         resource("/parameters")
                             .app_data(Data::new(ibe_pd.clone()))
