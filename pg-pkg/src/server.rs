@@ -20,12 +20,12 @@ use pg_core::api::Parameters;
 use pg_core::artifacts::*;
 use pg_core::kem::cgw_kv::CGWKV;
 
-use lazy_static::lazy_static;
 use prometheus::{register_int_counter_vec, IntCounterVec};
 use sqlx::postgres::PgPoolOptions;
+use std::sync::LazyLock;
 
-lazy_static! {
-    pub(crate) static ref POSTGUARD_CLIENTS: IntCounterVec = register_int_counter_vec!(
+pub(crate) static POSTGUARD_CLIENTS: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    register_int_counter_vec!(
         "postguard_clients",
         "Contains information about PostGuard clients connecting with the PKG.",
         &[
@@ -37,8 +37,8 @@ lazy_static! {
             "status"
         ]
     )
-    .expect("could not initialize metrics");
-}
+    .expect("could not initialize metrics")
+});
 
 /// Guard that checks if the Authorization header contains a postguard-business
 /// API key. Business-issued keys are `PG-<base64url>` (see

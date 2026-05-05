@@ -122,6 +122,35 @@ macro_rules! read_keypair {
 
 read_keypair!(CGWKV);
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::PKGError;
+
+    #[test]
+    fn cgwkv_read_key_pair_missing_files_returns_error_not_panic() {
+        let result = cgwkv_read_key_pair("/nonexistent/pk", "/nonexistent/sk");
+        match result {
+            Err(PKGError::Setup(msg)) => {
+                assert!(
+                    msg.contains("public key file"),
+                    "expected message about public key file, got: {msg}"
+                );
+            }
+            other => panic!("expected Setup error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gg_read_key_pair_missing_files_returns_error_not_panic() {
+        let result = gg_read_key_pair("/nonexistent/pk", "/nonexistent/sk");
+        match result {
+            Err(PKGError::StdIO(_)) => {}
+            other => panic!("expected StdIO error, got {other:?}"),
+        }
+    }
+}
+
 pub(crate) fn gg_read_key_pair(
     pk_path: impl AsRef<Path>,
     sk_path: impl AsRef<Path>,
