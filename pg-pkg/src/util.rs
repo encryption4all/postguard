@@ -98,7 +98,7 @@ macro_rules! read_keypair {
                 const PK_LENGTH: usize = $scheme::PK_BYTES;
                 const SK_LENGTH: usize = $scheme::SK_BYTES;
 
-                let pk_bytes = std::fs::read(pk_path).unwrap();
+                let pk_bytes = std::fs::read(&pk_path).map_err(|e| PKGError::Setup(format!("could not read public key file: {e}")))?;
                 if pk_bytes.len() != PK_LENGTH {
                     return Err(PKGError::Setup("wrong pk length".to_string()));
                 }
@@ -106,7 +106,7 @@ macro_rules! read_keypair {
                 let pk_bytes = array_ref![&pk_bytes, 0, PK_LENGTH];
                 let pk = open_ct(<$scheme as IBKEM>::Pk::from_bytes(pk_bytes)).ok_or(PKGError::Setup("could not read pk".to_string()))?;
 
-                let sk_bytes = std::fs::read(sk_path).unwrap();
+                let sk_bytes = std::fs::read(&sk_path).map_err(|e| PKGError::Setup(format!("could not read secret key file: {e}")))?;
                 if sk_bytes.len() != SK_LENGTH {
                     return Err(PKGError::Setup("wrong sk length".to_string()));
                 }
