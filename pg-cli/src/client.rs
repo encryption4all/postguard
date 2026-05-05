@@ -7,25 +7,22 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{ClientBuilder, Url};
 use serde::de::DeserializeOwned;
 use std::fmt;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::time::sleep;
 use url::ParseError as UrlParseError;
 
-use lazy_static::lazy_static;
-
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-lazy_static! {
-    static ref HEADER_VAL: String = format!("unknown,unknown,cli,{PKG_VERSION}");
-    static ref HEADERS: HeaderMap = {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "X-Postguard-Client-Version",
-            HeaderValue::from_static(&HEADER_VAL),
-        );
-        headers
-    };
-}
+static HEADERS: LazyLock<HeaderMap> = LazyLock::new(|| {
+    let header_val = format!("unknown,unknown,cli,{PKG_VERSION}");
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "X-Postguard-Client-Version",
+        HeaderValue::from_str(&header_val).expect("client version header is valid ASCII"),
+    );
+    headers
+});
 
 pub struct Client<'a> {
     baseurl: &'a str,
@@ -269,5 +266,15 @@ mod tests {
         let client = Client::new("https://example.invalid/").expect("valid url");
         let url = client.create_url("v2/whatever/123").expect("joined");
         assert!(url.as_str().ends_with("/v2/whatever/123"));
+    }
+
+    #[test]
+    fn headers_contain_client_version() {
+        let value = HEADERS
+            .get("X-Postguard-Client-Version")
+            .expect("X-Postguard-Client-Version header is set");
+        let s = value.to_str().expect("header value is valid ASCII");
+        assert!(s.starts_with("unknown,unknown,cli,"));
+        assert!(s.ends_with(PKG_VERSION));
     }
 }

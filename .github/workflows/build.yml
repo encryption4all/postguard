@@ -29,7 +29,7 @@ jobs:
         workspace: [core, pkg, cli, ffi]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - if: ${{ matrix.workspace == 'core' }}
         run: cargo test --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --features test,rust,stream
@@ -43,7 +43,7 @@ jobs:
         workspace: [core, pkg, cli, ffi]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all -- --check
 
@@ -62,7 +62,7 @@ jobs:
     env:
       WASM_BINDGEN_TEST_TIMEOUT: 120
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install
         run: cargo install wasm-pack
       - if: ${{ matrix.browser == 'firefox' }}
