@@ -1,8 +1,10 @@
+use anyhow::{Context, Result};
 use qrcode::render::Pixel;
 use qrcode::Color;
 
-pub(crate) fn print_qr(qr: &irma::Qr) {
-    let code = qrcode::QrCode::new(serde_json::to_string(qr).unwrap()).unwrap();
+pub(crate) fn print_qr(qr: &irma::Qr) -> Result<()> {
+    let json = serde_json::to_string(qr).context("failed to serialize QR session pointer")?;
+    let code = qrcode::QrCode::new(json).context("failed to encode QR code")?;
     let scode = code
         .render::<char>()
         .quiet_zone(true)
@@ -12,4 +14,5 @@ pub(crate) fn print_qr(qr: &irma::Qr) {
         .build();
 
     eprintln!("\n\n{}", scode);
+    Ok(())
 }
