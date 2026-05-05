@@ -26,3 +26,5 @@ tokio = { version = "1.26.0", features = ["full"] }
 irma = "0.2.1"
 indicatif = "0.17.3"
 inquire = "0.6.0"
+anyhow = "1.0"
+url = "2"
