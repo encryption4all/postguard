@@ -204,7 +204,7 @@ function `seal` returns a new `Uint8Array`. The `Unsealer.unseal` method
 returns an array `[plain, policy]`, where `plain` is a `Uint8Array` containing
 the plaintext and `policy` is an object containing the sender's signing policy.
 
-### Leveraging Web Workers
+### Using Web Workers
 
 Since `ReadableStream` and `WritableStream` are
 [transferable](https://developer.mozilla.org/en-US/docs/Glossary/Transferable_objects),
