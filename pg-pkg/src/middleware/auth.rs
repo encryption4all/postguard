@@ -32,6 +32,10 @@ pub(crate) struct AuthResult {
 /// `signing_attrs` — see [`PgApiKeyStore::lookup`].
 #[derive(Debug, Clone)]
 pub struct ApiKeyData {
+    /// Stable tenant identifier — `organizations.id` (uuid, stringified).
+    /// Used by callers like cryptify as the per-tenant accounting key for
+    /// quotas. Not exposed in any signing identity.
+    pub org_id: String,
     pub email: String,
     pub organisation_name: Option<String>,
     pub phone_number: Option<String>,
@@ -98,13 +102,14 @@ impl ApiKeyStore for PgApiKeyStore {
             (
                 String,
                 String,
+                String,
                 Option<String>,
                 Option<String>,
                 serde_json::Value,
             ),
         >(
             r#"
-            SELECT o.signing_email, o.name, u.phone, o.kvk_number, k.signing_attrs
+            SELECT o.id::text, o.signing_email, o.name, u.phone, o.kvk_number, k.signing_attrs
             FROM business_api_keys k
             JOIN organizations o ON o.id = k.org_id
             LEFT JOIN users u ON u.id = o.contact_user_id
@@ -121,7 +126,7 @@ impl ApiKeyStore for PgApiKeyStore {
             crate::Error::Unexpected
         })?;
 
-        let Some((org_email, org_name, org_phone, org_kvk, signing_attrs)) = result else {
+        let Some((org_id, org_email, org_name, org_phone, org_kvk, signing_attrs)) = result else {
             return Ok(None);
         };
 
@@ -163,6 +168,7 @@ impl ApiKeyStore for PgApiKeyStore {
         // The business schema has no public/private split — every enabled
         // attribute is published in the signing identity.
         Ok(Some(ApiKeyData {
+            org_id,
             email,
             organisation_name,
             phone_number,
@@ -310,6 +316,11 @@ where
                         pub_attributes: pub_attrs.clone(),
                         priv_attributes: priv_attrs.clone(),
                     });
+
+                    // Expose the validated key data to handlers that just need
+                    // identity (e.g. the `/v2/api-key/validate` endpoint) without
+                    // running through signing-key issuance.
+                    req.extensions_mut().insert(key_data.clone());
 
                     // Build all attributes as disclosed for the session result.
                     let all_attrs: Vec<Attribute> =
@@ -571,6 +582,7 @@ pub mod tests {
         let store = MockApiKeyStore::new().with_key(
             "valid-key",
             ApiKeyData {
+                org_id: "00000000-0000-0000-0000-000000000001".to_string(),
                 email: "user@example.com".to_string(),
                 organisation_name: None,
                 phone_number: None,

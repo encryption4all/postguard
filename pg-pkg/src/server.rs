@@ -183,72 +183,88 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
             app = app.app_data(Data::clone(pool));
         }
 
+        let mut v2 = scope("/v2")
+            .wrap_fn(collect_metrics)
+            .app_data(Data::new(web::JsonConfig::default().limit(64 * 1024)))
+            .service(
+                resource("/parameters")
+                    .app_data(Data::new(ibe_pd.clone()))
+                    .route(web::get().to(handlers::parameters)),
+            )
+            .service(
+                resource("/sign/parameters")
+                    .app_data(Data::new(ibs_pd.clone()))
+                    .route(web::get().to(handlers::parameters)),
+            );
+
+        // `/v2/api-key/validate` — sibling services (cryptify) call this to
+        // confirm a `PG-…` key is valid and read the tenant id without going
+        // through signing-key issuance. Only registered when a database pool
+        // is configured, since validation requires the business schema.
+        if let Some(ref pool) = db_pool {
+            v2 = v2.service(
+                resource("/api-key/validate")
+                    .guard(ApiKeyGuard)
+                    .wrap(
+                        Auth::new(irma.clone(), AuthType::Key).with_db_pool(pool.as_ref().clone()),
+                    )
+                    .route(web::get().to(handlers::api_key_validate)),
+            );
+        }
+
+        v2 = v2.service({
+            let mut irma_scope = scope("/{_:(irma|request)}")
+                .service(
+                    resource("/start")
+                        .app_data(Data::new(IrmaUrl(irma.clone())))
+                        .app_data(Data::new(IrmaToken(irma_token.clone())))
+                        .route(web::post().to(handlers::start)),
+                )
+                .service(
+                    resource("/jwt/{token}")
+                        .app_data(Data::new(IrmaUrl(irma.clone())))
+                        .route(web::get().to(handlers::jwt)),
+                )
+                .service(
+                    resource("/key/{timestamp}")
+                        .app_data(Data::new(ibe_sk.clone()))
+                        .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                        .route(web::get().to(handlers::key::<CGWKV>)),
+                )
+                .service(
+                    resource("/key")
+                        .app_data(Data::new(ibe_sk))
+                        .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                        .route(web::get().to(handlers::key::<CGWKV>)),
+                );
+
+            // API Key authentication (when header starts with "PG-")
+            // Only register this service when a database pool is configured
+            if let Some(ref pool) = db_pool {
+                irma_scope = irma_scope.service(
+                    resource("/sign/key")
+                        .guard(ApiKeyGuard)
+                        .app_data(Data::new(ibs_sk.clone()))
+                        .wrap(
+                            Auth::new(irma.clone(), AuthType::Key)
+                                .with_db_pool(pool.as_ref().clone()),
+                        )
+                        .route(web::post().to(handlers::signing_key)),
+                );
+            }
+
+            // JWT authentication (fallback for all other tokens)
+            irma_scope.service(
+                resource("/sign/key")
+                    .app_data(Data::new(ibs_sk.clone()))
+                    .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                    .route(web::post().to(handlers::signing_key)),
+            )
+        });
+
         app.service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(resource("/health").route(web::get().to(handlers::health)))
-            .service(
-                scope("/v2")
-                    .wrap_fn(collect_metrics)
-                    .app_data(Data::new(web::JsonConfig::default().limit(64 * 1024)))
-                    .service(
-                        resource("/parameters")
-                            .app_data(Data::new(ibe_pd.clone()))
-                            .route(web::get().to(handlers::parameters)),
-                    )
-                    .service(
-                        resource("/sign/parameters")
-                            .app_data(Data::new(ibs_pd.clone()))
-                            .route(web::get().to(handlers::parameters)),
-                    )
-                    .service({
-                        let mut irma_scope = scope("/{_:(irma|request)}")
-                            .service(
-                                resource("/start")
-                                    .app_data(Data::new(IrmaUrl(irma.clone())))
-                                    .app_data(Data::new(IrmaToken(irma_token.clone())))
-                                    .route(web::post().to(handlers::start)),
-                            )
-                            .service(
-                                resource("/jwt/{token}")
-                                    .app_data(Data::new(IrmaUrl(irma.clone())))
-                                    .route(web::get().to(handlers::jwt)),
-                            )
-                            .service(
-                                resource("/key/{timestamp}")
-                                    .app_data(Data::new(ibe_sk.clone()))
-                                    .wrap(Auth::new(irma.clone(), AuthType::Jwt))
-                                    .route(web::get().to(handlers::key::<CGWKV>)),
-                            )
-                            .service(
-                                resource("/key")
-                                    .app_data(Data::new(ibe_sk))
-                                    .wrap(Auth::new(irma.clone(), AuthType::Jwt))
-                                    .route(web::get().to(handlers::key::<CGWKV>)),
-                            );
-
-                        // API Key authentication (when header starts with "PG-")
-                        // Only register this service when a database pool is configured
-                        if let Some(ref pool) = db_pool {
-                            irma_scope = irma_scope.service(
-                                resource("/sign/key")
-                                    .guard(ApiKeyGuard)
-                                    .app_data(Data::new(ibs_sk.clone()))
-                                    .wrap(
-                                        Auth::new(irma.clone(), AuthType::Key)
-                                            .with_db_pool(pool.as_ref().clone()),
-                                    )
-                                    .route(web::post().to(handlers::signing_key)),
-                            );
-                        }
-
-                        // JWT authentication (fallback for all other tokens)
-                        irma_scope.service(
-                            resource("/sign/key")
-                                .app_data(Data::new(ibs_sk.clone()))
-                                .wrap(Auth::new(irma.clone(), AuthType::Jwt))
-                                .route(web::post().to(handlers::signing_key)),
-                        )
-                    }),
-            )
+            .service(v2)
     })
     .bind(format!("{host}:{port}"))?
     .shutdown_timeout(1)
@@ -619,6 +635,7 @@ pub(crate) mod tests {
 
     fn default_api_key_data(email: &str) -> ApiKeyData {
         ApiKeyData {
+            org_id: "00000000-0000-0000-0000-000000000001".to_string(),
             email: email.to_string(),
             organisation_name: None,
             phone_number: None,
@@ -777,6 +794,7 @@ pub(crate) mod tests {
         let (app, _) = setup_api_key_test_with_mock_store(
             "PG-valid-key".to_string(),
             ApiKeyData {
+                org_id: "00000000-0000-0000-0000-000000000001".to_string(),
                 email: "test@example.com".to_string(),
                 organisation_name: None,
                 phone_number: Some("+31612345678".to_string()),
@@ -822,6 +840,7 @@ pub(crate) mod tests {
         let (app, _) = setup_api_key_test_with_mock_store(
             "PG-valid-key".to_string(),
             ApiKeyData {
+                org_id: "00000000-0000-0000-0000-000000000001".to_string(),
                 email: "test@example.com".to_string(),
                 organisation_name: None,
                 phone_number: Some("+31612345678".to_string()),
@@ -866,6 +885,7 @@ pub(crate) mod tests {
         let (app, _) = setup_api_key_test_with_mock_store(
             "PG-valid-key".to_string(),
             ApiKeyData {
+                org_id: "00000000-0000-0000-0000-000000000001".to_string(),
                 email: "test@example.com".to_string(),
                 organisation_name: Some("Acme Corp".to_string()),
                 phone_number: Some("+31612345678".to_string()),
@@ -990,6 +1010,107 @@ pub(crate) mod tests {
             .uri("/api-key")
             .insert_header(("Authorization", "Bearer "))
             .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    async fn setup_api_key_validate_test(
+        key: String,
+        data: ApiKeyData,
+    ) -> impl Service<Request, Response = ServiceResponse, Error = Error> {
+        let irma = "https://irma.example.org".to_string();
+
+        let mock_store = if key.is_empty() {
+            MockApiKeyStore::new()
+        } else {
+            MockApiKeyStore::new().with_key(key, data)
+        };
+
+        test::init_service(
+            App::new().service(
+                scope("/v2").service(
+                    resource("/api-key/validate")
+                        .guard(ApiKeyGuard)
+                        .wrap(Auth::new(irma.clone(), AuthType::Key).with_api_key_store(mock_store))
+                        .route(web::get().to(handlers::api_key_validate)),
+                ),
+            ),
+        )
+        .await
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_validate_success_returns_tenant_id() {
+        let mut data = default_api_key_data("test@example.com");
+        data.org_id = "11111111-2222-3333-4444-555555555555".to_string();
+        data.organisation_name = Some("Acme".to_string());
+
+        let app = setup_api_key_validate_test("PG-valid-key".to_string(), data).await;
+
+        let req = test::TestRequest::get()
+            .uri("/v2/api-key/validate")
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body: serde_json::Value = test::try_read_body_json(resp).await.unwrap();
+        assert_eq!(body["tenant_id"], "11111111-2222-3333-4444-555555555555");
+        assert_eq!(body["organisation_name"], "Acme");
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_validate_unknown_key_rejected() {
+        let app = setup_api_key_validate_test(
+            "PG-valid-key".to_string(),
+            default_api_key_data("test@example.com"),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/v2/api-key/validate")
+            .insert_header(("Authorization", "Bearer PG-not-the-key"))
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await;
+        assert!(resp.is_err(), "Expected error for unknown API key");
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_validate_missing_bearer_404() {
+        // No Authorization header at all → ApiKeyGuard rejects → 404 (no
+        // matching route), since the route only registers on PG-prefixed
+        // bearer tokens.
+        let app = setup_api_key_validate_test(
+            "PG-valid-key".to_string(),
+            default_api_key_data("test@example.com"),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/v2/api-key/validate")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_api_key_validate_non_pg_bearer_404() {
+        // A non-PG bearer (e.g. a JWT) should fall through the guard and 404,
+        // not get routed into the API-key validator.
+        let app = setup_api_key_validate_test(
+            "PG-valid-key".to_string(),
+            default_api_key_data("test@example.com"),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/v2/api-key/validate")
+            .insert_header(("Authorization", "Bearer eyJhbGc.notapgkey"))
+            .to_request();
+
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
     }

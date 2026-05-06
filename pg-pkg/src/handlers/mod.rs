@@ -1,3 +1,4 @@
+mod api_key_validate;
 mod health;
 mod jwt;
 mod key;
@@ -6,6 +7,7 @@ mod parameters;
 mod signing_key;
 mod start;
 
+pub use api_key_validate::*;
 pub use health::*;
 pub use jwt::*;
 pub use key::*;
