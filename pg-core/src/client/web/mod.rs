@@ -149,13 +149,13 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
     /// Create a new [`Unsealer`].
     pub fn new(input: &Uint8Array, vk: &VerifyingKey) -> Result<Self, Error> {
         let b = input.to_vec();
-        let (preamble_bytes, b) = b.split_at(PREAMBLE_SIZE);
+        let (preamble_bytes, b) = try_split_at(&b, PREAMBLE_SIZE, "preamble")?;
         let (version, header_len) = preamble_checked(preamble_bytes)?;
 
-        let (header_bytes, b) = b.split_at(header_len);
-        let (h_sig_len_bytes, b) = b.split_at(SIG_SIZE_SIZE);
+        let (header_bytes, b) = try_split_at(b, header_len, "header")?;
+        let (h_sig_len_bytes, b) = try_split_at(b, SIG_SIZE_SIZE, "header signature length")?;
         let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into()?);
-        let (h_sig_bytes, ct) = b.split_at(h_sig_len as usize);
+        let (h_sig_bytes, ct) = try_split_at(b, h_sig_len as usize, "header signature")?;
 
         let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
         let id = h_sig_ext.pol.derive_ibs()?;

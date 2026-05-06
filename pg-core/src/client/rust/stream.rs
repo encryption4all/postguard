@@ -274,12 +274,25 @@ where
         let mut pol_id: Option<(Policy, Identity)> = None;
 
         fn extract_policy(buf: &mut Vec<u8>) -> Result<Option<(Policy, Identity)>, Error> {
+            if buf.len() < POL_SIZE_SIZE {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "policy length",
+                )));
+            }
             let pol_len = u32::from_be_bytes(buf[..POL_SIZE_SIZE].try_into()?) as usize;
-            let pol_bytes = &buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len];
+            let pol_end = POL_SIZE_SIZE.checked_add(pol_len).ok_or_else(|| {
+                Error::FormatViolation(alloc::string::String::from("policy length overflow"))
+            })?;
+            if buf.len() < pol_end {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "policy truncated",
+                )));
+            }
+            let pol_bytes = &buf[POL_SIZE_SIZE..pol_end];
             let pol: Policy = bincode::deserialize(pol_bytes)?;
             let id = pol.derive_ibs()?;
 
-            buf.drain(..POL_SIZE_SIZE + pol_len);
+            buf.drain(..pol_end);
 
             Ok(Some((pol, id)))
         }
@@ -292,7 +305,11 @@ where
             counter: u32,
             is_last: bool,
         ) -> Result<&'a [u8], Error> {
-            debug_assert!(seg.len() > SIG_BYTES);
+            if seg.len() < SIG_BYTES {
+                return Err(Error::FormatViolation(alloc::string::String::from(
+                    "segment too short for signature",
+                )));
+            }
 
             let (m, sig_bytes) = seg.split_at(seg.len() - SIG_BYTES);
             let sig: Signature = bincode::deserialize(sig_bytes)?;
@@ -620,5 +637,63 @@ mod tests {
 
         assert_eq!(input.into_inner().to_vec(), original);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stream_unseal_rejects_empty_input() {
+        use futures::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // Empty reader must not panic — the preamble read should fail cleanly.
+        let mut input = Cursor::new(Vec::<u8>::new());
+        let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
+        assert!(matches!(res, Err(Error::NotPostGuard)));
+    }
+
+    #[tokio::test]
+    async fn test_stream_unseal_rejects_truncated_preamble() {
+        use futures::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // A few bytes — enough to look like the start of a preamble but
+        // not enough to finish reading one.
+        let mut input = Cursor::new(vec![0u8; PREAMBLE_SIZE - 1]);
+        let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
+        assert!(matches!(res, Err(Error::NotPostGuard)));
+    }
+
+    #[tokio::test]
+    async fn test_stream_unseal_rejects_garbage_input() {
+        use futures::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        // 4 KiB of zeros — the prelude check rejects this before any unchecked
+        // length-prefixed read can panic.
+        let mut input = Cursor::new(vec![0u8; 4096]);
+        let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stream_unseal_rejects_flipped_prelude() {
+        use futures::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let mut ct = seal_helper(&setup, b"SECRET DATA");
+
+        // Flip a byte in the prelude — must be rejected as NotPostGuard,
+        // never panic.
+        ct[0] = ct[0].wrapping_add(1);
+
+        let mut input = Cursor::new(ct);
+        let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
+        assert!(matches!(res, Err(Error::NotPostGuard)));
     }
 }
