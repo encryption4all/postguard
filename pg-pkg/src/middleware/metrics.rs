@@ -41,7 +41,14 @@ pub(crate) fn collect_metrics<
 
         if let Some([a, b, c, d, e]) = values {
             POSTGUARD_CLIENTS
-                .with_label_values(&[&a, &b, &c, &d, &e, status.as_str()])
+                .with_label_values(&[
+                    a.as_str(),
+                    b.as_str(),
+                    c.as_str(),
+                    d.as_str(),
+                    e.as_str(),
+                    status.as_str(),
+                ])
                 .inc();
         }
 
