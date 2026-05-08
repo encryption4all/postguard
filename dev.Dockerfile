@@ -7,6 +7,7 @@ FROM chef AS planner
 COPY pg-core ./pg-core
 COPY pg-pkg ./pg-pkg
 COPY pg-cli ./pg-cli
+COPY pg-ffi ./pg-ffi
 COPY pg-wasm ./pg-wasm
 COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
