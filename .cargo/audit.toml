@@ -1,0 +1,12 @@
+# cargo-audit configuration for postguard.
+# See https://docs.rs/cargo-audit/latest/cargo_audit/config/index.html
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — Marvin attack timing sidechannel in `rsa` 0.9.x.
+    # Pulled in transitively via `sqlx-mysql` and `jsonwebtoken`. No fixed
+    # upstream release is available (advisory still open).
+    # Tracked in encryption4all/postguard#177. Drop this entry once `rsa`
+    # ships a patched release.
+    "RUSTSEC-2023-0071",
+]
