@@ -55,12 +55,12 @@ where
     let policy = Policy { timestamp, con };
 
     log::debug!(
-        "Deriving USK for policy: timestamp={}, attributes=[{}]",
+        "Deriving USK for policy: timestamp={}, attribute_types=[{}]",
         policy.timestamp,
         policy
             .con
             .iter()
-            .map(|a| format!("{}={:?}", a.atype, a.value))
+            .map(|a| a.atype.as_str())
             .collect::<Vec<_>>()
             .join(", ")
     );
