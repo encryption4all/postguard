@@ -9,4 +9,16 @@ ignore = [
     # Tracked in encryption4all/postguard#177. Drop this entry once `rsa`
     # ships a patched release.
     "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2025-0141 — `bincode` 1.3.3 is unmaintained (INFO-level advisory;
+    # not a CVE). Upstream development has permanently ceased and the advisory
+    # covers all versions, so bumping to bincode 2.x does not clear it. The
+    # bincode README explicitly states 1.3.3 is "a complete version not in
+    # need of updates"; future pushes are reserved for CVEs only. The on-disk
+    # IBS key format in `pg-pkg` is byte-pinned to bincode v1's wire layout,
+    # so staying on 1.3.3 avoids needless churn (a v2 migration with
+    # `config::legacy()` would be cosmetic only).
+    # Tracked in encryption4all/postguard#179. Drop this entry if we migrate
+    # off bincode entirely (e.g. to postcard).
+    "RUSTSEC-2025-0141",
 ]
