@@ -93,7 +93,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         w.feed(Uint8Array::from(&VERSION_V3.to_be_bytes()[..]).into())
             .await?;
 
-        let header_vec = bincode::serialize(&self.header)?;
+        let header_vec = crate::bincode_compat::serialize(&self.header)?;
 
         w.feed(Uint8Array::from(&(header_vec.len() as u32).to_be_bytes()[..]).into())
             .await?;
@@ -106,7 +106,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
             sig: header_sig,
             pol: self.pub_sign_key.policy.clone(),
         };
-        let header_sig_bytes = bincode::serialize(&header_sig_ext)?;
+        let header_sig_bytes = crate::bincode_compat::serialize(&header_sig_ext)?;
 
         w.feed(Uint8Array::from(&(header_sig_bytes.len() as u32).to_be_bytes()[..]).into())
             .await?;
@@ -118,7 +118,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         // Check for a private signing key, otherwise fall back to the public one.
         let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
-        let pol_bytes = bincode::serialize(&signing_key.policy)?;
+        let pol_bytes = crate::bincode_compat::serialize(&signing_key.policy)?;
         let pol_len: u32 = pol_bytes.len() as u32;
 
         if pol_len + POL_SIZE_SIZE as u32 > self.config.segment_size {
@@ -162,7 +162,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
                         .chain(&counter.to_be_bytes())
                         .chain(&[0x00])
                         .sign(&signing_key.key.0, self.rng);
-                    let sig_bytes = bincode::serialize(&sig)?;
+                    let sig_bytes = crate::bincode_compat::serialize(&sig)?;
 
                     buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
 
@@ -188,7 +188,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
             .chain(&counter.to_be_bytes())
             .chain(&[0x01])
             .sign(&signing_key.key.0, self.rng);
-        let sig_bytes = bincode::serialize(&sig)?;
+        let sig_bytes = crate::bincode_compat::serialize(&sig)?;
 
         buf.set(&Uint8Array::from(&sig_bytes[..]).into(), buf_tail);
         buf_tail += SIG_BYTES as u32;
@@ -289,7 +289,7 @@ where
 
         let mut header_sig_raw = vec![0u8; header_sig_len as usize];
         read_atleast(&mut r, &mut header_sig_raw, &mut spill).await?;
-        let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
+        let h_sig_ext: SignatureExt = crate::bincode_compat::deserialize(&header_sig_raw)?;
 
         let verifier = Verifier::default().chain(&header_raw);
         let pub_id = h_sig_ext.pol.derive_ibs()?;
@@ -298,7 +298,7 @@ where
             return Err(Error::IncorrectSignature.into());
         }
 
-        let header: Header = bincode::deserialize(&header_raw)?;
+        let header: Header = crate::bincode_compat::deserialize(&header_raw)?;
         let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
@@ -363,7 +363,7 @@ where
                 )));
             }
             let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, pol_end);
-            let pol: Policy = bincode::deserialize(&pol_bytes.to_vec())?;
+            let pol: Policy = crate::bincode_compat::deserialize(&pol_bytes.to_vec())?;
             let id = pol.derive_ibs()?;
             let new_plain = plain.slice(pol_end, plain.byte_length());
 
@@ -416,7 +416,7 @@ where
                     let m = plain.slice(0, plain.byte_length() - SIG_BYTES as u32);
                     let sig =
                         plain.slice(plain.byte_length() - SIG_BYTES as u32, plain.byte_length());
-                    let sig: Signature = bincode::deserialize(&sig.to_vec())?;
+                    let sig: Signature = crate::bincode_compat::deserialize(&sig.to_vec())?;
 
                     self.verifier.update(&m.to_vec());
 
@@ -462,7 +462,7 @@ where
             final_plain.byte_length(),
         );
 
-        let sig: Signature = bincode::deserialize(&sig.to_vec())?;
+        let sig: Signature = crate::bincode_compat::deserialize(&sig.to_vec())?;
         self.verifier.update(&m.to_vec());
         if !self
             .verifier

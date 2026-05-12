@@ -185,7 +185,7 @@ impl Serialize for SigningKey {
     where
         S: Serializer,
     {
-        let bytes = bincode::serialize(&self.0).map_err(|e| {
+        let bytes = crate::bincode_compat::serialize(&self.0).map_err(|e| {
             serde::ser::Error::custom(format!("could not serialize signing key: {e}"))
         })?;
 
@@ -200,7 +200,7 @@ impl<'de> Deserialize<'de> for SigningKey {
         let mut buf = [0u8; ibs::gg::USK_BYTES];
         deserialize_bin_or_b64(&mut buf, deserializer)?;
 
-        let usk = bincode::deserialize(&buf).map_err(|e| {
+        let usk = crate::bincode_compat::deserialize(&buf).map_err(|e| {
             serde::de::Error::custom(format!("could not deserialize signing key: {e}"))
         })?;
 
@@ -218,7 +218,7 @@ impl Serialize for VerifyingKey {
     where
         S: Serializer,
     {
-        let bytes = bincode::serialize(&self.0).map_err(|e| {
+        let bytes = crate::bincode_compat::serialize(&self.0).map_err(|e| {
             serde::ser::Error::custom(format!("could not serialize public key: {e}"))
         })?;
 
@@ -233,7 +233,7 @@ impl<'de> Deserialize<'de> for VerifyingKey {
         let mut buf = [0u8; ibs::gg::PK_BYTES];
         deserialize_bin_or_b64(&mut buf, deserializer)?;
 
-        let pk: ibs::gg::PublicKey = bincode::deserialize(&buf).map_err(|e| {
+        let pk: ibs::gg::PublicKey = crate::bincode_compat::deserialize(&buf).map_err(|e| {
             serde::de::Error::custom(format!("could not deserialize public key: {e}"))
         })?;
 
@@ -343,8 +343,9 @@ mod tests {
             let KEMSetup { pk, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_pk = PublicKey::<CGWKV>(pk);
-            let pk_encoded = bincode::serialize(&wrapped_pk).unwrap();
-            let pk_decoded: PublicKey<CGWKV> = bincode::deserialize(&pk_encoded[..]).unwrap();
+            let pk_encoded = crate::bincode_compat::serialize(&wrapped_pk).unwrap();
+            let pk_decoded: PublicKey<CGWKV> =
+                crate::bincode_compat::deserialize(&pk_encoded[..]).unwrap();
 
             assert_eq!(&wrapped_pk.0, &pk_decoded.0);
         }
@@ -354,8 +355,9 @@ mod tests {
             let KEMSetup { sk, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_sk = SecretKey::<CGWKV>(sk);
-            let sk_encoded = bincode::serialize(&wrapped_sk).unwrap();
-            let sk_decoded: SecretKey<CGWKV> = bincode::deserialize(&sk_encoded[..]).unwrap();
+            let sk_encoded = crate::bincode_compat::serialize(&wrapped_sk).unwrap();
+            let sk_decoded: SecretKey<CGWKV> =
+                crate::bincode_compat::deserialize(&sk_encoded[..]).unwrap();
 
             assert_eq!(&wrapped_sk.0, &sk_decoded.0);
         }
@@ -365,8 +367,9 @@ mod tests {
             let KEMSetup { usk, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_usk = UserSecretKey::<CGWKV>(usk);
-            let usk_encoded = bincode::serialize(&wrapped_usk).unwrap();
-            let usk_decoded: UserSecretKey<CGWKV> = bincode::deserialize(&usk_encoded[..]).unwrap();
+            let usk_encoded = crate::bincode_compat::serialize(&wrapped_usk).unwrap();
+            let usk_decoded: UserSecretKey<CGWKV> =
+                crate::bincode_compat::deserialize(&usk_encoded[..]).unwrap();
 
             assert_eq!(&wrapped_usk.0, &usk_decoded.0);
         }
@@ -376,8 +379,9 @@ mod tests {
             let KEMSetup { ct, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_ct = Ciphertext::<CGWKV>(ct);
-            let ct_encoded = bincode::serialize(&wrapped_ct).unwrap();
-            let ct_decoded: Ciphertext<CGWKV> = bincode::deserialize(&ct_encoded[..]).unwrap();
+            let ct_encoded = crate::bincode_compat::serialize(&wrapped_ct).unwrap();
+            let ct_decoded: Ciphertext<CGWKV> =
+                crate::bincode_compat::deserialize(&ct_encoded[..]).unwrap();
 
             assert_eq!(&wrapped_ct.0, &ct_decoded.0);
         }
@@ -387,9 +391,9 @@ mod tests {
             let KEMSetup { mct, .. } = default_encryption_setup::<CGWKV>();
 
             let wrapped_mct = MultiRecipientCiphertext::<CGWKV>(mct);
-            let mct_encoded = bincode::serialize(&wrapped_mct).unwrap();
+            let mct_encoded = crate::bincode_compat::serialize(&wrapped_mct).unwrap();
             let mct_decoded: MultiRecipientCiphertext<CGWKV> =
-                bincode::deserialize(&mct_encoded).unwrap();
+                crate::bincode_compat::deserialize(&mct_encoded).unwrap();
 
             assert_eq!(&wrapped_mct.0.to_bytes(), &mct_decoded.0.to_bytes());
         }
@@ -441,7 +445,7 @@ mod tests {
 
             let _pk: VerifyingKey = serde_json::from_str(&pk).unwrap();
             let _usk: SigningKey = serde_json::from_str(&usk).unwrap();
-            let _sk: SecretKey = bincode::deserialize(&sk).unwrap();
+            let _sk: SecretKey = crate::bincode_compat::deserialize(&sk).unwrap();
         }
 
         macro_rules! test_serialize {
@@ -463,8 +467,8 @@ mod tests {
             test_serialize_verifying_key_bin,
             default_signing_setup,
             VerifyingKey,
-            bincode::serialize,
-            bincode::deserialize,
+            crate::bincode_compat::serialize,
+            crate::bincode_compat::deserialize,
             pk
         );
 
@@ -472,8 +476,8 @@ mod tests {
             test_serialize_signing_key_bin,
             default_signing_setup,
             SigningKey,
-            bincode::serialize,
-            bincode::deserialize,
+            crate::bincode_compat::serialize,
+            crate::bincode_compat::deserialize,
             usk
         );
 

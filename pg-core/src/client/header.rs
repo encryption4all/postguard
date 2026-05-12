@@ -231,8 +231,8 @@ mod tests {
         let (header, _ss) = Header::new(&setup.ibe_pk, &setup.policy, &mut rng).unwrap();
         let header2 = header.clone();
 
-        let v = bincode::serialize(&header).unwrap();
-        let decoded: Header = bincode::deserialize(&v).unwrap();
+        let v = crate::bincode_compat::serialize(&header).unwrap();
+        let decoded: Header = crate::bincode_compat::deserialize(&v).unwrap();
 
         assert_eq!(decoded.recipients.len(), 2);
         assert_eq!(
@@ -258,12 +258,12 @@ mod tests {
         let header3 = header.clone();
 
         // encode as binary
-        let bytes = bincode::serialize(&header).unwrap();
+        let bytes = crate::bincode_compat::serialize(&header).unwrap();
 
         // encode as JSON
         let json = serde_json::to_string(&header2).unwrap();
 
-        let decoded1: Header = bincode::deserialize(&bytes).unwrap();
+        let decoded1: Header = crate::bincode_compat::deserialize(&bytes).unwrap();
         let ss2 = decoded1
             .recipients
             .get("Bob")

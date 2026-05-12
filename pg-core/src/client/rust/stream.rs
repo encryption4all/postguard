@@ -93,7 +93,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         w.write_all(&PRELUDE).await?;
         w.write_all(&VERSION_V3.to_be_bytes()).await?;
 
-        let header_vec = bincode::serialize(&self.header)?;
+        let header_vec = crate::bincode_compat::serialize(&self.header)?;
         w.write_all(&u32::try_from(header_vec.len())?.to_be_bytes())
             .await?;
         w.write_all(&header_vec).await?;
@@ -104,7 +104,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
             sig: header_sig,
             pol: self.pub_sign_key.policy.clone(),
         };
-        let header_sig_bytes = bincode::serialize(&header_sig_ext)?;
+        let header_sig_bytes = crate::bincode_compat::serialize(&header_sig_ext)?;
 
         w.write_all(&u32::try_from(header_sig_bytes.len())?.to_be_bytes())
             .await?;
@@ -116,7 +116,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         // Check for a private signing key, otherwise fall back to the public one.
         let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
-        let pol_bytes = bincode::serialize(&signing_key.policy)?;
+        let pol_bytes = crate::bincode_compat::serialize(&signing_key.policy)?;
         let pol_len = pol_bytes.len();
 
         if pol_len + POL_SIZE_SIZE > self.config.segment_size as usize {
@@ -151,7 +151,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
                     .chain(&counter.to_be_bytes())
                     .chain(&[0x00])
                     .sign(&signing_key.key.0, self.rng);
-                bincode::serialize_into(&mut buf, &sig)?;
+                crate::bincode_compat::serialize_into_vec(&mut buf, &sig)?;
 
                 enc.encrypt_next_in_place(b"", &mut buf)?;
 
@@ -170,7 +170,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
                     .chain(&counter.to_be_bytes())
                     .chain(&[0x01])
                     .sign(&signing_key.key.0, self.rng);
-                bincode::serialize_into(&mut buf, &sig_final)?;
+                crate::bincode_compat::serialize_into_vec(&mut buf, &sig_final)?;
 
                 enc.encrypt_last_in_place(b"", &mut buf)?;
 
@@ -222,7 +222,7 @@ where
 
         r.read_to_end(&mut header_sig_raw).await?;
 
-        let h_sig_ext: SignatureExt = bincode::deserialize(&header_sig_raw)?;
+        let h_sig_ext: SignatureExt = crate::bincode_compat::deserialize(&header_sig_raw)?;
 
         let verifier = Verifier::default().chain(&header_raw);
         let pub_id = h_sig_ext.pol.derive_ibs()?;
@@ -231,7 +231,7 @@ where
             return Err(Error::IncorrectSignature);
         }
 
-        let header: Header = bincode::deserialize(&header_raw)?;
+        let header: Header = crate::bincode_compat::deserialize(&header_raw)?;
         let (segment_size, _) = stream_mode_checked(&header)?;
 
         Ok(Unsealer {
@@ -289,7 +289,7 @@ where
                 )));
             }
             let pol_bytes = &buf[POL_SIZE_SIZE..pol_end];
-            let pol: Policy = bincode::deserialize(pol_bytes)?;
+            let pol: Policy = crate::bincode_compat::deserialize(pol_bytes)?;
             let id = pol.derive_ibs()?;
 
             buf.drain(..pol_end);
@@ -312,7 +312,7 @@ where
             }
 
             let (m, sig_bytes) = seg.split_at(seg.len() - SIG_BYTES);
-            let sig: Signature = bincode::deserialize(sig_bytes)?;
+            let sig: Signature = crate::bincode_compat::deserialize(sig_bytes)?;
             verifier.update(m);
 
             if !verifier

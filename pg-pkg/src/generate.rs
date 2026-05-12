@@ -38,9 +38,9 @@ pub fn exec(gen_opts: &GenOpts) -> Result<(), PKGError> {
             let (ibs_pk, ibs_sk) = gg::setup(&mut rng);
 
             println!("Keys IBE and IBS key pairs generated.");
-            let ibs_pk_bytes = bincode::serialize(&ibs_pk)
+            let ibs_pk_bytes = pg_core::bincode_compat::serialize(&ibs_pk)
                 .map_err(|e| PKGError::Setup(format!("could not serialize IBS public key: {e}")))?;
-            let ibs_sk_bytes = bincode::serialize(&ibs_sk)
+            let ibs_sk_bytes = pg_core::bincode_compat::serialize(&ibs_sk)
                 .map_err(|e| PKGError::Setup(format!("could not serialize IBS secret key: {e}")))?;
 
             write_owned(ibe_public_path, ibe_pk.to_bytes().as_ref())?;
