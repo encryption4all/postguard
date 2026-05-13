@@ -27,8 +27,10 @@ pub enum Error {
     },
     /// Serde JSON error.
     Json(serde_json::Error),
-    /// Bincode serialization/deserialization error.
-    Bincode(bincode::Error),
+    /// Bincode encoding error.
+    BincodeEncode(bincode_next::error::EncodeError),
+    /// Bincode decoding error.
+    BincodeDecode(bincode_next::error::DecodeError),
     /// The recipient identifier was not found in the policies.
     UnknownIdentifier(String),
     /// Incorrect scheme version.
@@ -66,9 +68,8 @@ impl core::fmt::Display for Error {
             }
             Self::UnknownIdentifier(ident) => write!(f, "recipient unknown: {ident}"),
             Self::FormatViolation(s) => write!(f, "{s} not (correctly) found in format"),
-            Self::Bincode(e) => {
-                write!(f, "Bincode error: {e}")
-            }
+            Self::BincodeEncode(e) => write!(f, "Bincode encode error: {e}"),
+            Self::BincodeDecode(e) => write!(f, "Bincode decode error: {e}"),
             Self::Json(e) => write!(f, "JSON error: {e}"),
             Self::IncorrectSchemeVersion => write!(f, "incorrect scheme version"),
             Self::ConstraintViolation => write!(f, "constraint violation"),
@@ -89,9 +90,15 @@ impl core::fmt::Display for Error {
     }
 }
 
-impl From<bincode::Error> for Error {
-    fn from(e: bincode::Error) -> Self {
-        Self::Bincode(e)
+impl From<bincode_next::error::EncodeError> for Error {
+    fn from(e: bincode_next::error::EncodeError) -> Self {
+        Self::BincodeEncode(e)
+    }
+}
+
+impl From<bincode_next::error::DecodeError> for Error {
+    fn from(e: bincode_next::error::DecodeError) -> Self {
+        Self::BincodeDecode(e)
     }
 }
 

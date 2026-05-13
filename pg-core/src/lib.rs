@@ -173,6 +173,8 @@ extern crate alloc;
 
 pub mod api;
 pub mod artifacts;
+#[doc(hidden)]
+pub mod bincode_compat;
 pub mod consts;
 pub mod error;
 pub mod identity;

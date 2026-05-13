@@ -102,7 +102,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
             size: message.byte_length(),
         });
 
-        let header_buf = bincode::serialize(&self.header)?;
+        let header_buf = crate::bincode_compat::serialize(&self.header)?;
         out.extend_from_slice(&(header_buf.len() as u32).to_be_bytes());
         out.extend_from_slice(&header_buf);
 
@@ -114,7 +114,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
             pol: self.pub_sign_key.policy.clone(),
         };
 
-        let h_sig_ext_bytes = bincode::serialize(&h_sig_ext)?;
+        let h_sig_ext_bytes = crate::bincode_compat::serialize(&h_sig_ext)?;
         out.extend_from_slice(&(h_sig_ext_bytes.len() as u32).to_be_bytes());
         out.extend_from_slice(&h_sig_ext_bytes);
 
@@ -122,7 +122,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
         let m_sig = signer.chain(&m).sign(&m_sig_key.key.0, self.rng);
 
-        let input = bincode::serialize(&MessageAndSignature {
+        let input = crate::bincode_compat::serialize(&MessageAndSignature {
             message: m,
             sig: SignatureExt {
                 sig: m_sig,
@@ -157,7 +157,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
         let h_sig_len = u32::from_be_bytes(h_sig_len_bytes.try_into()?);
         let (h_sig_bytes, ct) = try_split_at(b, h_sig_len as usize, "header signature")?;
 
-        let h_sig_ext: SignatureExt = bincode::deserialize(h_sig_bytes)?;
+        let h_sig_ext: SignatureExt = crate::bincode_compat::deserialize(h_sig_bytes)?;
         let id = h_sig_ext.pol.derive_ibs()?;
 
         let verifier = Verifier::default().chain(&header_bytes);
@@ -166,7 +166,7 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
             return Err(Error::IncorrectSignature.into());
         }
 
-        let header: Header = bincode::deserialize(header_bytes)?;
+        let header: Header = crate::bincode_compat::deserialize(header_bytes)?;
         let message_len = match header.mode {
             Mode::InMemory { size } => size as usize,
             _ => return Err(Error::ModeNotSupported(header.mode).into()),
@@ -204,7 +204,8 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
             .await?
             .to_vec();
 
-        let msg: MessageAndSignature = bincode::deserialize(&plain).map_err(Into::<Error>::into)?;
+        let msg: MessageAndSignature =
+            crate::bincode_compat::deserialize(&plain).map_err(Into::<Error>::into)?;
         let id = msg.sig.pol.derive_ibs()?;
         let verified = self
             .verifier
