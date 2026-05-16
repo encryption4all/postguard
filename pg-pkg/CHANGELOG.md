@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.11](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.10...pg-pkg-v0.5.11) - 2026-05-16
+
+### Added
+
+- *(pg-pkg)* add /v2/api-key/validate endpoint
+
+### Fixed
+
+- *(pg-pkg)* redact attribute values from USK debug log
+- *(pg-pkg)* use &str slice for prometheus label values
+
+### Other
+
+- refresh deps and bump criterion / indicatif / qrcode / twox-hash
+- migrate from bincode 1.3.3 to bincode-next 3.0.0-rc.13
+- update dependencies
+- Merge pull request #164 from encryption4all/fix/pg-pkg-bincode-unwrap-159
+- Merge remote-tracking branch 'origin/main' into fix/pkg-hardening-139
+- Merge pull request #163 from encryption4all/fix/lazy-static-to-lazylock
+- replace lazy_static with std::sync::LazyLock
+
 ## [0.5.10](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.9...pg-pkg-v0.5.10) - 2026-04-25
 
 ### Other
