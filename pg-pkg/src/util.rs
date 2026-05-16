@@ -11,7 +11,6 @@ use crate::server::ParametersData;
 
 use arrayref::array_ref;
 use core::hash::Hasher;
-use paste::paste;
 use serde::Serialize;
 use std::path::Path;
 use std::str::FromStr;
@@ -91,36 +90,35 @@ impl ParametersData {
     }
 }
 
-macro_rules! read_keypair {
-    ($scheme: ident) => {
-        paste! {
-            pub(crate) fn [<$scheme:lower _read_key_pair>](pk_path: impl AsRef<Path>, sk_path: impl AsRef<Path>) -> Result<(<$scheme as IBKEM>::Pk, <$scheme as IBKEM>::Sk), PKGError> {
-                const PK_LENGTH: usize = $scheme::PK_BYTES;
-                const SK_LENGTH: usize = $scheme::SK_BYTES;
+pub(crate) fn cgwkv_read_key_pair(
+    pk_path: impl AsRef<Path>,
+    sk_path: impl AsRef<Path>,
+) -> Result<(<CGWKV as IBKEM>::Pk, <CGWKV as IBKEM>::Sk), PKGError> {
+    const PK_LENGTH: usize = CGWKV::PK_BYTES;
+    const SK_LENGTH: usize = CGWKV::SK_BYTES;
 
-                let pk_bytes = std::fs::read(&pk_path).map_err(|e| PKGError::Setup(format!("could not read public key file: {e}")))?;
-                if pk_bytes.len() != PK_LENGTH {
-                    return Err(PKGError::Setup("wrong pk length".to_string()));
-                }
+    let pk_bytes = std::fs::read(&pk_path)
+        .map_err(|e| PKGError::Setup(format!("could not read public key file: {e}")))?;
+    if pk_bytes.len() != PK_LENGTH {
+        return Err(PKGError::Setup("wrong pk length".to_string()));
+    }
 
-                let pk_bytes = array_ref![&pk_bytes, 0, PK_LENGTH];
-                let pk = open_ct(<$scheme as IBKEM>::Pk::from_bytes(pk_bytes)).ok_or(PKGError::Setup("could not read pk".to_string()))?;
+    let pk_bytes = array_ref![&pk_bytes, 0, PK_LENGTH];
+    let pk = open_ct(<CGWKV as IBKEM>::Pk::from_bytes(pk_bytes))
+        .ok_or(PKGError::Setup("could not read pk".to_string()))?;
 
-                let sk_bytes = std::fs::read(&sk_path).map_err(|e| PKGError::Setup(format!("could not read secret key file: {e}")))?;
-                if sk_bytes.len() != SK_LENGTH {
-                    return Err(PKGError::Setup("wrong sk length".to_string()));
-                }
+    let sk_bytes = std::fs::read(&sk_path)
+        .map_err(|e| PKGError::Setup(format!("could not read secret key file: {e}")))?;
+    if sk_bytes.len() != SK_LENGTH {
+        return Err(PKGError::Setup("wrong sk length".to_string()));
+    }
 
-                let sk_bytes = array_ref![&sk_bytes, 0, SK_LENGTH];
-                let sk = open_ct(<$scheme as IBKEM>::Sk::from_bytes(sk_bytes)).ok_or(PKGError::Setup("could not read sk".to_string()))?;
+    let sk_bytes = array_ref![&sk_bytes, 0, SK_LENGTH];
+    let sk = open_ct(<CGWKV as IBKEM>::Sk::from_bytes(sk_bytes))
+        .ok_or(PKGError::Setup("could not read sk".to_string()))?;
 
-                Ok((pk, sk))
-            }
-        }
-    };
+    Ok((pk, sk))
 }
-
-read_keypair!(CGWKV);
 
 #[cfg(test)]
 mod tests {
