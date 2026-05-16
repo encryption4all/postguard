@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.5...pg-cli-v0.3.6) - 2026-05-16
+
+### Other
+
+- refresh deps and bump criterion / indicatif / qrcode / twox-hash
+- migrate from bincode 1.3.3 to bincode-next 3.0.0-rc.13
+- Merge branch 'main' into fix/pg-cli-unwrap-156
+- replace lazy_static with std::sync::LazyLock
+
 ## [0.3.5](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.4...pg-cli-v0.3.5) - 2026-04-24
 
 ### Other

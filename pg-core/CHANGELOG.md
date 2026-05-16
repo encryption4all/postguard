@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.0...pg-core-v0.6.1) - 2026-05-16
+
+### Other
+
+- refresh deps and bump criterion / indicatif / qrcode / twox-hash
+
 ## [0.5.10](https://github.com/encryption4all/postguard/compare/pg-core-v0.5.9...pg-core-v0.5.10) - 2026-04-24
 
 ### Fixed
