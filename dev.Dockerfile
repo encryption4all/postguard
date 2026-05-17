@@ -9,6 +9,7 @@ COPY pg-pkg ./pg-pkg
 COPY pg-cli ./pg-cli
 COPY pg-ffi ./pg-ffi
 COPY pg-wasm ./pg-wasm
+COPY irma ./irma
 COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
 RUN cargo run --bin pg-pkg -- gen
