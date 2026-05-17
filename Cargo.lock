@@ -416,9 +416,9 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bincode-next"
-version = "3.0.0-rc.13"
+version = "3.0.0-rc.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f23e7ee604dc1e468bc8c3003464a69e3e538ad6560051fe691978a69cfba970"
+checksum = "e4979ec1902cb712ca61a681f05e8a54f1fd42b82234c732dce7cfd1f4fac62a"
 dependencies = [
  "pastey",
  "rapidhash",
