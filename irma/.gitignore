@@ -1,0 +1,4 @@
+/target
+Cargo.lock
+/temp_testing
+/test_tools/client_emulator/client_emulator

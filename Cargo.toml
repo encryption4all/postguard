@@ -1,8 +1,15 @@
 [workspace]
-members = ["pg-core", "pg-cli", "pg-pkg", "pg-ffi"]
+members = ["pg-core", "pg-cli", "pg-pkg", "pg-ffi", "irma"]
 exclude = ["pg-wasm"]
 
 resolver = "2"
+
+# Redirect the `irma` crate to our vendored fork at ./irma, which carries the
+# same 0.2.1 source as crates.io but with `reqwest` bumped to 0.12 to clear
+# the unmaintained `rustls-pemfile 1.x` / `tokio-io 0.1` transitive advisories
+# (RUSTSEC-2025-0134 / RUSTSEC-2026-0058). Tracked in #186.
+[patch.crates-io]
+irma = { path = "irma" }
 
 [profile.release]
 lto = true
