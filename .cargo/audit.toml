@@ -9,4 +9,18 @@ ignore = [
     # Tracked in encryption4all/postguard#177. Drop this entry once `rsa`
     # ships a patched release.
     "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2025-0134 — `rustls-pemfile 1.0.4` is unmaintained. Pulled in
+    # transitively via `reqwest 0.11.27` (which we use directly and through
+    # `irma 0.2.1`). The real fix is upgrading `reqwest` to 0.12 (and bumping
+    # `irma` to a version that uses it). Tracked in encryption4all/postguard#186.
+    # Drop this entry once the reqwest 0.12 migration lands.
+    "RUSTSEC-2025-0134",
+
+    # RUSTSEC-2026-0058 — `tokio-io 0.1.13` is unmaintained. Pulled in
+    # transitively by `futures-util`'s `compat` feature, which is enabled by
+    # `reqwest 0.11`, `actix-server`, and `sqlx-core`. No usage in our own
+    # code. Cleared by the same reqwest 0.12 / actix / sqlx upgrades tracked
+    # for the rustls-pemfile advisory above (postguard#186).
+    "RUSTSEC-2026-0058",
 ]
