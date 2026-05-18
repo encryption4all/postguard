@@ -23,7 +23,7 @@ serde_json = "1.0"
 subtle = "2.3"
 tiny-keccak = { version = "2.0", features = ["sha3"] }
 base64ct = "1.5"
-bincode-next = { version = "3.0.0-rc.13", default-features = false, features = ["alloc", "serde"] }
+bincode-next = { version = "3.0.0-rc.14", default-features = false, features = ["alloc", "serde"] }
 
 # For both stream features and the web implementation.
 futures = { version = "0.3.27", optional = true }
