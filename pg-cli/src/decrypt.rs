@@ -74,10 +74,12 @@ pub async fn exec(dec_opts: DecOpts) -> Result<()> {
         con: reconstructed_policy
             .con
             .iter()
-            .map(|attr| DisclosureAttribute {
-                atype: attr.atype.clone(),
-                value: attr.value.clone(),
-                optional: false,
+            .map(|attr| {
+                ConItem::Single(DisclosureAttribute {
+                    atype: attr.atype.clone(),
+                    value: attr.value.clone(),
+                    optional: false,
+                })
             })
             .collect(),
         validity: None,

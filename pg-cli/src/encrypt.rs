@@ -1,4 +1,6 @@
-use pg_core::api::{DisclosureAttribute, IrmaAuthRequest, SigningKeyRequest, SigningKeyResponse};
+use pg_core::api::{
+    ConItem, DisclosureAttribute, IrmaAuthRequest, SigningKeyRequest, SigningKeyResponse,
+};
 use pg_core::client::rust::stream::SealerStreamConfig;
 use pg_core::client::Sealer;
 use pg_core::identity::{Attribute, Policy};
@@ -126,10 +128,12 @@ pub async fn exec(enc_opts: EncOpts) -> Result<()> {
             .request_start(&IrmaAuthRequest {
                 con: total_id
                     .into_iter()
-                    .map(|a| DisclosureAttribute {
-                        atype: a.atype,
-                        value: a.value,
-                        optional: false,
+                    .map(|a| {
+                        ConItem::Single(DisclosureAttribute {
+                            atype: a.atype,
+                            value: a.value,
+                            optional: false,
+                        })
                     })
                     .collect(),
                 validity: None,
