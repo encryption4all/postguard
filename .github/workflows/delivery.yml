@@ -324,6 +324,31 @@ jobs:
       - name: Build pg-wasm (web)
         run: wasm-pack build --release -d pkg/web --out-name index --scope e4a --target web ./pg-wasm
 
+      # wasm-bindgen's `--target web` output emits a default-module-path branch
+      # (`module_or_path = new URL('index_bg.wasm', import.meta.url)`) that
+      # webpack 5 statically resolves as an asset import at build time even when
+      # the branch is unreachable, breaking consumers that always pass
+      # `module_or_path` explicitly (e.g. @e4a/pg-js). wasm-pack does not expose
+      # wasm-bindgen's `--omit-default-module-path` flag, so we strip the branch
+      # from the generated index.js after the build. Fails loudly if the pattern
+      # is gone so a future wasm-bindgen change can't silently no-op the strip.
+      # The bundler target is unaffected (no init function). See #153.
+      - name: Strip default-module-path branch from web target (#153)
+        run: |
+          node -e "
+          const fs = require('fs');
+          const p = 'pg-wasm/pkg/web/index.js';
+          const re = /\n\s*if \([^)]*module_or_path[^)]*\) \{\s*module_or_path = new URL\('index_bg\.wasm', import\.meta\.url\);\s*\}\n/;
+          const src = fs.readFileSync(p, 'utf8');
+          const out = src.replace(re, '\n');
+          if (out === src) {
+            console.error('Strip pattern not found in ' + p + '; wasm-bindgen output may have changed. See #153.');
+            process.exit(1);
+          }
+          fs.writeFileSync(p, out);
+          console.log('Stripped default-module-path branch from ' + p);
+          "
+
       - name: Assemble package
         working-directory: pg-wasm/pkg
         run: |
