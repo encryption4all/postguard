@@ -226,6 +226,11 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                         .route(web::get().to(handlers::jwt)),
                 )
                 .service(
+                    resource("/statusevents/{token}")
+                        .app_data(Data::new(IrmaUrl(irma.clone())))
+                        .route(web::get().to(handlers::statusevents)),
+                )
+                .service(
                     resource("/key/{timestamp}")
                         .app_data(Data::new(ibe_sk.clone()))
                         .wrap(Auth::new(irma.clone(), AuthType::Jwt))
