@@ -76,6 +76,28 @@ mod tests {
         format!("http://{addr}")
     }
 
+    /// Spawns a one-shot fake IRMA server that answers the next connection with
+    /// the given HTTP error status line (e.g. `503 Service Unavailable`) and an
+    /// empty body. Used to exercise the `error_for_status()` -> `UpstreamError`
+    /// path. Returns the base URL to point `IrmaUrl` at.
+    async fn spawn_fake_irma_error(status_line: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await.unwrap();
+
+            let response = format!("HTTP/1.1 {status_line}\r\nContent-Length: 0\r\n\r\n");
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.flush().await.unwrap();
+        });
+
+        format!("http://{addr}")
+    }
+
     #[actix_web::test]
     async fn statusevents_proxies_sse_body_and_content_type() {
         let body = "event: status\ndata: \"DONE\"\n\n";
@@ -110,9 +132,9 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn statusevents_maps_upstream_error_to_503() {
-        // No upstream listening on this port → connection refused → Unexpected.
-        // Point at a closed port to exercise the error path.
+    async fn statusevents_maps_connection_failure_to_500() {
+        // No upstream listening on this port → connection refused → the request
+        // future errors before a response, surfacing as `Error::Unexpected` (500).
         let app = test::init_service(
             App::new().service(
                 web::resource("/v2/irma/statusevents/{token}")
@@ -127,7 +149,29 @@ mod tests {
             .to_request();
 
         let resp = test::call_service(&app, req).await;
-        // A failed connection surfaces as `Error::Unexpected` (500).
         assert_eq!(resp.status(), 500);
+    }
+
+    #[actix_web::test]
+    async fn statusevents_maps_upstream_error_to_503() {
+        // Upstream replies with an HTTP error status → `error_for_status()`
+        // returns `Err` → `Error::UpstreamError`, which the PKG maps to 503.
+        let irma_url = spawn_fake_irma_error("503 Service Unavailable").await;
+
+        let app = test::init_service(
+            App::new().service(
+                web::resource("/v2/irma/statusevents/{token}")
+                    .app_data(Data::new(IrmaUrl(irma_url)))
+                    .route(web::get().to(statusevents)),
+            ),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/v2/irma/statusevents/some-session-token")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 503);
     }
 }
