@@ -6,6 +6,7 @@ mod metrics;
 mod parameters;
 mod signing_key;
 mod start;
+mod statusevents;
 
 pub use api_key_validate::*;
 pub use health::*;
@@ -15,3 +16,4 @@ pub use metrics::*;
 pub use parameters::*;
 pub use signing_key::*;
 pub use start::*;
+pub use statusevents::*;
