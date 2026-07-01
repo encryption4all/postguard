@@ -24,6 +24,7 @@ fi
 exec /usr/local/bin/pg-pkg server \
     ${IRMA_TOKEN:+-t "$IRMA_TOKEN"} \
     -i "${IRMA_SERVER:-https://is.yivi.app}" \
+    ${PKG_ALLOWED_ORIGINS:+--allowed-origins "$PKG_ALLOWED_ORIGINS"} \
     --ibe-secret-path "$KEYS_DIR/pkg_ibe.sec" \
     --ibe-public-path "$KEYS_DIR/pkg_ibe.pub" \
     --ibs-secret-path "$KEYS_DIR/pkg_ibs.sec" \
