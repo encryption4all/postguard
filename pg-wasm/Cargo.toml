@@ -35,3 +35,13 @@ web-sys = { version = "0.3", features = ["console", "Window", "Performance"] }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Os"]
+
+# Pass wasm-bindgen's --omit-default-module-path so the generated `--target web`
+# glue does not emit the unreachable `new URL('index_bg.wasm', import.meta.url)`
+# default-module-path branch. Webpack 5 statically resolves that `new URL(...,
+# import.meta.url)` as an asset import at build time even though the branch never
+# fires for callers that always pass `module_or_path` (e.g. @e4a/pg-js), so
+# downstream consumers otherwise hit `Module not found: Can't resolve
+# 'index_bg.wasm'`. See #153.
+[package.metadata.wasm-pack.profile.release.wasm-bindgen]
+omit-default-module-path = true
