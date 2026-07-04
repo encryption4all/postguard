@@ -26,6 +26,34 @@ pub(crate) struct IrmaUrl(pub String);
 #[derive(Debug, Clone)]
 pub(crate) struct IrmaToken(pub Option<String>);
 
+/// Returns `true` if `token` is a canonical UUID version 4 string.
+///
+/// The canonical form is 36 characters in the `8-4-4-4-12` hex layout
+/// (`xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`): 32 lowercase/uppercase hex
+/// digits and 4 hyphens, with the version nibble fixed to `4` and the
+/// variant nibble one of `8`, `9`, `a`, or `b`.
+///
+/// The session `{token}` path parameter is interpolated verbatim into the
+/// upstream IRMA server URL, so it must be validated against this fixed
+/// format before use to keep attacker-controlled input out of the
+/// constructed URL.
+pub(crate) fn is_valid_uuid_v4(token: &str) -> bool {
+    if token.len() != 36 {
+        return false;
+    }
+
+    token.bytes().enumerate().all(|(i, c)| match i {
+        // Hyphen separators.
+        8 | 13 | 18 | 23 => c == b'-',
+        // Version nibble: must be '4'.
+        14 => c == b'4',
+        // Variant nibble: must be one of 8, 9, a, b (case-insensitive).
+        19 => matches!(c, b'8' | b'9' | b'a' | b'b' | b'A' | b'B'),
+        // Everything else must be a hex digit.
+        _ => c.is_ascii_hexdigit(),
+    })
+}
+
 pub(crate) fn client_version(req: &ServiceRequest) -> String {
     if let Some(Ok(x)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
         x.to_string()
@@ -136,6 +164,43 @@ mod tests {
                 );
             }
             other => panic!("expected Setup error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn is_valid_uuid_v4_accepts_canonical_tokens() {
+        // Lowercase and uppercase, various valid variant nibbles.
+        for token in [
+            "de305d54-75b4-431b-adb2-eb6b9e546013",
+            "DE305D54-75B4-431B-ADB2-EB6B9E546013",
+            "00000000-0000-4000-8000-000000000000",
+            "ffffffff-ffff-4fff-bfff-ffffffffffff",
+        ] {
+            assert!(is_valid_uuid_v4(token), "expected {token} to be accepted");
+        }
+    }
+
+    #[test]
+    fn is_valid_uuid_v4_rejects_malformed_tokens() {
+        for token in [
+            "",
+            "some-session-token",
+            // Wrong length (too short / too long).
+            "de305d54-75b4-431b-adb2-eb6b9e54601",
+            "de305d54-75b4-431b-adb2-eb6b9e5460133",
+            // Non-hex digit.
+            "ge305d54-75b4-431b-adb2-eb6b9e546013",
+            // Wrong version nibble (3 instead of 4).
+            "de305d54-75b4-331b-adb2-eb6b9e546013",
+            // Wrong variant nibble (c is not 8/9/a/b).
+            "de305d54-75b4-431b-cdb2-eb6b9e546013",
+            // Hyphens in the wrong positions.
+            "de305d5475-b4-431b-adb2-eb6b9e546013",
+            // Path-traversal / URL-injection attempts.
+            "../../session/other/result-jwt",
+            "de305d54-75b4-431b-adb2-eb6b9e546013/../admin",
+        ] {
+            assert!(!is_valid_uuid_v4(token), "expected {token} to be rejected");
         }
     }
 

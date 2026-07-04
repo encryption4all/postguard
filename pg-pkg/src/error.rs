@@ -21,6 +21,7 @@ pub enum Error {
     ClientInvalid,
     SessionCreationError,
     APIKeyInvalid,
+    SessionTokenInvalid,
 }
 
 /// Errors that can occur during setup/running of the PKG.
@@ -76,6 +77,7 @@ impl ResponseError for Error {
             Error::NoTimestampError => StatusCode::BAD_REQUEST,
             Error::SessionCreationError => StatusCode::INTERNAL_SERVER_ERROR,
             Error::APIKeyInvalid => StatusCode::UNAUTHORIZED,
+            Error::SessionTokenInvalid => StatusCode::BAD_REQUEST,
         }
     }
 }
@@ -97,6 +99,7 @@ impl Display for Error {
             Error::ClientInvalid => write!(f, "client couldn't be made properly"),
             Error::SessionCreationError => write!(f, "couldn't create session"),
             Error::APIKeyInvalid => write!(f, "API key is invalid"),
+            Error::SessionTokenInvalid => write!(f, "session token is malformed"),
         }
     }
 }
