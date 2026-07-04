@@ -39,6 +39,7 @@ sha2 = "0.11"
 prometheus = { version = "0.14", default-features = false }
 bincode-next = { version = "3.0.0-rc.14", default-features = false, features = ["std", "serde"] }
 tokio = "1.47.1"
+actix-governor = "0.10"
 
 [dependencies.clap]
 features = ["derive", "env"]

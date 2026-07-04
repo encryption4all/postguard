@@ -96,4 +96,32 @@ pub struct ServerOpts {
         value_delimiter = ','
     )]
     pub allowed_origins: Vec<String>,
+
+    /// Disable per-IP rate limiting on the `/v2` API. Only set this when the
+    /// PKG runs behind a trusted reverse proxy that performs its own
+    /// rate-limiting (per-IP limiting on the peer address is meaningless when
+    /// every request appears to come from the proxy).
+    #[clap(long, env = "PKG_RATELIMIT_DISABLED", default_value = "false")]
+    pub ratelimit_disabled: bool,
+
+    /// Sustained per-IP request rate (requests per second) for the general
+    /// `/v2` API. One token is replenished per `1 / value` seconds.
+    #[clap(long, env = "PKG_RATELIMIT_PER_SECOND", default_value = "10")]
+    pub ratelimit_per_second: u64,
+
+    /// Maximum burst of requests a single IP may make against the general
+    /// `/v2` API before being throttled to `--ratelimit-per-second`.
+    #[clap(long, env = "PKG_RATELIMIT_BURST", default_value = "50")]
+    pub ratelimit_burst: u32,
+
+    /// Sustained per-IP request rate (requests per second) for the sensitive,
+    /// key-issuing endpoints (`/start`, `/key`, `/key/{timestamp}`,
+    /// `/sign/key`, `/api-key/validate`).
+    #[clap(long, env = "PKG_RATELIMIT_SENSITIVE_PER_SECOND", default_value = "2")]
+    pub ratelimit_sensitive_per_second: u64,
+
+    /// Maximum burst of requests a single IP may make against the sensitive,
+    /// key-issuing endpoints before being throttled.
+    #[clap(long, env = "PKG_RATELIMIT_SENSITIVE_BURST", default_value = "10")]
+    pub ratelimit_sensitive_burst: u32,
 }

@@ -1,4 +1,5 @@
 use actix_cors::Cors;
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_http::header::HttpDate;
 use actix_web::http::header::EntityTag;
 use actix_web::{
@@ -88,6 +89,11 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ibs_secret_path,
         ibs_public_path,
         allowed_origins,
+        ratelimit_disabled,
+        ratelimit_per_second,
+        ratelimit_burst,
+        ratelimit_sensitive_per_second,
+        ratelimit_sensitive_burst,
     } = server_opts;
 
     let allow_any_origin = allowed_origins.iter().any(|o| o == "*");
@@ -149,6 +155,42 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         Some(&ibs_public_path),
     )?;
 
+    // Per-IP rate limiting (actix-governor, keyed on the peer IP address).
+    // Two tiers: a permissive limit on the whole `/v2` scope to cap overall
+    // load, and a stricter limit on the key-issuing endpoints. When
+    // `--ratelimit-disabled` is set the middleware is built in permissive mode
+    // so it passes every request through unchanged (useful behind a trusted
+    // proxy that does its own rate limiting).
+    if ratelimit_disabled {
+        log::warn!(
+            "PKG rate limiting: DISABLED. Only do this behind a trusted reverse proxy that rate-limits itself."
+        );
+    } else {
+        log::info!(
+            "PKG rate limiting: /v2 = {}/s (burst {}), key endpoints = {}/s (burst {}), per peer IP",
+            ratelimit_per_second,
+            ratelimit_burst,
+            ratelimit_sensitive_per_second,
+            ratelimit_sensitive_burst,
+        );
+    }
+
+    // Both configs share their underlying rate-limiter state across workers
+    // because `GovernorConfig::clone` only clones the internal `Arc`.
+    let make_config = |per_second: u64, burst: u32| {
+        let mut builder = GovernorConfigBuilder::default();
+        builder
+            .requests_per_second(per_second.max(1))
+            .burst_size(burst.max(1));
+        builder
+            .const_permissive(ratelimit_disabled)
+            .finish()
+            .expect("invalid rate-limit configuration")
+    };
+    let general_ratelimit = make_config(ratelimit_per_second, ratelimit_burst);
+    let sensitive_ratelimit =
+        make_config(ratelimit_sensitive_per_second, ratelimit_sensitive_burst);
+
     HttpServer::new(move || {
         let mut app = App::new()
             .wrap(
@@ -184,6 +226,9 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         }
 
         let mut v2 = scope("/v2")
+            // Outermost middleware: reject over-limit requests before they hit
+            // metrics collection or any handler.
+            .wrap(Governor::new(&general_ratelimit))
             .wrap_fn(collect_metrics)
             .app_data(Data::new(web::JsonConfig::default().limit(64 * 1024)))
             .service(
@@ -205,9 +250,11 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
             v2 = v2.service(
                 resource("/api-key/validate")
                     .guard(ApiKeyGuard)
+                    // Registered last => outermost: rate-limit before auth work.
                     .wrap(
                         Auth::new(irma.clone(), AuthType::Key).with_db_pool(pool.as_ref().clone()),
                     )
+                    .wrap(Governor::new(&sensitive_ratelimit))
                     .route(web::get().to(handlers::api_key_validate)),
             );
         }
@@ -218,6 +265,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     resource("/start")
                         .app_data(Data::new(IrmaUrl(irma.clone())))
                         .app_data(Data::new(IrmaToken(irma_token.clone())))
+                        .wrap(Governor::new(&sensitive_ratelimit))
                         .route(web::post().to(handlers::start)),
                 )
                 .service(
@@ -234,12 +282,14 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     resource("/key/{timestamp}")
                         .app_data(Data::new(ibe_sk.clone()))
                         .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                        .wrap(Governor::new(&sensitive_ratelimit))
                         .route(web::get().to(handlers::key::<CGWKV>)),
                 )
                 .service(
                     resource("/key")
                         .app_data(Data::new(ibe_sk))
                         .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                        .wrap(Governor::new(&sensitive_ratelimit))
                         .route(web::get().to(handlers::key::<CGWKV>)),
                 );
 
@@ -254,6 +304,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                             Auth::new(irma.clone(), AuthType::Key)
                                 .with_db_pool(pool.as_ref().clone()),
                         )
+                        .wrap(Governor::new(&sensitive_ratelimit))
                         .route(web::post().to(handlers::signing_key)),
                 );
             }
@@ -263,6 +314,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                 resource("/sign/key")
                     .app_data(Data::new(ibs_sk.clone()))
                     .wrap(Auth::new(irma.clone(), AuthType::Jwt))
+                    .wrap(Governor::new(&sensitive_ratelimit))
                     .route(web::post().to(handlers::signing_key)),
             )
         });
@@ -1118,5 +1170,167 @@ pub(crate) mod tests {
 
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
+    }
+
+    // ---------------------------------------------------------------------
+    // Rate-limiting (actix-governor) integration tests
+    // ---------------------------------------------------------------------
+
+    use actix_governor::{Governor, GovernorConfigBuilder};
+    use actix_web::http::StatusCode;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    /// A `/v2` scope mirroring the production middleware stack: a general
+    /// governor on the whole scope, a stricter governor on the `/key`
+    /// endpoint, and one unlimited endpoint reachable only via the general
+    /// limit. The replenish rate is kept at 1/s so the bucket does not refill
+    /// while a test fires its requests back-to-back within a few milliseconds.
+    async fn ratelimit_setup(
+        general_burst: u32,
+        sensitive_burst: u32,
+        permissive: bool,
+    ) -> impl Service<Request, Response = ServiceResponse, Error = Error> {
+        let mut rng = thread_rng();
+        let (ibe_pk, ibe_sk) = CGWKV::setup(&mut rng);
+
+        let pd = ParametersData::new(
+            &Parameters::<PublicKey<CGWKV>> {
+                format_version: 0x00,
+                public_key: PublicKey(ibe_pk),
+            },
+            None,
+        )
+        .unwrap();
+
+        let make_config = |burst: u32| {
+            let mut builder = GovernorConfigBuilder::default();
+            builder.requests_per_second(1).burst_size(burst.max(1));
+            builder
+                .const_permissive(permissive)
+                .finish()
+                .expect("invalid rate-limit configuration")
+        };
+        let general = make_config(general_burst);
+        let sensitive = make_config(sensitive_burst);
+
+        test::init_service(
+            App::new().service(
+                scope("/v2")
+                    .wrap(Governor::new(&general))
+                    .service(
+                        resource("/parameters")
+                            .app_data(Data::new(pd))
+                            .route(web::get().to(handlers::parameters)),
+                    )
+                    .service(
+                        resource("/key")
+                            .app_data(Data::new(ibe_sk))
+                            .wrap(NoAuth::Decryption)
+                            .wrap(Governor::new(&sensitive))
+                            .route(web::get().to(handlers::key::<CGWKV>)),
+                    ),
+            ),
+        )
+        .await
+    }
+
+    fn peer(last_octet: u8) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, last_octet)), 4000)
+    }
+
+    fn key_request(peer_addr: SocketAddr) -> Request {
+        let pol = Policy {
+            timestamp: now(),
+            con: vec![Attribute::new("testattribute", Some("testvalue"))],
+        };
+        test::TestRequest::get()
+            .uri("/v2/key")
+            .peer_addr(peer_addr)
+            .set_json(pol)
+            .to_request()
+    }
+
+    #[actix_web::test]
+    async fn test_ratelimit_sensitive_endpoint_returns_429() {
+        // General limit is generous; the sensitive limit (burst 2) is what
+        // should trip on the `/key` endpoint.
+        let app = ratelimit_setup(100, 2, false).await;
+        let ip = peer(10);
+
+        // First two requests fit within the burst.
+        for i in 0..2 {
+            let resp = test::call_service(&app, key_request(ip)).await;
+            assert_eq!(resp.status(), 200, "request {i} should be allowed");
+        }
+
+        // Third request exceeds the sensitive burst → 429.
+        let resp = test::call_service(&app, key_request(ip)).await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            resp.headers().contains_key("retry-after"),
+            "429 response must carry a retry-after header"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_ratelimit_is_per_ip() {
+        let app = ratelimit_setup(100, 2, false).await;
+
+        // Exhaust the sensitive burst for IP .20.
+        for _ in 0..2 {
+            let resp = test::call_service(&app, key_request(peer(20))).await;
+            assert_eq!(resp.status(), 200);
+        }
+        let resp = test::call_service(&app, key_request(peer(20))).await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // A different IP still has its own fresh bucket.
+        let resp = test::call_service(&app, key_request(peer(21))).await;
+        assert_eq!(
+            resp.status(),
+            200,
+            "a different peer IP must not be throttled by another IP's usage"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_ratelimit_general_scope_returns_429() {
+        // Sensitive limit is generous; the general scope limit (burst 2) is
+        // what should trip on the otherwise-unlimited `/parameters` endpoint.
+        let app = ratelimit_setup(2, 100, false).await;
+        let ip = peer(30);
+
+        for i in 0..2 {
+            let req = test::TestRequest::get()
+                .uri("/v2/parameters")
+                .peer_addr(ip)
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200, "request {i} should be allowed");
+        }
+
+        let req = test::TestRequest::get()
+            .uri("/v2/parameters")
+            .peer_addr(ip)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[actix_web::test]
+    async fn test_ratelimit_permissive_never_blocks() {
+        // With `--ratelimit-disabled` the middleware is built in permissive
+        // mode and must pass every request through, even well past the burst.
+        let app = ratelimit_setup(1, 1, true).await;
+        let ip = peer(40);
+
+        for i in 0..10 {
+            let resp = test::call_service(&app, key_request(ip)).await;
+            assert_eq!(
+                resp.status(),
+                200,
+                "permissive mode must never return 429 (request {i})"
+            );
+        }
     }
 }
