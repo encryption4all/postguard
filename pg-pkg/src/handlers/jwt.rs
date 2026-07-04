@@ -1,4 +1,4 @@
-use crate::util::{is_valid_uuid_v4, IrmaUrl};
+use crate::util::{is_valid_session_token, IrmaUrl};
 use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{web::Data, HttpResponse};
@@ -7,8 +7,8 @@ pub async fn jwt(irma: Data<IrmaUrl>, req: HttpRequest) -> Result<HttpResponse, 
     let token = req.match_info().query("token");
 
     // The token is interpolated into the upstream IRMA URL, so reject anything
-    // that is not a canonical UUID v4 before constructing the request.
-    if !is_valid_uuid_v4(token) {
+    // that is not a well-formed session token before constructing the request.
+    if !is_valid_session_token(token) {
         return Err(crate::Error::SessionTokenInvalid);
     }
 
@@ -47,9 +47,12 @@ mod tests {
         .await;
 
         for token in [
-            "not-a-uuid",
-            "ge305d54-75b4-431b-adb2-eb6b9e546013",
-            "de305d54-75b4-431b-adb2-eb6b9e54601",
+            // A UUID is the wrong shape for an IRMA session token.
+            "de305d54-75b4-431b-adb2-eb6b9e546013",
+            // Too short.
+            "ELMExi5iauWYHzbH7gw",
+            // 20 chars but contains a URL metacharacter.
+            "ELMExi5iauWYHzbH7gw.",
         ] {
             let req = test::TestRequest::get()
                 .uri(&format!("/v2/irma/jwt/{token}"))
