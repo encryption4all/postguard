@@ -226,10 +226,12 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         }
 
         let mut v2 = scope("/v2")
-            // Outermost middleware: reject over-limit requests before they hit
-            // metrics collection or any handler.
-            .wrap(Governor::new(&general_ratelimit))
             .wrap_fn(collect_metrics)
+            // Registered last => outermost: reject over-limit requests before
+            // they hit metrics collection or any handler. actix applies `wrap`
+            // layers in reverse registration order, so the Governor must be
+            // wrapped after `collect_metrics` to sit in front of it.
+            .wrap(Governor::new(&general_ratelimit))
             .app_data(Data::new(web::JsonConfig::default().limit(64 * 1024)))
             .service(
                 resource("/parameters")
