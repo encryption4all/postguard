@@ -26,6 +26,24 @@ pub(crate) struct IrmaUrl(pub String);
 #[derive(Debug, Clone)]
 pub(crate) struct IrmaToken(pub Option<String>);
 
+/// Length of an IRMA/Yivi requestor session token.
+const SESSION_TOKEN_LEN: usize = 20;
+
+/// Returns `true` if `token` is a well-formed IRMA/Yivi session token.
+///
+/// IRMA/Yivi requestor session tokens are 20-character base62 strings made up
+/// exclusively of ASCII letters and digits (e.g. `ELMExi5iauWYHzbH7gwU`); they
+/// are **not** UUIDs.
+///
+/// The session `{token}` path parameter is interpolated verbatim into the
+/// upstream IRMA server URL, so it must be validated against this fixed shape
+/// before use. Restricting it to a fixed-length ASCII-alphanumeric allowlist
+/// keeps URL metacharacters (`/`, `..`, `?`, `#`, ...) and any other
+/// attacker-controlled input out of the constructed URL.
+pub(crate) fn is_valid_session_token(token: &str) -> bool {
+    token.len() == SESSION_TOKEN_LEN && token.bytes().all(|c| c.is_ascii_alphanumeric())
+}
+
 pub(crate) fn client_version(req: &ServiceRequest) -> String {
     if let Some(Ok(x)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
         x.to_string()
@@ -136,6 +154,50 @@ mod tests {
                 );
             }
             other => panic!("expected Setup error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn is_valid_session_token_accepts_real_tokens() {
+        // Realistic 20-char base62 IRMA/Yivi requestor tokens (from the
+        // irmars crate's own fixtures), plus all-letters/all-digits edges.
+        for token in [
+            "ELMExi5iauWYHzbH7gwU",
+            "bVqg9btHRhiMvEWs8axQ",
+            "5bTpPRXctenYGGsZVe3x",
+            "abcdefghijklmnopqrst",
+            "01234567890123456789",
+        ] {
+            assert!(
+                is_valid_session_token(token),
+                "expected {token} to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_session_token_rejects_malformed_tokens() {
+        for token in [
+            "",
+            // Wrong length (too short / too long).
+            "ELMExi5iauWYHzbH7gw",
+            "ELMExi5iauWYHzbH7gwUX",
+            // A UUID is the wrong shape (36 chars, contains hyphens).
+            "de305d54-75b4-431b-adb2-eb6b9e546013",
+            // Non-alphanumeric characters inside an otherwise 20-char token.
+            "ELMExi5iauWYHzbH7gw.",
+            "ELMExi5iauWYHzbH7gw_",
+            // URL metacharacters / path-traversal / injection attempts.
+            "../../session/other/",
+            "a/b/c/d/e/f/g/h/i/jk",
+            "a?b=cdefghijklmnopqr",
+            "a#bcdefghijklmnopqrs",
+            "ELMExi5iauWYHzbH7gwU/../admin",
+        ] {
+            assert!(
+                !is_valid_session_token(token),
+                "expected {token} to be rejected"
+            );
         }
     }
 
