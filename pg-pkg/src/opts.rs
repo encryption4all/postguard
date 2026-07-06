@@ -85,14 +85,16 @@ pub struct ServerOpts {
     pub ibs_public_path: String,
 
     /// Comma-separated list of origins allowed to make cross-origin requests
-    /// to the PKG. The special value `*` allows any origin (the historical
-    /// default), but is discouraged for production deployments that handle
-    /// key material. Example:
+    /// to the PKG. This option is required and has no default: the server
+    /// refuses to start unless an allowlist is supplied, so CORS is never
+    /// silently open to all origins in production. The special value `*`
+    /// allows any origin, but must be opted into explicitly and is discouraged
+    /// for deployments that handle key material. Example:
     /// `--allowed-origins https://postguard.eu,https://postguard.nl`.
     #[clap(
         long,
         env = "PKG_ALLOWED_ORIGINS",
-        default_value = "*",
+        required = true,
         value_delimiter = ','
     )]
     pub allowed_origins: Vec<String>,

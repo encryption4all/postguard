@@ -21,6 +21,9 @@ services:
             - RUST_BACKTRACE=1
             - IRMA_SERVER=http://irma-server:8088
             - DATABASE_URL=postgres://devuser:devpassword@postgres:5432/devdb
+            # allowed-origins is required (no default); dev explicitly opts into
+            # the wildcard so local cross-origin requests work.
+            - PKG_ALLOWED_ORIGINS=*
         networks:
             - pg-network
         depends_on:
