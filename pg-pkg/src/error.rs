@@ -54,9 +54,21 @@ impl std::fmt::Debug for PKGError {
 /// Show the error as an HTTP response for Actix-web.
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {
+        // Some variants wrap internal errors whose `Display` output may contain
+        // implementation details we don't want to expose to clients (e.g. the
+        // underlying Prometheus error text). Those are logged server-side in
+        // full, but the HTTP response body only carries a generic message.
+        let message = match self {
+            Error::Prometheus(_) => {
+                log::error!("internal error while handling request: {self}");
+                "internal server error".to_string()
+            }
+            _ => format!("{self}"),
+        };
+
         let body = json!({
             "error": true,
-            "message": format!("{}", self),
+            "message": message,
         });
 
         HttpResponse::build(self.status_code()).json(body)
@@ -98,5 +110,50 @@ impl Display for Error {
             Error::SessionCreationError => write!(f, "couldn't create session"),
             Error::APIKeyInvalid => write!(f, "API key is invalid"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::body::to_bytes;
+
+    #[actix_web::test]
+    async fn prometheus_error_is_masked_in_response_body() {
+        let err = Error::Prometheus(prometheus::Error::Msg(
+            "sensitive internal detail".to_string(),
+        ));
+
+        // Sanity check: the full detail is still available server-side via Display.
+        assert!(format!("{err}").contains("sensitive internal detail"));
+
+        let resp = err.error_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = to_bytes(resp.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["error"], serde_json::json!(true));
+        assert_eq!(json["message"], serde_json::json!("internal server error"));
+
+        // The internal Prometheus detail must never reach the client.
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(
+            !body_str.contains("sensitive internal detail"),
+            "internal error detail leaked into response body: {body_str}"
+        );
+    }
+
+    #[actix_web::test]
+    async fn client_facing_error_message_is_preserved() {
+        let err = Error::SessionNotFound;
+        let resp = err.error_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let body = to_bytes(resp.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["error"], serde_json::json!(true));
+        assert_eq!(json["message"], serde_json::json!("session not found"));
     }
 }
