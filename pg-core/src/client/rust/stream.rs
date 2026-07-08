@@ -215,9 +215,15 @@ where
         r.read_exact(&mut header_sig_len_bytes)
             .map_err(|_e| Error::FormatViolation("no header signature length".to_string()))
             .await?;
-        let header_sig_len = u32::from_be_bytes(header_sig_len_bytes);
+        let header_sig_len = u32::from_be_bytes(header_sig_len_bytes) as usize;
 
-        let mut header_sig_raw = Vec::with_capacity(header_sig_len as usize);
+        // Bound the attacker-controlled length prefix before it sizes an
+        // allocation, mirroring the MAX_HEADER_SIZE check in preamble_checked.
+        if header_sig_len > MAX_SIG_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
+
+        let mut header_sig_raw = Vec::with_capacity(header_sig_len);
         let mut r = r.take(header_sig_len as u64);
 
         r.read_to_end(&mut header_sig_raw).await?;
@@ -695,5 +701,34 @@ mod tests {
         let mut input = Cursor::new(ct);
         let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
         assert!(matches!(res, Err(Error::NotPostGuard)));
+    }
+
+    #[tokio::test]
+    async fn test_stream_unseal_rejects_oversized_sig_len() {
+        use crate::util::preamble_checked;
+        use crate::{MAX_SIG_SIZE, SIG_SIZE_SIZE};
+        use futures::io::Cursor;
+
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let mut ct = seal_helper(&setup, b"SECRET DATA");
+
+        // The header-signature length prefix sits right after the header. Overwrite
+        // it with a value far larger than MAX_SIG_SIZE. The unsealer must reject it
+        // cleanly with a ConstraintViolation before it tries to allocate a buffer of
+        // that size — never hang, OOM, or panic.
+        let (_, header_len) =
+            preamble_checked(&ct[..PREAMBLE_SIZE]).expect("preamble should parse");
+        let sig_len_off = PREAMBLE_SIZE + header_len;
+        assert!(sig_len_off + SIG_SIZE_SIZE <= ct.len());
+        assert!((MAX_SIG_SIZE as u64) < u32::MAX as u64);
+        ct[sig_len_off..sig_len_off + SIG_SIZE_SIZE].copy_from_slice(&u32::MAX.to_be_bytes());
+
+        let mut input = Cursor::new(ct);
+        let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
+        assert!(
+            matches!(res, Err(Error::ConstraintViolation)),
+            "expected ConstraintViolation, got {res:?}"
+        );
     }
 }
