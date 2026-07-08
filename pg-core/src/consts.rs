@@ -45,9 +45,9 @@ pub const MAX_HEADER_SIZE: usize = 1024 * 1024;
 /// The maximum size of the serialized header signature (8 KiB).
 ///
 /// A serialized header signature holds a single signature plus its policy,
-/// which comfortably fits in a few KiB. Bounding this attacker-controlled
-/// length prefix keeps the streaming unsealer from allocating an arbitrarily
-/// large buffer before the signature has been validated.
+/// which comfortably fits in a few KiB. Bounding the serialized
+/// header-signature length to a sane maximum before allocation mirrors the
+/// `MAX_HEADER_SIZE` check applied to the preamble.
 pub const MAX_SIG_SIZE: usize = 8 * 1024;
 
 /// The maximum size of symmetric segments (4 MiB).

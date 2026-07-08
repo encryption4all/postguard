@@ -217,7 +217,7 @@ where
             .await?;
         let header_sig_len = u32::from_be_bytes(header_sig_len_bytes) as usize;
 
-        // Bound the attacker-controlled length prefix before it sizes an
+        // Bound the length prefix to a sane maximum before it sizes an
         // allocation, mirroring the MAX_HEADER_SIZE check in preamble_checked.
         if header_sig_len > MAX_SIG_SIZE {
             return Err(Error::ConstraintViolation);
@@ -714,9 +714,8 @@ mod tests {
         let mut ct = seal_helper(&setup, b"SECRET DATA");
 
         // The header-signature length prefix sits right after the header. Overwrite
-        // it with a value far larger than MAX_SIG_SIZE. The unsealer must reject it
-        // cleanly with a ConstraintViolation before it tries to allocate a buffer of
-        // that size — never hang, OOM, or panic.
+        // it with a value larger than MAX_SIG_SIZE and assert the unsealer rejects it
+        // with a ConstraintViolation before allocating a buffer of that size.
         let (_, header_len) =
             preamble_checked(&ct[..PREAMBLE_SIZE]).expect("preamble should parse");
         let sig_len_off = PREAMBLE_SIZE + header_len;

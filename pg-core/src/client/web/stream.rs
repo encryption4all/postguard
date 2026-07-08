@@ -287,10 +287,10 @@ where
         read_atleast(&mut r, &mut h_sig_len_bytes, &mut spill).await?;
         let header_sig_len = u32::from_be_bytes(h_sig_len_bytes) as usize;
 
-        // Bound the attacker-controlled length prefix before it sizes an
+        // Bound the length prefix to a sane maximum before it sizes an
         // allocation, mirroring the MAX_HEADER_SIZE check in preamble_checked.
         if header_sig_len > MAX_SIG_SIZE {
-            return Err(Error::ConstraintViolation.into());
+            return Err(Error::ConstraintViolation);
         }
 
         let mut header_sig_raw = vec![0u8; header_sig_len];
