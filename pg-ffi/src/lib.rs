@@ -77,6 +77,15 @@ fn seal_impl(
 /// - `output` + `output_len`: out-parameters for sealed ciphertext (allocated by Rust)
 ///
 /// Returns 0 on success, -1 on error. Call `pg_last_error()` for the error message.
+///
+/// # Safety
+/// - Every non-null `*_json` pointer must reference a valid, null-terminated C
+///   string that stays alive for the duration of the call. `priv_sign_key_json`
+///   may be null.
+/// - `plaintext` must either be null (treated as empty) or point to at least
+///   `plaintext_len` readable bytes.
+/// - `output` and `output_len` must be valid, writable pointers; on success they
+///   receive a buffer that the caller must later release with [`pg_free`].
 #[no_mangle]
 pub unsafe extern "C" fn pg_seal(
     mpk_json: *const c_char,
@@ -147,10 +156,15 @@ pub unsafe extern "C" fn pg_seal(
 }
 
 /// Free memory allocated by `pg_seal`.
+///
+/// # Safety
+/// `ptr`/`len` must be exactly the `output`/`output_len` pair produced by a
+/// successful [`pg_seal`] call and not yet freed. Passing a null `ptr` or a
+/// `len` of 0 is a no-op. Any other combination is undefined behaviour.
 #[no_mangle]
 pub unsafe extern "C" fn pg_free(ptr: *mut u8, len: usize) {
     if !ptr.is_null() && len > 0 {
-        let _ = Box::from_raw(slice::from_raw_parts_mut(ptr, len));
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));
     }
 }
 

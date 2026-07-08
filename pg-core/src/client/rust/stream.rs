@@ -148,8 +148,8 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
                 signer.update(&buf[start..]);
                 let sig = signer
                     .clone()
-                    .chain(&counter.to_be_bytes())
-                    .chain(&[0x00])
+                    .chain(counter.to_be_bytes())
+                    .chain([0x00])
                     .sign(&signing_key.key.0, self.rng);
                 crate::bincode_compat::serialize_into_vec(&mut buf, &sig)?;
 
@@ -167,8 +167,8 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
 
                 signer.update(&buf[start..]);
                 let sig_final = signer
-                    .chain(&counter.to_be_bytes())
-                    .chain(&[0x01])
+                    .chain(counter.to_be_bytes())
+                    .chain([0x01])
                     .sign(&signing_key.key.0, self.rng);
                 crate::bincode_compat::serialize_into_vec(&mut buf, &sig_final)?;
 
@@ -317,8 +317,8 @@ where
 
             if !verifier
                 .clone()
-                .chain(&counter.to_be_bytes())
-                .chain(&[is_last as u8])
+                .chain(counter.to_be_bytes())
+                .chain([is_last as u8])
                 .verify(&vk.0, &sig, id)
             {
                 return Err(Error::IncorrectSignature);
@@ -428,7 +428,7 @@ mod tests {
             Sealer::<_, SealerStreamConfig>::new(
                 &setup.ibe_pk,
                 &setup.policy,
-                &signing_key,
+                signing_key,
                 &mut rng,
             )
             .unwrap()

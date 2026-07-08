@@ -443,8 +443,8 @@ mod tests {
                 199, 137, 169, 187, 204, 85, 118, 79, 35, 52, 83, 37, 217, 230, 13,
             ];
 
-            let _pk: VerifyingKey = serde_json::from_str(&pk).unwrap();
-            let _usk: SigningKey = serde_json::from_str(&usk).unwrap();
+            let _pk: VerifyingKey = serde_json::from_str(pk).unwrap();
+            let _usk: SigningKey = serde_json::from_str(usk).unwrap();
             let _sk: SecretKey = crate::bincode_compat::deserialize(&sk).unwrap();
         }
 
