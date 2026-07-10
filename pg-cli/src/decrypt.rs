@@ -85,7 +85,7 @@ pub async fn exec(dec_opts: DecOpts) -> Result<()> {
         validity: None,
     };
 
-    eprintln!("Requesting key for {:?}", &keyrequest);
+    eprintln!("Requesting key for {:?}", keyrequest);
 
     let sd: irma::SessionData = client
         .request_start(&keyrequest)
