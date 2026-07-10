@@ -134,6 +134,10 @@ pub struct ServerOpts {
     /// entry is used, so client-supplied entries cannot spoof the key. When
     /// disabled (the default) the peer address is used, which collapses every
     /// client into one bucket when the PKG sits behind a proxy.
-    #[clap(long, env = "PKG_RATELIMIT_TRUST_FORWARDED_FOR", default_value = "false")]
+    #[clap(
+        long,
+        env = "PKG_RATELIMIT_TRUST_FORWARDED_FOR",
+        default_value = "false"
+    )]
     pub ratelimit_trust_forwarded_for: bool,
 }
