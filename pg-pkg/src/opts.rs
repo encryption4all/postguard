@@ -126,4 +126,14 @@ pub struct ServerOpts {
     /// key-issuing endpoints before being throttled.
     #[clap(long, env = "PKG_RATELIMIT_SENSITIVE_BURST", default_value = "10")]
     pub ratelimit_sensitive_burst: u32,
+
+    /// Key rate limiting on the client IP taken from the `X-Forwarded-For`
+    /// header instead of the TCP peer address. Enable this only when the PKG
+    /// runs behind a trusted reverse proxy (e.g. ingress-nginx) that appends
+    /// the real client IP as the last `X-Forwarded-For` entry: the rightmost
+    /// entry is used, so client-supplied entries cannot spoof the key. When
+    /// disabled (the default) the peer address is used, which collapses every
+    /// client into one bucket when the PKG sits behind a proxy.
+    #[clap(long, env = "PKG_RATELIMIT_TRUST_FORWARDED_FOR", default_value = "false")]
+    pub ratelimit_trust_forwarded_for: bool,
 }
