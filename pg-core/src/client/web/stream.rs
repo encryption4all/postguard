@@ -285,9 +285,15 @@ where
 
         let mut h_sig_len_bytes = [0u8; SIG_SIZE_SIZE];
         read_atleast(&mut r, &mut h_sig_len_bytes, &mut spill).await?;
-        let header_sig_len = u32::from_be_bytes(h_sig_len_bytes);
+        let header_sig_len = u32::from_be_bytes(h_sig_len_bytes) as usize;
 
-        let mut header_sig_raw = vec![0u8; header_sig_len as usize];
+        // Bound the length prefix to a sane maximum before it sizes an
+        // allocation, mirroring the MAX_HEADER_SIZE check in preamble_checked.
+        if header_sig_len > MAX_SIG_SIZE {
+            return Err(Error::ConstraintViolation);
+        }
+
+        let mut header_sig_raw = vec![0u8; header_sig_len];
         read_atleast(&mut r, &mut header_sig_raw, &mut spill).await?;
         let h_sig_ext: SignatureExt = crate::bincode_compat::deserialize(&header_sig_raw)?;
 
