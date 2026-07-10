@@ -282,7 +282,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                 )
                 .service(
                     resource("/key/{timestamp}")
-                        .app_data(Data::new(ibe_sk.clone()))
+                        .app_data(Data::new(ibe_sk))
                         .wrap(Auth::new(irma.clone(), AuthType::Jwt))
                         .wrap(Governor::new(&sensitive_ratelimit))
                         .route(web::get().to(handlers::key::<CGWKV>)),
@@ -409,7 +409,7 @@ pub(crate) mod tests {
                         )
                         .service(
                             resource("/key/{timestamp}")
-                                .app_data(Data::new(ibe_sk.clone()))
+                                .app_data(Data::new(ibe_sk))
                                 .wrap(NoAuth::Decryption)
                                 .route(web::get().to(handlers::key::<CGWKV>)),
                         )
@@ -1015,7 +1015,7 @@ pub(crate) mod tests {
 
     #[actix_web::test]
     async fn test_signing_guard_valid_key() {
-        use actix_web::{test, App, HttpResponse};
+        use actix_web::test;
 
         let app = setup_guard_test().await;
 
@@ -1036,7 +1036,7 @@ pub(crate) mod tests {
 
     #[actix_web::test]
     async fn test_signing_guard_unprefixed_key() {
-        use actix_web::{test, App, HttpResponse};
+        use actix_web::test;
 
         let app = setup_guard_test().await;
 
@@ -1050,7 +1050,7 @@ pub(crate) mod tests {
 
     #[actix_web::test]
     async fn test_signing_guard_no_auth_header() {
-        use actix_web::{test, App, HttpResponse};
+        use actix_web::test;
 
         let app = setup_guard_test().await;
 
@@ -1061,7 +1061,7 @@ pub(crate) mod tests {
 
     #[actix_web::test]
     async fn test_signing_guard_empty_bearer() {
-        use actix_web::{test, App, HttpResponse};
+        use actix_web::test;
 
         let app = setup_guard_test().await;
 

@@ -138,6 +138,21 @@ pub(crate) fn cgwkv_read_key_pair(
     Ok((pk, sk))
 }
 
+pub(crate) fn gg_read_key_pair(
+    pk_path: impl AsRef<Path>,
+    sk_path: impl AsRef<Path>,
+) -> Result<(pg_core::ibs::gg::PublicKey, pg_core::ibs::gg::SecretKey), PKGError> {
+    let pk_bytes = std::fs::read(pk_path)?;
+    let pk: pg_core::ibs::gg::PublicKey = pg_core::bincode_compat::deserialize(&pk_bytes)
+        .map_err(|e| PKGError::Setup(format!("could not deserialize ibs pk: {e}")))?;
+
+    let sk_bytes = std::fs::read(sk_path)?;
+    let sk: pg_core::ibs::gg::SecretKey = pg_core::bincode_compat::deserialize(&sk_bytes)
+        .map_err(|e| PKGError::Setup(format!("could not deserialize ibs sk: {e}")))?;
+
+    Ok((pk, sk))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,19 +224,4 @@ mod tests {
             other => panic!("expected StdIO error, got {other:?}"),
         }
     }
-}
-
-pub(crate) fn gg_read_key_pair(
-    pk_path: impl AsRef<Path>,
-    sk_path: impl AsRef<Path>,
-) -> Result<(pg_core::ibs::gg::PublicKey, pg_core::ibs::gg::SecretKey), PKGError> {
-    let pk_bytes = std::fs::read(pk_path)?;
-    let pk: pg_core::ibs::gg::PublicKey = pg_core::bincode_compat::deserialize(&pk_bytes)
-        .map_err(|e| PKGError::Setup(format!("could not deserialize ibs pk: {e}")))?;
-
-    let sk_bytes = std::fs::read(sk_path)?;
-    let sk: pg_core::ibs::gg::SecretKey = pg_core::bincode_compat::deserialize(&sk_bytes)
-        .map_err(|e| PKGError::Setup(format!("could not deserialize ibs sk: {e}")))?;
-
-    Ok((pk, sk))
 }

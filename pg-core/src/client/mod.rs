@@ -122,9 +122,7 @@ impl From<futures::io::Error> for crate::error::Error {
 }
 
 #[cfg(feature = "stream")]
-pub(self) fn stream_mode_checked(
-    h: &Header,
-) -> Result<(u32, (u64, Option<u64>)), crate::error::Error> {
+fn stream_mode_checked(h: &Header) -> Result<(u32, (u64, Option<u64>)), crate::error::Error> {
     let (segment_size, size_hint) = match h {
         Header {
             mode:

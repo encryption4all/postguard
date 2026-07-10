@@ -240,7 +240,7 @@ mod tests {
         let sealed = Sealer::<_, SealerMemoryConfig>::new(
             &setup.ibe_pk,
             &setup.policy,
-            &pub_sign_key,
+            pub_sign_key,
             &mut rng,
         )
         .unwrap()
@@ -253,7 +253,7 @@ mod tests {
         let (original, verified_policy) =
             Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk)
                 .unwrap()
-                .unseal("Bob", &usk)
+                .unseal("Bob", usk)
                 .unwrap();
 
         assert_eq!(&input.to_vec(), &original);
@@ -278,7 +278,7 @@ mod tests {
         let sealed = Sealer::<_, SealerMemoryConfig>::new(
             &setup.ibe_pk,
             &setup.policy,
-            &pub_sign_key,
+            pub_sign_key,
             &mut rng,
         )
         .unwrap()
@@ -290,7 +290,7 @@ mod tests {
         let usk = &setup.usks[4];
         let res = Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk)
             .unwrap()
-            .unseal("Charlie", &usk);
+            .unseal("Charlie", usk);
 
         assert!(matches!(res, Err(Error::KEM)));
     }
@@ -307,7 +307,7 @@ mod tests {
         let sealed = Sealer::<_, SealerMemoryConfig>::new(
             &setup.ibe_pk,
             &setup.policy,
-            &pub_sign_key,
+            pub_sign_key,
             &mut rng,
         )
         .unwrap()
@@ -318,7 +318,7 @@ mod tests {
         let usk = &setup.usks[4];
         let res = Unsealer::<_, UnsealerMemoryConfig>::new(sealed, &setup.ibs_pk)
             .unwrap()
-            .unseal("Daniel", &usk);
+            .unseal("Daniel", usk);
 
         assert!(matches!(res, Err(Error::UnknownIdentifier(_))));
     }
@@ -343,7 +343,7 @@ mod tests {
         let sealed = Sealer::<_, SealerMemoryConfig>::new(
             &setup.ibe_pk,
             &setup.policy,
-            &pub_sign_key,
+            pub_sign_key,
             &mut rng,
         )
         .unwrap()
