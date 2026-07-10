@@ -13,6 +13,7 @@
 
 pub mod auth;
 pub mod metrics;
+pub mod ratelimit;
 
 #[cfg(test)]
 pub mod irma_noauth;

@@ -13,6 +13,7 @@ use actix_web::{
 
 use crate::middleware::auth::{Auth, AuthType};
 use crate::middleware::metrics::collect_metrics;
+use crate::middleware::ratelimit::ClientIpKeyExtractor;
 use crate::opts::*;
 use crate::util::*;
 use crate::{handlers, PKGError};
@@ -94,6 +95,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ratelimit_burst,
         ratelimit_sensitive_per_second,
         ratelimit_sensitive_burst,
+        ratelimit_trust_forwarded_for,
     } = server_opts;
 
     let allow_any_origin = allowed_origins.iter().any(|o| o == "*");
@@ -167,23 +169,35 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         );
     } else {
         log::info!(
-            "PKG rate limiting: /v2 = {}/s (burst {}), key endpoints = {}/s (burst {}), per peer IP",
+            "PKG rate limiting: /v2 = {}/s (burst {}), key endpoints = {}/s (burst {}), keyed on {}",
             ratelimit_per_second,
             ratelimit_burst,
             ratelimit_sensitive_per_second,
             ratelimit_sensitive_burst,
+            if ratelimit_trust_forwarded_for {
+                "client IP (X-Forwarded-For)"
+            } else {
+                "peer IP"
+            },
         );
     }
 
     // Both configs share their underlying rate-limiter state across workers
-    // because `GovernorConfig::clone` only clones the internal `Arc`.
+    // because `GovernorConfig::clone` only clones the internal `Arc`. The key
+    // extractor decides whether a "client" is the peer address or the real
+    // client IP from `X-Forwarded-For` (see `ClientIpKeyExtractor`); behind our
+    // ingress the peer is always the proxy, so `--ratelimit-trust-forwarded-for`
+    // must be set for per-client limiting to be meaningful.
     let make_config = |per_second: u64, burst: u32| {
-        let mut builder = GovernorConfigBuilder::default();
+        let mut default_builder = GovernorConfigBuilder::default();
+        let mut builder = default_builder.key_extractor(ClientIpKeyExtractor {
+            trust_forwarded_for: ratelimit_trust_forwarded_for,
+        });
         builder
             .requests_per_second(per_second.max(1))
             .burst_size(burst.max(1));
         builder
-            .const_permissive(ratelimit_disabled)
+            .permissive(ratelimit_disabled)
             .finish()
             .expect("invalid rate-limit configuration")
     };
