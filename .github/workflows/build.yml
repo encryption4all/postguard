@@ -47,6 +47,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all -- --check
 
+  clippy:
+    name: Clippy workspace
+    strategy:
+      matrix:
+        workspace: [core, pkg, cli, ffi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - if: ${{ matrix.workspace == 'core' }}
+        run: cargo clippy --manifest-path pg-core/Cargo.toml --all-targets --features test,rust,stream -- -D warnings
+      - if: ${{ matrix.workspace != 'core' }}
+        run: cargo clippy --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all-targets --all-features -- -D warnings
+
   test-wasm-browsers:
     name: Run wasm tests in browsers
     strategy:
