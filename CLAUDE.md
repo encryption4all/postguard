@@ -1,11 +1,10 @@
+# Agent notes
 
----
-
-## Agent notes (migrated from the dobby memory repo)
+Migrated from the dobby memory repo (`encryption4all/dobby`). This file is the single home for durable repo knowledge; dobby updates it in the same PR whenever it learns something worth keeping.
 
 ## Workspace & CI
 
-- Workspace crates: `pg-core` (lib), `pg-ffi` (C ABI), `pg-pkg` (PKG service), `pg-cli`, `pg-wasm`. Sub-crates share workspace files. Build/test from repo root: `cargo build`, `cargo test --workspace`. `pg-core` uses CGWKV + MKEM for multi-recipient encryption (production feature set `["cgwkv", "mkem"]`).
+- Workspace members: `pg-core` (lib), `pg-ffi` (C ABI), `pg-pkg` (PKG service), `pg-cli`. `pg-wasm` is a sibling crate the root `Cargo.toml` lists under `exclude`, so it is not part of the workspace and is built separately with wasm-pack (see Release & configuration). Sub-crates share workspace files. Build/test the workspace from repo root: `cargo build`, `cargo test --workspace` (this does not cover `pg-wasm`). `pg-core` uses CGWKV + MKEM for multi-recipient encryption (production feature set `["cgwkv", "mkem"]`).
 - CI's `Format workspace` matrix runs `cargo fmt --manifest-path pg-<crate>/Cargo.toml --all -- --check` per crate over shared workspace files; always run `cargo fmt --all -- --check` from repo root before pushing, or one crate's drift fails the whole matrix.
 - The Docker build (`Dockerfile`, `FROM rust:<version>-slim`) pins an older or different Rust than the `Test workspace`/`Format workspace` jobs' `dtolnay/rust-toolchain@stable`. A change can pass every workspace test and still fail Docker Build on a type-inference difference that doesn't reproduce on host stable (e.g. a slice-element-type unification difference across rustc versions). Check the Dockerfile's current pin, and run `cargo build --profile edge --bin pg-pkg` locally before pushing any `Cargo.toml` dependency bump; for a true repro, build the Docker image.
 - The `dobby-coder` GitHub App lacks `workflows: write` on this repo; any push touching `.github/workflows/*.yml` is rejected at the remote. Before treating a fix as blocked, check whether the same effect can be achieved in a pushable file (crate manifest, source, committed script); if a fix genuinely can only live in a workflow file, ship the pushable half and hand the maintainer ready-to-paste YAML in the PR body.
