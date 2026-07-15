@@ -1,0 +1,32 @@
+# Agent notes
+
+Migrated from the dobby memory repo (`encryption4all/dobby`). This file is the single home for durable repo knowledge; dobby updates it in the same PR whenever it learns something worth keeping.
+
+## Workspace & CI
+
+- Workspace members: `pg-core` (lib), `pg-ffi` (C ABI), `pg-pkg` (PKG service), `pg-cli`. `pg-wasm` is a sibling crate the root `Cargo.toml` lists under `exclude`, so it is not part of the workspace and is built separately with wasm-pack (see Release & configuration). Sub-crates share workspace files. Build/test the workspace from repo root: `cargo build`, `cargo test --workspace` (this does not cover `pg-wasm`). `pg-core` uses CGWKV + MKEM for multi-recipient encryption (production feature set `["cgwkv", "mkem"]`).
+- CI's `Format workspace` matrix runs `cargo fmt --manifest-path pg-<crate>/Cargo.toml --all -- --check` per crate over shared workspace files; always run `cargo fmt --all -- --check` from repo root before pushing, or one crate's drift fails the whole matrix.
+- The Docker build (`Dockerfile`, `FROM rust:<version>-slim`) pins an older or different Rust than the `Test workspace`/`Format workspace` jobs' `dtolnay/rust-toolchain@stable`. A change can pass every workspace test and still fail Docker Build on a type-inference difference that doesn't reproduce on host stable (e.g. a slice-element-type unification difference across rustc versions). Check the Dockerfile's current pin, and run `cargo build --profile edge --bin pg-pkg` locally before pushing any `Cargo.toml` dependency bump; for a true repro, build the Docker image.
+- The `dobby-coder` GitHub App lacks `workflows: write` on this repo; any push touching `.github/workflows/*.yml` is rejected at the remote. Before treating a fix as blocked, check whether the same effect can be achieved in a pushable file (crate manifest, source, committed script); if a fix genuinely can only live in a workflow file, ship the pushable half and hand the maintainer ready-to-paste YAML in the PR body.
+
+## Dependencies
+
+- postguard depends on `bincode-next` (crate name `bincode-next`, import `bincode_next`), a third-party fork by `panayang`/`Apich-Organization`, not the original `bincode-org`. Flag this trust caveat in any PR touching it. Pin the exact rc in use and re-audit on any rc bump (current: `bincode-next 3.0.0-rc.14`). `bincode_next::config::legacy()` is byte-compatible with bincode 1.x (pinned by a regression test); use it wherever wire/on-disk format matters. The error type split (`EncodeError`/`DecodeError`) is a breaking API change requiring a version bump of every in-repo dependent. A `bincode-next` rc bump may raise its MSRV, which can force the Docker Rust pin higher too; check before bumping either.
+- postguard's `irma` client comes from `irma = { package = "irmars", version = "..." }`, encryption4all's own fork of the dormant (since 2021) `tweedegolf/irmars`, published to get a `reqwest ^0.12` release line.
+- Bumping `rand` past 0.8 anywhere in the workspace is blocked until `ibe`/`ibs` (upstream crates) migrate off `rand_core 0.6`; check `cargo tree -p pg-core | grep rand_core` before adding a rand bump to a dep-update PR. The real bottleneck is `ibe` (no migration branch yet), not `ibs` (migrated on a branch, not yet published).
+- `cargo-audit` allowlist lives at repo-root `.cargo/audit.toml` (`[advisories] ignore = [...]`); each entry needs a comment naming the blocking crate plus a drop-when condition. CI does not currently run `cargo audit`; this file is for local/routine scans only.
+
+## Security
+
+- IRMA/Yivi session tokens are 20-character base62 alphanumeric strings, not UUIDs; never validate a `{token}` path param against UUID v4, it will reject every real request.
+- `pg-core` security: preserve these architecture invariants when touching unsealer/PKG code: Sign-then-Encrypt with multi-recipient KEM, strict separation of streaming vs in-memory decode paths, `preamble_checked` version+header-length bounds validation, AES-128-GCM with correct STREAM nonce construction, constant-time base64 (`base64ct`). Known pitfall classes that have already shipped fixes: malformed-ciphertext panics, open CORS, unbounded JSON body, no rate limiting, error-message info leaks. The one still-open gap is that key material (USK/MSK) is not zeroized on drop (no `zeroize` crate dependency yet).
+
+## Release & configuration
+
+- release-plz reads conventional-commit PR titles (PRs are squash-merged, so the title becomes the commit subject) to decide the version bump. A breaking change needs `fix(scope)!:`/`feat(scope)!:` (the `!` is what the semantic-PR-title check and release-plz both key on) plus a `BREAKING CHANGE:` footer, or the break silently ships as a patch/minor bump with no changelog warning.
+- `pg-wasm`'s web target: set `[package.metadata.wasm-pack.profile.release.wasm-bindgen] omit-default-module-path = true` in `pg-wasm/Cargo.toml` to drop the `new URL('index_bg.wasm', import.meta.url)` branch from generated `__wbg_init` glue (Webpack 5 otherwise statically resolves it and breaks bundler consumers that always pass an explicit `module_or_path`). Cleaner than post-build regex-stripping the generated JS.
+- `pg-pkg` (the postguard PKG service) CLI flags: `-t irma_token`, `-i irma_server_url`, `-d postgres_url`. Env vars: `IRMA_SERVER`, `DATABASE_URL`, `RUST_LOG`.
+
+## Operations
+
+- `pg-pkg` state model: master IBE/IBS keypairs load from `/tmp/keys/pkg_ibe.*`/`pkg_ibs.*` at startup and are not volume-mounted. Without all 4 `PKG_IBE_*`/`PKG_IBS_*` env vars set, or a persistent mount, every restart regenerates the MSK, invalidating every previously-issued USK and every previously-encrypted ciphertext; this is the single most dangerous operational gotcha in the service. API-key auth needs `DATABASE_URL` pointed at postguard-business (unset means API-key auth disabled; JWT/IRMA flows unaffected); nothing is cached, API-key lookups, USK/signing-key derivation, and IRMA session state all hit their backing store/computation fresh per request.
