@@ -9,9 +9,9 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use irma::*;
 use pg_core::identity::Attribute;
@@ -210,19 +210,29 @@ struct Claims {
 /// The key is fetched on first use instead of during worker startup, so the
 /// PKG no longer exits (or hangs) when the IRMA server is briefly unreachable
 /// at boot; JWT requests degrade to 503 until the IRMA server is back.
+///
+/// Failed fetches are negatively cached for [`FETCH_FAILURE_BACKOFF`]: during
+/// an IRMA outage a burst of JWT traffic fails fast with 503 instead of tying
+/// every worker up in back-to-back fetch timeouts.
 pub(crate) struct JwtKeyCache {
     /// `{irma_url}/publickey`
     url: String,
     /// Workers are single-threaded (services are `Rc`-shared), so `RefCell`
     /// suffices. Borrows are never held across an await point.
     key: RefCell<Option<DecodingKey>>,
+    /// When the last fetch attempt failed, if it did (negative cache).
+    last_failure: Cell<Option<Instant>>,
 }
+
+/// How long to fail fast after a failed key fetch before trying again.
+const FETCH_FAILURE_BACKOFF: Duration = Duration::from_secs(3);
 
 impl JwtKeyCache {
     fn new(irma_url: &str) -> Self {
         Self {
             url: format!("{irma_url}/publickey"),
             key: RefCell::new(None),
+            last_failure: Cell::new(None),
         }
     }
 
@@ -261,11 +271,39 @@ impl JwtKeyCache {
         })
     }
 
+    /// Fetch the key and store it, negatively caching failures so an IRMA
+    /// outage doesn't turn every JWT request into a full fetch timeout.
+    async fn fetch_and_store(&self) -> Result<(), crate::Error> {
+        if self
+            .last_failure
+            .get()
+            .is_some_and(|t| t.elapsed() < FETCH_FAILURE_BACKOFF)
+        {
+            return Err(crate::Error::UpstreamError);
+        }
+
+        match self.fetch().await {
+            Ok(key) => {
+                *self.key.borrow_mut() = Some(key);
+                self.last_failure.set(None);
+                Ok(())
+            }
+            Err(e) => {
+                self.last_failure.set(Some(Instant::now()));
+                Err(e)
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn clear_failure_backoff(&self) {
+        self.last_failure.set(None);
+    }
+
     /// Decode and validate a JWT, fetching the verification key on first use.
     async fn decode(&self, jwt: &str) -> Result<Claims, crate::Error> {
         if self.key.borrow().is_none() {
-            let key = self.fetch().await?;
-            *self.key.borrow_mut() = Some(key);
+            self.fetch_and_store().await?;
         }
 
         let mut validation = Validation::new(Algorithm::RS256);
@@ -667,6 +705,63 @@ pub mod tests {
             sha256_hex("PG-test-key"),
             "85e74a724a8252e6b9feeb05c47e452de5a9ab9eda70ebfa7cdee7dc78b369dd"
         );
+    }
+
+    /// Serve `served` at `/publickey` from a plain thread (raw HTTP, no async
+    /// runtime interplay), counting every fetch in `fetches`.
+    fn spawn_publickey_server(
+        served: std::sync::Arc<std::sync::Mutex<String>>,
+        fetches: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> u16 {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                fetches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let body = served.lock().unwrap().clone();
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        port
+    }
+
+    /// While the IRMA server is down (or serving garbage), fetch failures are
+    /// negatively cached: a burst of JWT requests fails fast with a single
+    /// upstream fetch instead of one fetch (timeout) per request.
+    #[actix_web::test]
+    async fn test_jwt_key_fetch_failure_is_negatively_cached() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let served = Arc::new(Mutex::new("not a pem".to_string()));
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let port = spawn_publickey_server(served, fetches.clone());
+        let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
+
+        // First request fetches (and fails to parse the key).
+        assert!(cache.decode("some.jwt.here").await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        // Burst within the backoff window: fail fast, no extra fetches.
+        for _ in 0..5 {
+            assert!(cache.decode("some.jwt.here").await.is_err());
+        }
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        // Once the backoff expires, fetching resumes.
+        cache.clear_failure_backoff();
+        assert!(cache.decode("some.jwt.here").await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
     }
 
     /// Regression test for the startup fragility where the PKG exited when the
