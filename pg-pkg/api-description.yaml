@@ -187,8 +187,20 @@ paths:
               schema:
                 type: string
                 description: "A compact JWS (three dot-separated segments)."
-        "502":
-          description: "Upstream IRMA server error (e.g. unknown session)."
+        "400":
+          description: "Malformed session token."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "The IRMA server was unreachable."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "Upstream IRMA server error status (e.g. unknown session)."
           content:
             application/json:
               schema:
@@ -215,8 +227,20 @@ paths:
             text/event-stream:
               schema:
                 type: string
+        "400":
+          description: "Malformed session token."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "Unexpected upstream failure while opening the stream."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "503":
-          description: "Upstream IRMA server unreachable."
+          description: "Upstream IRMA server unreachable or returned an error status."
           content:
             application/json:
               schema:
@@ -401,7 +425,8 @@ components:
             A Yivi disjunction-of-conjunctions (OR of ANDs). An **empty inner
             conjunction** marks the whole disjunction optional per Yivi
             convention. Note irmamobile#360: deployed apps mis-render an
-            empty alternative listed first — clients currently place it last.
+            empty alternative listed first — place it last, as the server's
+            own `optional: true` expansion does. Either order is accepted.
           items:
             type: array
             items:

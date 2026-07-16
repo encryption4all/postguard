@@ -42,7 +42,7 @@
     },
     "conjunction": {
       "title": "Conjunction",
-      "description": "An AND of attributes. An EMPTY conjunction inside a disjunction marks the whole disjunction as skippable (Yivi's optional-disjunction convention). Ordering note (irmamobile#360): deployed Yivi apps mis-render a disjunction whose empty alternative comes FIRST, so clients currently place the empty alternative LAST; the server accepts either order.",
+      "description": "An AND of attributes. An EMPTY conjunction inside a disjunction marks the whole disjunction as skippable (Yivi's optional-disjunction convention). Ordering note (irmamobile#360): deployed Yivi apps mis-render a disjunction whose empty alternative comes FIRST, so place the empty alternative LAST — the server's own optional:true expansion does the same. The server accepts either order on input.",
       "type": "array",
       "items": { "$ref": "#/$defs/attribute" }
     },
