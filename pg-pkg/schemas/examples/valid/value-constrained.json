@@ -1,0 +1,6 @@
+{
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email", "v": "alice@example.com" }
+  ],
+  "validity": 120
+}

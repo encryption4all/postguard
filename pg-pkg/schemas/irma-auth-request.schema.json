@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://postguard.eu/schemas/irma-auth-request.schema.json",
+  "title": "IrmaAuthRequest",
+  "description": "The condiscon disclosure request accepted by the PKG's POST /v2/{irma|request}/start. Faithful to the server's parser (serde), which REJECTS unknown fields with a 400 naming the offending field: in a key-issuance request a silently dropped misspelled field would widen the disclosure the caller intended. The canonical examples in examples/{valid,invalid}/ are executable tests against the server's actual parser (pg-pkg/tests/contract_examples.rs).",
+  "type": "object",
+  "required": ["con"],
+  "additionalProperties": false,
+  "properties": {
+    "con": {
+      "description": "Conjunction over the entries: the user must satisfy every entry.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/conItem" }
+    },
+    "validity": {
+      "description": "Validity of the session-result JWT in seconds. The parser accepts any non-negative integer; the handler rejects values above 86400 (1 day) with 400, and defaults to 300 when absent.",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "attribute": {
+      "title": "DisclosureAttribute",
+      "type": "object",
+      "required": ["t"],
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "description": "Yivi attribute type, e.g. pbdf.sidn-pbdf.email.email.",
+          "type": "string"
+        },
+        "v": {
+          "description": "When present and non-null, constrains disclosure to this exact value.",
+          "type": ["string", "null"]
+        },
+        "optional": {
+          "description": "When true, the PKG wraps this attribute in a disjunction with an empty option so the user may skip it in the Yivi app. Only meaningful on a top-level (Single) entry; ignored inside a nested disjunction.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "conjunction": {
+      "title": "Conjunction",
+      "description": "An AND of attributes. An EMPTY conjunction inside a disjunction marks the whole disjunction as skippable (Yivi's optional-disjunction convention, conventionally listed first). Ordering is presentational only; the server accepts either order. (Historical: Yivi apps before irmamobile v8.1.0 mis-rendered an empty-first alternative — irmamobile#360, fixed.)",
+      "type": "array",
+      "items": { "$ref": "#/$defs/attribute" }
+    },
+    "disjunction": {
+      "title": "Disjunction",
+      "description": "An OR of conjunctions (Yivi 'discon'): the user picks ONE inner conjunction to satisfy. Note the nesting: a disjunction entry is an array of ARRAYS of attributes — a single-level array of attributes is malformed (see examples/invalid/discon-missing-conjunction-level.json).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/conjunction" }
+    },
+    "conItem": {
+      "title": "ConItem",
+      "description": "One entry of `con`: either a single attribute object, or a nested disjunction-of-conjunctions.",
+      "oneOf": [
+        { "$ref": "#/$defs/attribute" },
+        { "$ref": "#/$defs/disjunction" }
+      ]
+    }
+  }
+}

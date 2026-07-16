@@ -58,7 +58,10 @@ fn con_item_to_discon(item: &ConItem) -> Vec<Vec<AttributeRequest>> {
         ConItem::Single(attr) => {
             let ar = attr_to_request(attr);
             if attr.optional {
-                // Empty first option lets the user skip this attribute.
+                // Empty first option lets the user skip this attribute
+                // (Yivi convention). Ordering is presentational only; apps
+                // before irmamobile v8.1.0 mis-rendered this order
+                // (irmamobile#360), fixed since.
                 vec![vec![], vec![ar]]
             } else {
                 vec![vec![ar]]

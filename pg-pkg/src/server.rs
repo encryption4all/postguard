@@ -64,6 +64,27 @@ impl Guard for ApiKeyGuard {
     }
 }
 
+/// JSON body handling for the `/v2` scope. Body-deserialization failures
+/// (malformed JSON, unknown or missing fields — the request types are
+/// `#[serde(deny_unknown_fields)]`) become a 400 in the documented
+/// `{error, message}` envelope, carrying serde's client-actionable message
+/// (e.g. ``unknown field `vaule`, expected one of `t`, `v`, `optional```).
+fn json_config() -> web::JsonConfig {
+    web::JsonConfig::default()
+        .limit(64 * 1024)
+        .error_handler(|err, _req| {
+            let body = serde_json::json!({
+                "error": true,
+                "message": err.to_string(),
+            });
+            actix_web::error::InternalError::from_response(
+                err,
+                actix_web::HttpResponse::BadRequest().json(body),
+            )
+            .into()
+        })
+}
+
 /// Precomputed parameter data.
 #[derive(Debug, Clone)]
 pub struct ParametersData {
@@ -246,7 +267,12 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
             // layers in reverse registration order, so the Governor must be
             // wrapped after `collect_metrics` to sit in front of it.
             .wrap(Governor::new(&general_ratelimit))
-            .app_data(Data::new(web::JsonConfig::default().limit(64 * 1024)))
+            // Body-deserialization failures (malformed JSON, unknown/missing
+            // fields — request types are #[serde(deny_unknown_fields)]) must
+            // use the documented {error, message} envelope, not actix's
+            // default plain-text body. The serde message is client-actionable
+            // ("unknown field `vaule`, expected one of `t`, `v`, `optional`").
+            .app_data(Data::new(json_config()))
             .service(
                 resource("/parameters")
                     .app_data(Data::new(ibe_pd.clone()))
@@ -1348,5 +1374,37 @@ pub(crate) mod tests {
                 "permissive mode must never return 429 (request {i})"
             );
         }
+    }
+
+    /// A request with a misspelled field must be a 400 in the documented
+    /// `{error, message}` envelope, with the message naming the field — not
+    /// silently accepted (deny_unknown_fields), and not actix's default
+    /// plain-text error body.
+    #[actix_web::test]
+    async fn test_unknown_request_field_yields_400_envelope() {
+        use pg_core::api::IrmaAuthRequest;
+
+        let app = test::init_service(App::new().app_data(Data::new(json_config())).service(
+            resource("/echo").route(web::post().to(|_body: web::Json<IrmaAuthRequest>| async {
+                actix_web::HttpResponse::Ok().finish()
+            })),
+        ))
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/echo")
+            .insert_header(("Content-Type", "application/json"))
+            .set_payload(r#"{ "con": [ { "t": "pbdf.sidn-pbdf.email.email", "vaule": "x" } ] }"#)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["error"], serde_json::Value::Bool(true));
+        let msg = body["message"].as_str().expect("message must be a string");
+        assert!(
+            msg.contains("vaule"),
+            "the 400 must name the unknown field, got: {msg}"
+        );
     }
 }

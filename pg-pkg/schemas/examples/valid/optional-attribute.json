@@ -1,0 +1,6 @@
+{
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email" },
+    { "t": "pbdf.sidn-pbdf.mobilenumber.mobilenumber", "optional": true }
+  ]
+}

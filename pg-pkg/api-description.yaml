@@ -1,0 +1,576 @@
+openapi: "3.0.3"
+info:
+  title: "PostGuard PKG API"
+  description: |
+    The Private Key Generator (PKG). Coordinates identity verification with a
+    Yivi (IRMA) server and derives identity-based keys: IBE user secret keys
+    for decryption and IBS signing keys for sender authenticity, plus the
+    public parameters clients need to seal/verify.
+
+    This document is the **v2 HTTP contract** — one of the three seams every
+    PostGuard client depends on (wire format, this API, and the condiscon
+    request shape; the latter is additionally pinned by
+    `schemas/irma-auth-request.schema.json`). Treat response/request shape
+    changes here as breaking unless additive.
+
+    ### Path prefix aliases
+    The identity endpoints are registered under `/v2/{irma|request}/…`; both
+    prefixes serve the same handlers. `…/request/…` is canonical; `…/irma/…`
+    is a legacy alias kept for deployed clients. This document lists the
+    canonical paths only.
+
+    ### Authentication
+    - **Yivi JWT** (`Authorization: Bearer <jwt>`): the session-result JWT
+      obtained from `/v2/request/jwt/{token}` after a completed disclosure,
+      signed by the IRMA server (RS256). Used for key issuance.
+    - **Business API key** (`Authorization: Bearer PG-…`): issued by the
+      business portal. Only available when the PKG is configured with the
+      business database; routes requiring it are absent otherwise.
+
+    ### Rate limiting
+    All `/v2` routes are per-IP rate-limited; session-start and key-issuance
+    routes have a stricter budget. Over-limit requests receive **429**.
+  version: "2.0.0"
+servers:
+  - url: http://localhost:8087
+    description: Development server (e2e stack / docker compose)
+tags:
+  - name: "Health"
+    description: "Health check"
+  - name: "Metrics"
+    description: "Prometheus scrape endpoint"
+  - name: "Parameters"
+    description: "Public parameters for sealing and signature verification"
+  - name: "Session"
+    description: "Yivi disclosure sessions (proxied to the IRMA server)"
+  - name: "Keys"
+    description: "Identity-based key issuance"
+  - name: "API keys"
+    description: "Business API key validation"
+paths:
+  /health:
+    get:
+      tags: ["Health"]
+      summary: "Health check"
+      operationId: "health"
+      security: []
+      responses:
+        "200":
+          description: "The PKG is up."
+  /metrics:
+    get:
+      tags: ["Metrics"]
+      summary: "Prometheus metrics"
+      operationId: "metrics"
+      security: []
+      responses:
+        "200":
+          description: "Prometheus text exposition format."
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v2/parameters:
+    get:
+      tags: ["Parameters"]
+      summary: "IBE master public key"
+      description: |
+        The public parameters clients use to **seal**. The `publicKey` value
+        is an opaque pg-core-serialized artifact: pass it to the client
+        library (`@e4a/pg-wasm` `seal`, pg-core `Sealer`) verbatim.
+        Cacheable; served with an `ETag`.
+      operationId: "parameters"
+      security: []
+      responses:
+        "200":
+          description: "Successful operation."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Parameters"
+  /v2/sign/parameters:
+    get:
+      tags: ["Parameters"]
+      summary: "IBS verifying key"
+      description: |
+        The public parameters used to **verify signatures** when unsealing.
+        Same envelope as `/v2/parameters`; the `publicKey` value is the
+        opaque IBS verifying key. Cacheable; served with an `ETag`.
+      operationId: "signParameters"
+      security: []
+      responses:
+        "200":
+          description: "Successful operation."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Parameters"
+  /v2/request/start:
+    post:
+      tags: ["Session"]
+      summary: "Start a Yivi disclosure session"
+      description: |
+        Builds a Yivi disclosure request from the posted condiscon (see
+        `IrmaAuthRequest` and `schemas/irma-auth-request.schema.json`) and
+        starts a session on the IRMA server. The response is the IRMA
+        server's session package: render `sessionPtr` as a QR / deeplink for
+        the Yivi app, then poll `/v2/request/jwt/{token}`.
+      operationId: "startSession"
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IrmaAuthRequest"
+            examples:
+              flat:
+                summary: "Legacy flat conjunction"
+                value:
+                  con:
+                    - { t: "pbdf.sidn-pbdf.email.email" }
+                    - { t: "pbdf.gemeente.personalData.fullname", optional: true }
+              condiscon:
+                summary: "Conjunction with a nested disjunction (condiscon)"
+                value:
+                  con:
+                    - { t: "pbdf.sidn-pbdf.email.email" }
+                    - - [ { t: "pbdf.gemeente.personalData.fullname" } ]
+                      - - { t: "pbdf.pbdf.passport.firstName" }
+                        - { t: "pbdf.pbdf.passport.lastName" }
+                  validity: 300
+      responses:
+        "200":
+          description: "Session started."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionData"
+        "400":
+          description: "Malformed body, or `validity` above the maximum (86400 s)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "Rate limited."
+        "500":
+          description: "The IRMA server rejected the session or was unreachable."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v2/request/jwt/{token}:
+    get:
+      tags: ["Session"]
+      summary: "Fetch the session-result JWT"
+      description: |
+        Proxies the IRMA server's `result-jwt` for the session. Once the
+        disclosure completes, the response body is a signed JWT (RS256, the
+        IRMA server's key) whose claims carry the session status, proof
+        status and disclosed attributes. Use it as the Bearer token for the
+        key endpoints.
+      operationId: "sessionJwt"
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: "The session token from `/v2/request/start`."
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "The (possibly not-yet-final) session result JWT."
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: "A compact JWS (three dot-separated segments)."
+        "400":
+          description: "Malformed session token."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "The IRMA server was unreachable."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "Upstream IRMA server error status (e.g. unknown session)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v2/request/statusevents/{token}:
+    get:
+      tags: ["Session"]
+      summary: "Session status events (SSE)"
+      description: |
+        Proxies the IRMA server's server-sent-events stream for the session,
+        so web clients can react to status changes without polling.
+      operationId: "statusEvents"
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "An SSE stream of session status updates."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          description: "Malformed session token."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "Unexpected upstream failure while opening the stream."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "Upstream IRMA server unreachable or returned an error status."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v2/request/key/{timestamp}:
+    get:
+      tags: ["Keys"]
+      summary: "IBE user secret key for a timestamp"
+      description: |
+        Derives the caller's IBE user secret key for the decryption identity
+        proven by the Bearer JWT, bound to `timestamp` (the seal-time policy
+        timestamp — it must equal the `ts` in the ciphertext's policy). The
+        key is only present when the session status is `DONE` with a `VALID`
+        proof.
+      operationId: "keyWithTimestamp"
+      security:
+        - yiviJwt: []
+      parameters:
+        - name: timestamp
+          in: path
+          required: true
+          description: "Unix seconds; the policy timestamp the key must match."
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: "Successful operation (inspect `status`/`proofStatus`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyResponse"
+        "401":
+          description: "Missing/invalid JWT."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "Rate limited."
+        "503":
+          description: "IRMA verification key unavailable (IRMA server unreachable)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v2/request/key:
+    get:
+      tags: ["Keys"]
+      summary: "IBE user secret key (no timestamp)"
+      description: "As `/v2/request/key/{timestamp}`, for identities without a policy timestamp."
+      operationId: "key"
+      security:
+        - yiviJwt: []
+      responses:
+        "200":
+          description: "Successful operation (inspect `status`/`proofStatus`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyResponse"
+        "401":
+          description: "Missing/invalid JWT."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v2/request/sign/key:
+    post:
+      tags: ["Keys"]
+      summary: "IBS signing keys"
+      description: |
+        Derives the caller's identity-based **signing** keys.
+
+        - **Yivi JWT auth:** the signing identity is the subset of the JWT's
+          disclosed attributes selected by the request body (`pubSignId`,
+          optionally `privSignId`).
+        - **Business API key auth (`PG-…`):** the signing identity comes from
+          the business database configuration for that key; the request body
+          is ignored. The PKG stamps the policy timestamp in both cases.
+      operationId: "signingKey"
+      security:
+        - yiviJwt: []
+        - businessApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SigningKeyRequest"
+      responses:
+        "200":
+          description: "Successful operation (inspect `status`/`proofStatus`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigningKeyResponse"
+        "401":
+          description: "Missing/invalid JWT or API key."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "Rate limited."
+  /v2/api-key/validate:
+    get:
+      tags: ["API keys"]
+      summary: "Validate a business API key"
+      description: |
+        Confirms a `PG-…` key is valid (exists, not expired, not revoked) and
+        returns the tenant identity. Used by sibling services (cryptify) to
+        gate per-tenant behaviour. **Only registered when the PKG is
+        configured with the business database.**
+      operationId: "apiKeyValidate"
+      security:
+        - businessApiKey: []
+      responses:
+        "200":
+          description: "The key is valid."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyValidateResponse"
+        "401":
+          description: "Unknown, expired or revoked key."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  securitySchemes:
+    yiviJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Session-result JWT from `/v2/request/jwt/{token}`."
+    businessApiKey:
+      type: http
+      scheme: bearer
+      description: "Business API key; the token starts with `PG-`."
+  schemas:
+    Parameters:
+      type: object
+      required: [formatVersion, publicKey]
+      properties:
+        formatVersion:
+          type: integer
+          description: "Formatting version of the key material."
+        publicKey:
+          description: |
+            Opaque pg-core-serialized key artifact. Pass verbatim to the
+            client crypto library; never introspect.
+      additionalProperties: false
+    DisclosureAttribute:
+      type: object
+      required: [t]
+      properties:
+        t:
+          type: string
+          description: "Yivi attribute type, e.g. `pbdf.sidn-pbdf.email.email`."
+        v:
+          type: string
+          nullable: true
+          description: "When present, constrains disclosure to this exact value."
+        optional:
+          type: boolean
+          default: false
+          description: |
+            When true, the PKG wraps the attribute in a disjunction with an
+            empty option so the user may skip it in the Yivi app.
+      additionalProperties: false
+      description: |
+        Unknown fields are **rejected** (400, naming the offending field):
+        silently dropping a misspelled `v` or `optional` would widen the
+        disclosure the caller intended.
+    ConItem:
+      oneOf:
+        - $ref: "#/components/schemas/DisclosureAttribute"
+        - type: array
+          description: |
+            A Yivi disjunction-of-conjunctions (OR of ANDs). An **empty inner
+            conjunction** marks the whole disjunction optional per Yivi
+            convention (conventionally listed first). Ordering is
+            presentational only; either order is accepted. (Historical: apps
+            before irmamobile v8.1.0 mis-rendered an empty-first alternative
+            — irmamobile#360, fixed.)
+          items:
+            type: array
+            items:
+              $ref: "#/components/schemas/DisclosureAttribute"
+      description: "One entry of `IrmaAuthRequest.con`."
+    IrmaAuthRequest:
+      type: object
+      required: [con]
+      properties:
+        con:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConItem"
+          description: "Conjunction over the entries: every entry must be satisfied."
+        validity:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 86400
+          default: 300
+          description: "Validity of the session-result JWT, in seconds."
+      additionalProperties: false
+      description: |
+        The condiscon request accepted by `/v2/request/start`. Unknown fields
+        are rejected with a 400 naming the field. Also pinned as a standalone
+        JSON Schema with canonical examples under `pg-pkg/schemas/` — those
+        examples are executable tests against the server's parser.
+    SessionData:
+      type: object
+      required: [sessionPtr, token]
+      properties:
+        sessionPtr:
+          type: object
+          required: [u, irmaqr]
+          properties:
+            u:
+              type: string
+              description: "Session URL for the Yivi app (QR/deeplink payload)."
+            irmaqr:
+              type: string
+              description: "Session type, e.g. `disclosing`."
+        token:
+          type: string
+          description: "Requestor token; path parameter for the jwt/statusevents endpoints."
+    SessionStatus:
+      type: string
+      description: "Yivi session status."
+      enum: [INITIALIZED, PAIRING, CONNECTED, CANCELLED, DONE, TIMEOUT]
+    ProofStatus:
+      type: string
+      description: "Yivi proof status."
+      enum: [VALID, INVALID, INVALID_TIMESTAMP, UNMATCHED_REQUEST, MISSING_ATTRIBUTES, EXPIRED]
+    KeyResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        proofStatus:
+          $ref: "#/components/schemas/ProofStatus"
+        key:
+          description: |
+            Opaque pg-core-serialized IBE user secret key. Present only when
+            `status` is `DONE` and `proofStatus` is `VALID`.
+    Attribute:
+      type: object
+      required: [t]
+      properties:
+        t:
+          type: string
+          description: "Yivi attribute type."
+        v:
+          type: string
+          nullable: true
+          description: "Attribute value."
+      description: |
+        Deliberately lenient about extra fields (unlike `DisclosureAttribute`):
+        this type is shared with the binary wire format, the wasm/FFI seal
+        boundary and response policies, and in the signing-key request paths
+        its values are not semantically load-bearing (the identity comes from
+        the JWT or the business database).
+    SigningKeyRequest:
+      type: object
+      required: [pubSignId]
+      additionalProperties: false
+      properties:
+        pubSignId:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attribute"
+          description: "Attributes to include in the public (always visible) signing identity."
+        privSignId:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attribute"
+          description: "Attributes to include in the private (recipient-only) signing identity."
+    SigningKeyResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        proofStatus:
+          $ref: "#/components/schemas/ProofStatus"
+        pubSignKey:
+          $ref: "#/components/schemas/SigningKeyExt"
+        privSignKey:
+          $ref: "#/components/schemas/SigningKeyExt"
+    SigningKeyExt:
+      type: object
+      required: [key, policy]
+      properties:
+        key:
+          description: "Opaque pg-core-serialized IBS signing key."
+        policy:
+          type: object
+          required: [ts, con]
+          properties:
+            ts:
+              type: integer
+              format: int64
+              description: "PKG-stamped policy timestamp (unix seconds)."
+            con:
+              type: array
+              items:
+                $ref: "#/components/schemas/Attribute"
+    ApiKeyValidateResponse:
+      type: object
+      required: [tenant_id]
+      properties:
+        tenant_id:
+          type: string
+          description: "Stable per-tenant identifier (`organizations.id`)."
+        organisation_name:
+          type: string
+          nullable: true
+          description: "Best-effort organisation display name."
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: boolean
+          enum: [true]
+        message:
+          type: string

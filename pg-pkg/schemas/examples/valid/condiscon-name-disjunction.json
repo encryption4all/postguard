@@ -1,0 +1,24 @@
+{
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email" },
+    [
+      [],
+      [ { "t": "pbdf.gemeente.personalData.fullname" } ],
+      [
+        { "t": "pbdf.pbdf.passport.firstName" },
+        { "t": "pbdf.pbdf.passport.lastName" }
+      ],
+      [
+        { "t": "pbdf.pbdf.idcard.firstName" },
+        { "t": "pbdf.pbdf.idcard.lastName" }
+      ],
+      [
+        { "t": "pbdf.pbdf.drivinglicence.firstName" },
+        { "t": "pbdf.pbdf.drivinglicence.lastName" }
+      ]
+    ],
+    { "t": "pbdf.sidn-pbdf.mobilenumber.mobilenumber", "optional": true },
+    { "t": "pbdf.gemeente.personalData.dateofbirth", "optional": true }
+  ],
+  "validity": 300
+}

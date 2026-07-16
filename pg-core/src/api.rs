@@ -23,7 +23,13 @@ pub struct Parameters<T> {
 /// first option, allowing the user to skip disclosing it in the Yivi app.
 ///
 /// This type is only used in API requests (JSON), not in the binary wire format.
+///
+/// Unknown fields are rejected: in a key-issuance request a silently dropped
+/// misspelled field (`vaule` for `v`, `optioanl` for `optional`) would *widen*
+/// the disclosure the caller intended, so a typo must be a 400, not a
+/// reinterpretation.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct DisclosureAttribute {
     /// Attribute type.
     #[serde(rename = "t")]
@@ -45,6 +51,7 @@ pub struct DisclosureAttribute {
 /// `[{t,v?,optional?}, ...]` JSON shape still deserialises, because
 /// `ConItem` is `#[serde(untagged)]`.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IrmaAuthRequest {
     /// The conjunction of attributes (or disjunctions) for the disclosure request.
     pub con: Vec<ConItem>,
@@ -71,7 +78,7 @@ pub struct KeyResponse<T> {
 
 /// The request Signing key request body.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SigningKeyRequest {
     /// The public signing identity.
     pub pub_sign_id: Vec<Attribute>,
@@ -89,13 +96,59 @@ pub struct SigningKeyRequest {
 /// disjunction-of-conjunctions (`OR` of `AND`), which deserializes into
 /// [`ConItem::Discon`]. An empty inner conjunction marks the discon as
 /// optional per Yivi convention.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(untagged)]
 pub enum ConItem {
     /// A single attribute, optionally marked `optional: true`.
     Single(DisclosureAttribute),
     /// A disjunction of conjunctions of attributes.
     Discon(Vec<Vec<DisclosureAttribute>>),
+}
+
+/// Manual [`Deserialize`] instead of `#[serde(untagged)]`: untagged enums
+/// swallow the inner error ("data did not match any variant"), which is
+/// useless to a client debugging a 400. The JSON shape already discriminates
+/// the variants (object vs array), so dispatch on it and let the real error —
+/// e.g. ``unknown field `vaule`, expected one of `t`, `v`, `optional``` —
+/// propagate.
+impl<'de> Deserialize<'de> for ConItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ConItemVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ConItemVisitor {
+            type Value = ConItem;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str(
+                    "an attribute object like {\"t\": …} or a disjunction \
+                        (array of conjunctions, i.e. array of arrays of attributes)",
+                )
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<ConItem, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                DisclosureAttribute::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(ConItem::Single)
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<ConItem, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                Vec::<Vec<DisclosureAttribute>>::deserialize(
+                    serde::de::value::SeqAccessDeserializer::new(seq),
+                )
+                .map(ConItem::Discon)
+            }
+        }
+
+        deserializer.deserialize_any(ConItemVisitor)
+    }
 }
 
 /// The signing key response from the Private Key Generator (PKG).
@@ -159,6 +212,54 @@ mod tests {
             }
             other => panic!("expected Discon, got {:?}", other),
         }
+    }
+
+    /// Unknown fields in a request are rejected, not silently ignored: a
+    /// misspelled `v` would otherwise WIDEN the disclosure the caller
+    /// intended. The error must name the offending field so a client
+    /// developer can act on the 400.
+    #[test]
+    fn irma_auth_request_rejects_unknown_attribute_field() {
+        let body =
+            r#"{ "con": [ { "t": "pbdf.sidn-pbdf.email.email", "vaule": "alice@example.com" } ] }"#;
+
+        let err = serde_json::from_str::<IrmaAuthRequest>(body)
+            .expect_err("a misspelled attribute field must be rejected");
+        let msg = alloc::string::ToString::to_string(&err);
+        assert!(
+            msg.contains("vaule"),
+            "error must name the unknown field, got: {msg}"
+        );
+    }
+
+    /// Same at the top level: extra request fields are rejected.
+    #[test]
+    fn irma_auth_request_rejects_unknown_top_level_field() {
+        let body = r#"{ "con": [ { "t": "pbdf.sidn-pbdf.email.email" } ], "validty": 300 }"#;
+
+        let err = serde_json::from_str::<IrmaAuthRequest>(body)
+            .expect_err("a misspelled top-level field must be rejected");
+        let msg = alloc::string::ToString::to_string(&err);
+        assert!(
+            msg.contains("validty"),
+            "error must name the unknown field, got: {msg}"
+        );
+    }
+
+    /// The nesting mistake (a one-level array of attributes where a
+    /// disjunction needs arrays-of-arrays) yields the visitor's shape hint,
+    /// not an inscrutable untagged-enum error.
+    #[test]
+    fn con_item_nesting_mistake_gets_a_useful_error() {
+        let body = r#"{ "con": [ [ { "t": "pbdf.gemeente.personalData.fullname" } ] ] }"#;
+
+        let err = serde_json::from_str::<IrmaAuthRequest>(body)
+            .expect_err("attributes directly inside a disjunction must be rejected");
+        let msg = alloc::string::ToString::to_string(&err);
+        assert!(
+            !msg.contains("did not match any variant"),
+            "must not surface the untagged-enum catch-all, got: {msg}"
+        );
     }
 
     /// Backwards-compat: an old-style flat `con` of `{t,v?,optional?}` objects
