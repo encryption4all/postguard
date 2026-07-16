@@ -7,14 +7,17 @@
 //! already in the wild — old encrypted emails and files — breaks identically.
 //! That must be a deliberate, versioned decision: regenerate fixtures for the
 //! NEW version (see the testdata README) and keep the old set decodable.
-#![cfg(all(feature = "rust", feature = "stream"))]
+//!
+//! Gated on the default `rust` feature so a plain `cargo test -p pg-core`
+//! runs the tripwires; only the streaming-container test additionally needs
+//! the `stream` feature (CI runs with `test,rust,stream`, covering all four).
+#![cfg(feature = "rust")]
 
 use std::fs;
 use std::path::PathBuf;
 
 use pg_core::api::Parameters;
 use pg_core::artifacts::{UserSecretKey, VerifyingKey};
-use pg_core::client::rust::stream::UnsealerStreamConfig;
 use pg_core::client::rust::UnsealerMemoryConfig;
 use pg_core::client::Unsealer;
 use pg_core::consts::{PREAMBLE_SIZE, PRELUDE, PRELUDE_SIZE, VERSION_SIZE, VERSION_V3};
@@ -107,7 +110,10 @@ fn golden_mem_fixture_unseals() {
 /// The streaming golden container (what cryptify stores and clients upload)
 /// must keep parsing and decrypting forever.
 #[test]
+#[cfg(feature = "stream")]
 fn golden_stream_fixture_unseals() {
+    use pg_core::client::rust::stream::UnsealerStreamConfig;
+
     let f = fixture();
     let ct = testdata("stream.bin");
 
