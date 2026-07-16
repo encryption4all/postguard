@@ -211,6 +211,11 @@ struct Claims {
 /// PKG no longer exits (or hangs) when the IRMA server is briefly unreachable
 /// at boot; JWT requests degrade to 503 until the IRMA server is back.
 ///
+/// On a signature mismatch the key is re-fetched once (rate-limited by
+/// [`MIN_REFRESH_INTERVAL`]) and the JWT retried, so rotating the IRMA
+/// server's signing key heals on the next request instead of requiring a PKG
+/// restart.
+///
 /// Failed fetches are negatively cached for [`FETCH_FAILURE_BACKOFF`], and
 /// concurrent fetches are de-duplicated on an async lock: a burst of JWT
 /// traffic while the key is missing costs a single upstream fetch — the rest
@@ -221,12 +226,18 @@ pub(crate) struct JwtKeyCache {
     /// Workers are single-threaded (services are `Rc`-shared), so `RefCell`
     /// suffices. Borrows are never held across an await point.
     key: RefCell<Option<DecodingKey>>,
+    /// When the key was last fetched; gates rotation-triggered refreshes so a
+    /// flood of forged tokens cannot become a fetch-flood on the IRMA server.
+    last_fetch: Cell<Option<Instant>>,
     /// When the last fetch attempt failed, if it did (negative cache).
     last_failure: Cell<Option<Instant>>,
     /// Serializes upstream fetches so concurrent requests don't each start
     /// their own (in-flight de-duplication).
     fetch_lock: futures::lock::Mutex<()>,
 }
+
+/// Minimum time between rotation-triggered key refreshes (per worker).
+const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 /// How long to fail fast after a failed key fetch before trying again.
 const FETCH_FAILURE_BACKOFF: Duration = Duration::from_secs(3);
@@ -236,6 +247,7 @@ impl JwtKeyCache {
         Self {
             url: format!("{irma_url}/publickey"),
             key: RefCell::new(None),
+            last_fetch: Cell::new(None),
             last_failure: Cell::new(None),
             fetch_lock: futures::lock::Mutex::new(()),
         }
@@ -276,6 +288,32 @@ impl JwtKeyCache {
         })
     }
 
+    /// Fetch the key, store it, and record the outcome. Caller must hold
+    /// `fetch_lock`. Failures are negatively cached; successes stamp
+    /// `last_fetch` (the rotation-refresh debounce).
+    async fn fetch_and_record(&self) -> Result<(), crate::Error> {
+        if self
+            .last_failure
+            .get()
+            .is_some_and(|t| t.elapsed() < FETCH_FAILURE_BACKOFF)
+        {
+            return Err(crate::Error::UpstreamError);
+        }
+
+        match self.fetch().await {
+            Ok(key) => {
+                *self.key.borrow_mut() = Some(key);
+                self.last_failure.set(None);
+                self.last_fetch.set(Some(Instant::now()));
+                Ok(())
+            }
+            Err(e) => {
+                self.last_failure.set(Some(Instant::now()));
+                Err(e)
+            }
+        }
+    }
+
     /// Ensure the verification key is cached, fetching it if necessary.
     ///
     /// Concurrent callers de-duplicate on `fetch_lock`: one request does the
@@ -290,25 +328,13 @@ impl JwtKeyCache {
             return Ok(());
         }
 
-        if self
-            .last_failure
-            .get()
-            .is_some_and(|t| t.elapsed() < FETCH_FAILURE_BACKOFF)
-        {
-            return Err(crate::Error::UpstreamError);
-        }
+        self.fetch_and_record().await
+    }
 
-        match self.fetch().await {
-            Ok(key) => {
-                *self.key.borrow_mut() = Some(key);
-                self.last_failure.set(None);
-                Ok(())
-            }
-            Err(e) => {
-                self.last_failure.set(Some(Instant::now()));
-                Err(e)
-            }
-        }
+    /// Re-fetch the verification key even though one is cached (rotation).
+    async fn refresh(&self) -> Result<(), crate::Error> {
+        let _guard = self.fetch_lock.lock().await;
+        self.fetch_and_record().await
     }
 
     #[cfg(test)]
@@ -316,25 +342,67 @@ impl JwtKeyCache {
         self.last_failure.set(None);
     }
 
+    /// Whether a rotation-triggered refresh is allowed yet.
+    fn refresh_due(&self) -> bool {
+        self.last_fetch
+            .get()
+            .is_none_or(|t| t.elapsed() >= MIN_REFRESH_INTERVAL)
+    }
+
+    #[cfg(test)]
+    fn expire_debounce(&self) {
+        self.last_fetch.set(None);
+    }
+
+    /// Decode a JWT with the given key, returning the raw jsonwebtoken error
+    /// so the caller can distinguish a signature mismatch (possible key
+    /// rotation) from client-side problems.
+    fn decode_with(key: &DecodingKey, jwt: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.leeway = 0;
+
+        decode::<Claims>(jwt, key, &validation).map(|decoded| decoded.claims)
+    }
+
     /// Decode and validate a JWT, fetching the verification key on first use.
+    ///
+    /// On a signature mismatch the key is refreshed once (rate-limited) and
+    /// the JWT retried: an IRMA server key rotation heals here instead of
+    /// 401-ing every request until someone restarts the PKG.
     async fn decode(&self, jwt: &str) -> Result<Claims, crate::Error> {
         if self.key.borrow().is_none() {
             self.ensure_key().await?;
         }
 
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.leeway = 0;
+        let kind = {
+            let borrowed = self.key.borrow();
+            let key = borrowed.as_ref().ok_or(crate::Error::Unexpected)?;
+            match Self::decode_with(key, jwt) {
+                Ok(claims) => return Ok(claims),
+                Err(e) => e.into_kind(),
+            }
+        };
 
-        let borrowed = self.key.borrow();
-        // Populated above if it was empty.
-        let key = borrowed.as_ref().ok_or(crate::Error::Unexpected)?;
+        if matches!(kind, ErrorKind::InvalidSignature) && self.refresh_due() {
+            log::info!(
+                "JWT signature mismatch; re-fetching the IRMA verification key \
+                    from {} in case it rotated",
+                self.url
+            );
+            self.refresh().await?;
 
-        decode::<Claims>(jwt, key, &validation)
-            .map(|decoded| decoded.claims)
-            .map_err(|e| match e.into_kind() {
+            let borrowed = self.key.borrow();
+            let key = borrowed.as_ref().ok_or(crate::Error::Unexpected)?;
+            return Self::decode_with(key, jwt).map_err(|e| match e.into_kind() {
                 ErrorKind::ExpiredSignature => crate::Error::ChronologyError,
                 _ => crate::Error::DecodingError,
-            })
+            });
+        }
+
+        Err(match kind {
+            ErrorKind::ExpiredSignature => crate::Error::ChronologyError,
+            _ => crate::Error::DecodingError,
+        })
     }
 }
 
@@ -752,6 +820,78 @@ pub mod tests {
             }
         });
         port
+    }
+
+    /// Regression test for #234: rotating the IRMA server's JWT signing key
+    /// must heal on the next request (refresh + retry) instead of 401-ing
+    /// everything until the PKG is restarted — while forged/garbage tokens
+    /// must NOT trigger upstream key fetches.
+    #[actix_web::test]
+    async fn test_jwt_key_refresh_on_rotation() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        const PRIV_A: &str = include_str!("../../testdata/jwt_rotation/priv_a.pem");
+        const PUB_A: &str = include_str!("../../testdata/jwt_rotation/pub_a.pem");
+        const PRIV_B: &str = include_str!("../../testdata/jwt_rotation/priv_b.pem");
+        const PUB_B: &str = include_str!("../../testdata/jwt_rotation/pub_b.pem");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let claims = Claims {
+            exp: now + 300,
+            iat: now,
+            iss: "irmaserver".to_string(),
+            sub: "verification_result".to_string(),
+            token: SessionToken("testtoken".to_string()),
+            status: SessionStatus::Done,
+            r#type: SessionType::Disclosing,
+            proof_status: Some(ProofStatus::Valid),
+            disclosed: vec![],
+        };
+        let sign = |pem: &str| {
+            encode(
+                &Header::new(Algorithm::RS256),
+                &claims,
+                &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
+            )
+            .unwrap()
+        };
+        let jwt_a = sign(PRIV_A);
+        let jwt_b = sign(PRIV_B);
+
+        let served = Arc::new(Mutex::new(PUB_A.to_string()));
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let port = spawn_publickey_server(served.clone(), fetches.clone(), Duration::ZERO);
+        let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
+
+        // First use: lazily fetches key A and validates.
+        cache.decode(&jwt_a).await.expect("JWT signed by key A");
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        // The IRMA server rotates to key B. With the debounce expired, the
+        // signature mismatch triggers a refresh + retry and the request heals.
+        *served.lock().unwrap() = PUB_B.to_string();
+        cache.expire_debounce();
+        cache
+            .decode(&jwt_b)
+            .await
+            .expect("JWT signed by key B after rotation");
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+
+        // A mismatching token inside the debounce window must fail WITHOUT
+        // another upstream fetch (forged-token flood protection).
+        assert!(cache.decode(&jwt_a).await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+
+        // Garbage tokens never trigger a refresh, debounced or not.
+        cache.expire_debounce();
+        assert!(cache.decode("not.a.jwt").await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
     }
 
     /// While the IRMA server is down (or serving garbage), fetch failures are
