@@ -1,0 +1,18 @@
+{
+  "con": [
+    {
+      "t": "irma-demo.RU.studentCard.level",
+      "v": "PhD"
+    }
+  ],
+  "files": {
+    "mem.bin": "in-memory container (seal / pg-js toBytes)",
+    "stream.bin": "streaming container (sealStream / cryptify / pg-js upload)"
+  },
+  "generatedAt": "2026-07-16T13:03:47Z",
+  "plaintextB64": "cG9zdGd1YXJkLWUyZSBjcnlwdG8tY29tcGF0IGZpeHR1cmU6IG9sZCBjaXBoZXJ0ZXh0cyBtdXN0IGRlY3J5cHQgZm9yZXZlcg==",
+  "recipientId": "phd-holder",
+  "sealedBy": "@e4a/pg-wasm@0.6.1",
+  "senderEmail": "sender@golden.test",
+  "ts": 1784207026
+}
