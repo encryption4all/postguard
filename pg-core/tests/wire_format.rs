@@ -99,7 +99,7 @@ fn golden_fixtures_carry_the_pinned_preamble() {
 #[test]
 fn golden_mem_fixture_unseals() {
     let f = fixture();
-    let unsealer = Unsealer::<Vec<u8>, UnsealerMemoryConfig>::new(&testdata("mem.bin"), &f.vk)
+    let unsealer = Unsealer::<Vec<u8>, UnsealerMemoryConfig>::new(testdata("mem.bin"), &f.vk)
         .expect("parse the golden in-memory container");
     let (plain, _verified) = unsealer
         .unseal(&f.meta.recipient_id, &f.usk)
