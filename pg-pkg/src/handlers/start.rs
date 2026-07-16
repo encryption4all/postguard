@@ -58,11 +58,11 @@ fn con_item_to_discon(item: &ConItem) -> Vec<Vec<AttributeRequest>> {
         ConItem::Single(attr) => {
             let ar = attr_to_request(attr);
             if attr.optional {
-                // An empty option lets the user skip this attribute. It goes
-                // LAST: deployed Yivi apps mis-render a disjunction whose
-                // empty alternative comes first (irmamobile#360) — the same
-                // workaround clients apply to their own discons.
-                vec![vec![ar], vec![]]
+                // Empty first option lets the user skip this attribute
+                // (Yivi convention). Ordering is presentational only; apps
+                // before irmamobile v8.1.0 mis-rendered this order
+                // (irmamobile#360), fixed since.
+                vec![vec![], vec![ar]]
             } else {
                 vec![vec![ar]]
             }
@@ -124,16 +124,14 @@ mod tests {
     }
 
     #[test]
-    fn single_optional_appends_empty_alternative_last() {
+    fn single_optional_prepends_empty_alternative() {
         let mut a = attr("pbdf.sidn-pbdf.mobilenumber.mobilenumber");
         a.optional = true;
         let item = ConItem::Single(a);
         let dis = con_item_to_discon(&item);
-        assert_eq!(dis.len(), 2, "optional: actual + empty alt");
-        assert_eq!(dis[0].len(), 1, "actual attribute first");
-        // LAST, not first: deployed Yivi apps mis-render an empty-first
-        // alternative (irmamobile#360).
-        assert!(dis[1].is_empty(), "empty alternative last");
+        assert_eq!(dis.len(), 2, "optional: empty alt + actual");
+        assert!(dis[0].is_empty(), "empty alternative first");
+        assert_eq!(dis[1].len(), 1);
     }
 
     #[test]

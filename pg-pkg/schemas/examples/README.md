@@ -13,9 +13,9 @@ here instead.
 | File | What it pins |
 |---|---|
 | `flat-legacy.json` | The pre-condiscon shape every deployed client sends: a flat conjunction of attribute objects. Must keep parsing forever. |
-| `condiscon-name-disjunction.json` | The postguard-website sender-signing request: email plus a disjunction over name sources. |
+| `condiscon-name-disjunction.json` | The postguard-website sender-signing request verbatim: email, a skippable disjunction over four name sources (leading empty alternative), optional phone and date of birth. |
 | `optional-attribute.json` | `optional: true` on a top-level attribute; the PKG expands it into a disjunction with an empty option. |
-| `optional-discon-empty-alt-last.json` | A skippable disjunction: the empty conjunction marks it optional (Yivi convention). Listed **last** as a workaround for irmamobile#360 — deployed apps mis-render an empty alternative listed first; the server accepts either order. |
+| `optional-discon-empty-alt.json` | A skippable disjunction: the empty conjunction marks it optional (Yivi convention, conventionally listed first). Ordering is presentational; either order parses. (Historical: apps before irmamobile v8.1.0 mis-rendered empty-first — irmamobile#360, fixed.) |
 | `value-constrained.json` | `v` constrains disclosure to an exact value. |
 
 ## invalid/

@@ -2,8 +2,8 @@
   "con": [
     { "t": "pbdf.sidn-pbdf.email.email" },
     [
-      [ { "t": "pbdf.gemeente.personalData.fullname" } ],
-      []
+      [],
+      [ { "t": "pbdf.gemeente.personalData.fullname" } ]
     ]
   ]
 }

@@ -424,9 +424,10 @@ components:
           description: |
             A Yivi disjunction-of-conjunctions (OR of ANDs). An **empty inner
             conjunction** marks the whole disjunction optional per Yivi
-            convention. Note irmamobile#360: deployed apps mis-render an
-            empty alternative listed first — place it last, as the server's
-            own `optional: true` expansion does. Either order is accepted.
+            convention (conventionally listed first). Ordering is
+            presentational only; either order is accepted. (Historical: apps
+            before irmamobile v8.1.0 mis-rendered an empty-first alternative
+            — irmamobile#360, fixed.)
           items:
             type: array
             items:

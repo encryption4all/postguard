@@ -20,8 +20,7 @@ pub struct Parameters<T> {
 /// An attribute in a disclosure request, extending [`Attribute`] with an `optional` flag.
 ///
 /// When `optional` is true, the PKG wraps this attribute in a disjunction with an empty
-/// option (listed last — see irmamobile#360), allowing the user to skip disclosing it
-/// in the Yivi app.
+/// first option, allowing the user to skip disclosing it in the Yivi app.
 ///
 /// This type is only used in API requests (JSON), not in the binary wire format.
 ///
