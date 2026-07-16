@@ -68,7 +68,7 @@ pub struct ServerOpts {
     #[clap(
         long,
         env = "PKG_EMAIL_ATTRIBUTE",
-        default_value = "pbdf.sidn-pbdf.email.email"
+        default_value_t = crate::middleware::auth::DEFAULT_EMAIL_ATTRIBUTE.to_string()
     )]
     pub email_attribute: String,
 
