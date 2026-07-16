@@ -1,5 +1,4 @@
 {
-  "$comment": "The postguard-website sender-signing request: email plus a disjunction over name sources (condiscon).",
   "con": [
     { "t": "pbdf.sidn-pbdf.email.email" },
     [

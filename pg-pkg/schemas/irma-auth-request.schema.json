@@ -2,9 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://postguard.eu/schemas/irma-auth-request.schema.json",
   "title": "IrmaAuthRequest",
-  "description": "The condiscon disclosure request accepted by the PKG's POST /v2/{irma|request}/start. This schema is deliberately faithful to the server's parser (serde): unknown extra properties are IGNORED, not rejected — a misspelled field name fails silently, so validate client-side against this schema before sending. The canonical examples in examples/{valid,invalid}/ are executable tests against the server's actual parser (pg-pkg/tests/contract_examples.rs).",
+  "description": "The condiscon disclosure request accepted by the PKG's POST /v2/{irma|request}/start. Faithful to the server's parser (serde), which REJECTS unknown fields with a 400 naming the offending field: in a key-issuance request a silently dropped misspelled field would widen the disclosure the caller intended. The canonical examples in examples/{valid,invalid}/ are executable tests against the server's actual parser (pg-pkg/tests/contract_examples.rs).",
   "type": "object",
   "required": ["con"],
+  "additionalProperties": false,
   "properties": {
     "con": {
       "description": "Conjunction over the entries: the user must satisfy every entry.",
@@ -22,6 +23,7 @@
       "title": "DisclosureAttribute",
       "type": "object",
       "required": ["t"],
+      "additionalProperties": false,
       "properties": {
         "t": {
           "description": "Yivi attribute type, e.g. pbdf.sidn-pbdf.email.email.",

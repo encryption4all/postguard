@@ -1,5 +1,4 @@
 {
-  "$comment": "INVALID: the classic nesting mistake. A disjunction entry is an array of CONJUNCTIONS (arrays), not of attributes — this one-level array is rejected. Wrap each alternative in its own array: [[{...}]].",
   "con": [
     [ { "t": "pbdf.gemeente.personalData.fullname" } ]
   ]

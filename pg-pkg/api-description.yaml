@@ -388,10 +388,11 @@ components:
           description: |
             When true, the PKG wraps the attribute in a disjunction with an
             empty option so the user may skip it in the Yivi app.
+      additionalProperties: false
       description: |
-        Unknown extra properties are ignored by the server (serde default) —
-        misspelled field names fail silently, so validate against
-        `schemas/irma-auth-request.schema.json` client-side.
+        Unknown fields are **rejected** (400, naming the offending field):
+        silently dropping a misspelled `v` or `optional` would widen the
+        disclosure the caller intended.
     ConItem:
       oneOf:
         - $ref: "#/components/schemas/DisclosureAttribute"
@@ -422,11 +423,12 @@ components:
           maximum: 86400
           default: 300
           description: "Validity of the session-result JWT, in seconds."
+      additionalProperties: false
       description: |
-        The condiscon request accepted by `/v2/request/start`. Also pinned as
-        a standalone JSON Schema with canonical examples under
-        `pg-pkg/schemas/` — those examples are executable tests against the
-        server's parser.
+        The condiscon request accepted by `/v2/request/start`. Unknown fields
+        are rejected with a 400 naming the field. Also pinned as a standalone
+        JSON Schema with canonical examples under `pg-pkg/schemas/` — those
+        examples are executable tests against the server's parser.
     SessionData:
       type: object
       required: [sessionPtr, token]
@@ -475,9 +477,16 @@ components:
           type: string
           nullable: true
           description: "Attribute value."
+      description: |
+        Deliberately lenient about extra fields (unlike `DisclosureAttribute`):
+        this type is shared with the binary wire format, the wasm/FFI seal
+        boundary and response policies, and in the signing-key request paths
+        its values are not semantically load-bearing (the identity comes from
+        the JWT or the business database).
     SigningKeyRequest:
       type: object
       required: [pubSignId]
+      additionalProperties: false
       properties:
         pubSignId:
           type: array

@@ -1,4 +1,3 @@
 {
-  "$comment": "INVALID: t must be a string.",
   "con": [ { "t": 42 } ]
 }

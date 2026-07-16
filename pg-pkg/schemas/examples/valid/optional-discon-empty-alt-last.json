@@ -1,5 +1,4 @@
 {
-  "$comment": "A skippable disjunction: the empty conjunction marks it optional (Yivi convention). It is listed LAST as a workaround for irmamobile#360 — deployed apps mis-render an empty alternative listed first. The server accepts either order.",
   "con": [
     { "t": "pbdf.sidn-pbdf.email.email" },
     [
