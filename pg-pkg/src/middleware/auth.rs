@@ -9,9 +9,9 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use irma::*;
 use pg_core::identity::Attribute;
@@ -210,19 +210,31 @@ struct Claims {
 /// The key is fetched on first use instead of during worker startup, so the
 /// PKG no longer exits (or hangs) when the IRMA server is briefly unreachable
 /// at boot; JWT requests degrade to 503 until the IRMA server is back.
+///
+/// On a signature mismatch the key is re-fetched once (rate-limited by
+/// [`MIN_REFRESH_INTERVAL`]) and the JWT retried, so rotating the IRMA
+/// server's signing key heals on the next request instead of requiring a PKG
+/// restart.
 pub(crate) struct JwtKeyCache {
     /// `{irma_url}/publickey`
     url: String,
     /// Workers are single-threaded (services are `Rc`-shared), so `RefCell`
     /// suffices. Borrows are never held across an await point.
     key: RefCell<Option<DecodingKey>>,
+    /// When the key was last fetched; gates rotation-triggered refreshes so a
+    /// flood of forged tokens cannot become a fetch-flood on the IRMA server.
+    last_fetch: Cell<Option<Instant>>,
 }
+
+/// Minimum time between rotation-triggered key refreshes (per worker).
+const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 impl JwtKeyCache {
     fn new(irma_url: &str) -> Self {
         Self {
             url: format!("{irma_url}/publickey"),
             key: RefCell::new(None),
+            last_fetch: Cell::new(None),
         }
     }
 
@@ -261,26 +273,75 @@ impl JwtKeyCache {
         })
     }
 
-    /// Decode and validate a JWT, fetching the verification key on first use.
-    async fn decode(&self, jwt: &str) -> Result<Claims, crate::Error> {
-        if self.key.borrow().is_none() {
-            let key = self.fetch().await?;
-            *self.key.borrow_mut() = Some(key);
-        }
+    /// Re-fetch the verification key and record when we did.
+    async fn refresh(&self) -> Result<(), crate::Error> {
+        let key = self.fetch().await?;
+        *self.key.borrow_mut() = Some(key);
+        self.last_fetch.set(Some(Instant::now()));
+        Ok(())
+    }
 
+    /// Whether a rotation-triggered refresh is allowed yet.
+    fn refresh_due(&self) -> bool {
+        self.last_fetch
+            .get()
+            .is_none_or(|t| t.elapsed() >= MIN_REFRESH_INTERVAL)
+    }
+
+    #[cfg(test)]
+    fn expire_debounce(&self) {
+        self.last_fetch.set(None);
+    }
+
+    /// Decode a JWT with the given key, returning the raw jsonwebtoken error
+    /// so the caller can distinguish a signature mismatch (possible key
+    /// rotation) from client-side problems.
+    fn decode_with(key: &DecodingKey, jwt: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.leeway = 0;
 
-        let borrowed = self.key.borrow();
-        // Populated above if it was empty.
-        let key = borrowed.as_ref().ok_or(crate::Error::Unexpected)?;
+        decode::<Claims>(jwt, key, &validation).map(|decoded| decoded.claims)
+    }
 
-        decode::<Claims>(jwt, key, &validation)
-            .map(|decoded| decoded.claims)
-            .map_err(|e| match e.into_kind() {
+    /// Decode and validate a JWT, fetching the verification key on first use.
+    ///
+    /// On a signature mismatch the key is refreshed once (rate-limited) and
+    /// the JWT retried: an IRMA server key rotation heals here instead of
+    /// 401-ing every request until someone restarts the PKG.
+    async fn decode(&self, jwt: &str) -> Result<Claims, crate::Error> {
+        if self.key.borrow().is_none() {
+            self.refresh().await?;
+        }
+
+        let kind = {
+            let borrowed = self.key.borrow();
+            let key = borrowed.as_ref().ok_or(crate::Error::Unexpected)?;
+            match Self::decode_with(key, jwt) {
+                Ok(claims) => return Ok(claims),
+                Err(e) => e.into_kind(),
+            }
+        };
+
+        if matches!(kind, ErrorKind::InvalidSignature) && self.refresh_due() {
+            log::info!(
+                "JWT signature mismatch; re-fetching the IRMA verification key \
+                    from {} in case it rotated",
+                self.url
+            );
+            self.refresh().await?;
+
+            let borrowed = self.key.borrow();
+            let key = borrowed.as_ref().ok_or(crate::Error::Unexpected)?;
+            return Self::decode_with(key, jwt).map_err(|e| match e.into_kind() {
                 ErrorKind::ExpiredSignature => crate::Error::ChronologyError,
                 _ => crate::Error::DecodingError,
-            })
+            });
+        }
+
+        Err(match kind {
+            ErrorKind::ExpiredSignature => crate::Error::ChronologyError,
+            _ => crate::Error::DecodingError,
+        })
     }
 }
 
@@ -667,6 +728,106 @@ pub mod tests {
             sha256_hex("PG-test-key"),
             "85e74a724a8252e6b9feeb05c47e452de5a9ab9eda70ebfa7cdee7dc78b369dd"
         );
+    }
+
+    /// Serve `served` at `/publickey` from a plain thread (raw HTTP, no async
+    /// runtime interplay), counting every fetch in `fetches`.
+    fn spawn_publickey_server(
+        served: std::sync::Arc<std::sync::Mutex<String>>,
+        fetches: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> u16 {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                fetches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let body = served.lock().unwrap().clone();
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        port
+    }
+
+    /// Regression test for #234: rotating the IRMA server's JWT signing key
+    /// must heal on the next request (refresh + retry) instead of 401-ing
+    /// everything until the PKG is restarted — while forged/garbage tokens
+    /// must NOT trigger upstream key fetches.
+    #[actix_web::test]
+    async fn test_jwt_key_refresh_on_rotation() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        const PRIV_A: &str = include_str!("../../testdata/jwt_rotation/priv_a.pem");
+        const PUB_A: &str = include_str!("../../testdata/jwt_rotation/pub_a.pem");
+        const PRIV_B: &str = include_str!("../../testdata/jwt_rotation/priv_b.pem");
+        const PUB_B: &str = include_str!("../../testdata/jwt_rotation/pub_b.pem");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let claims = Claims {
+            exp: now + 300,
+            iat: now,
+            iss: "irmaserver".to_string(),
+            sub: "verification_result".to_string(),
+            token: SessionToken("testtoken".to_string()),
+            status: SessionStatus::Done,
+            r#type: SessionType::Disclosing,
+            proof_status: Some(ProofStatus::Valid),
+            disclosed: vec![],
+        };
+        let sign = |pem: &str| {
+            encode(
+                &Header::new(Algorithm::RS256),
+                &claims,
+                &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
+            )
+            .unwrap()
+        };
+        let jwt_a = sign(PRIV_A);
+        let jwt_b = sign(PRIV_B);
+
+        let served = Arc::new(Mutex::new(PUB_A.to_string()));
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let port = spawn_publickey_server(served.clone(), fetches.clone());
+        let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
+
+        // First use: lazily fetches key A and validates.
+        cache.decode(&jwt_a).await.expect("JWT signed by key A");
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        // The IRMA server rotates to key B. With the debounce expired, the
+        // signature mismatch triggers a refresh + retry and the request heals.
+        *served.lock().unwrap() = PUB_B.to_string();
+        cache.expire_debounce();
+        cache
+            .decode(&jwt_b)
+            .await
+            .expect("JWT signed by key B after rotation");
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+
+        // A mismatching token inside the debounce window must fail WITHOUT
+        // another upstream fetch (forged-token flood protection).
+        assert!(cache.decode(&jwt_a).await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+
+        // Garbage tokens never trigger a refresh, debounced or not.
+        cache.expire_debounce();
+        assert!(cache.decode("not.a.jwt").await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
     }
 
     /// Regression test for the startup fragility where the PKG exited when the
