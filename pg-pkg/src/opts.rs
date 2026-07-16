@@ -61,6 +61,17 @@ pub struct ServerOpts {
     #[clap(short, long, env = "DATABASE_URL", value_hint = ValueHint::Url)]
     pub database_url: Option<String>,
 
+    /// Attribute type carrying the email in API-key signing identities.
+    /// Test environments override this with a test-scheme type (e.g.
+    /// `irma-demo.sidn-pbdf.email.email`), since `pbdf.*` credentials cannot
+    /// be issued outside production (issue #236).
+    #[clap(
+        long,
+        env = "PKG_EMAIL_ATTRIBUTE",
+        default_value = "pbdf.sidn-pbdf.email.email"
+    )]
+    pub email_attribute: String,
+
     /// IRMA server used to verify identities.
     #[clap(short, long, default_value = "https://is.yivi.app", value_hint = ValueHint::Url)]
     pub irma: String,
