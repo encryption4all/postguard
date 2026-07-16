@@ -104,6 +104,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         host,
         port,
         database_url,
+        email_attribute,
         irma,
         irma_token,
         ibe_secret_path,
@@ -294,7 +295,9 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     .guard(ApiKeyGuard)
                     // Registered last => outermost: rate-limit before auth work.
                     .wrap(
-                        Auth::new(irma.clone(), AuthType::Key).with_db_pool(pool.as_ref().clone()),
+                        Auth::new(irma.clone(), AuthType::Key)
+                            .with_email_attribute(email_attribute.clone())
+                            .with_db_pool(pool.as_ref().clone()),
                     )
                     .wrap(Governor::new(&sensitive_ratelimit))
                     .route(web::get().to(handlers::api_key_validate)),
@@ -344,6 +347,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                         .app_data(Data::new(ibs_sk.clone()))
                         .wrap(
                             Auth::new(irma.clone(), AuthType::Key)
+                                .with_email_attribute(email_attribute.clone())
                                 .with_db_pool(pool.as_ref().clone()),
                         )
                         .wrap(Governor::new(&sensitive_ratelimit))
@@ -806,6 +810,60 @@ pub(crate) mod tests {
         assert_eq!(pub_key.policy.con.len(), 1);
         assert_eq!(pub_key.policy.con[0].atype, "pbdf.sidn-pbdf.email.email");
         assert!(key_response.priv_sign_key.is_none());
+    }
+
+    /// Issue #236: the attribute type carrying the email in an API-key signing
+    /// identity is configurable, so test environments (which cannot issue
+    /// `pbdf.*` credentials) can run the same code path under a test scheme.
+    #[actix_web::test]
+    async fn test_api_key_signing_uses_configured_email_attribute() {
+        let (_, _, _, _, ibs_sk) = default_setup().await;
+        let irma = "https://irma.example.org".to_string();
+        let mock_store = MockApiKeyStore::new().with_key(
+            "PG-valid-key".to_string(),
+            default_api_key_data("sender@golden.test"),
+        );
+
+        let app = test::init_service(
+            App::new().service(
+                scope("/v2").service(
+                    resource("/sign/key")
+                        .app_data(Data::new(ibs_sk.clone()))
+                        .wrap(
+                            Auth::new(irma, AuthType::Key)
+                                .with_email_attribute("irma-demo.sidn-pbdf.email.email")
+                                .with_api_key_store(mock_store),
+                        )
+                        .route(web::post().to(handlers::signing_key)),
+                ),
+            ),
+        )
+        .await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![],
+            priv_sign_id: None,
+        };
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .insert_header(("Authorization", "Bearer PG-valid-key"))
+            .set_json(&skr)
+            .to_request();
+
+        let resp = test::try_call_service(&app, req).await.unwrap();
+        let key_response: SigningKeyResponse = test::try_read_body_json(resp).await.unwrap();
+
+        assert_eq!(key_response.status, SessionStatus::Done);
+        let pub_key = key_response.pub_sign_key.unwrap();
+        assert_eq!(pub_key.policy.con.len(), 1);
+        assert_eq!(
+            pub_key.policy.con[0].atype, "irma-demo.sidn-pbdf.email.email",
+            "the configured email attribute type must be used"
+        );
+        assert_eq!(
+            pub_key.policy.con[0].value.as_deref(),
+            Some("sender@golden.test")
+        );
     }
 
     #[actix_web::test]

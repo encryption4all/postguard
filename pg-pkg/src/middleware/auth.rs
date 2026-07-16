@@ -20,6 +20,11 @@ use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation
 
 use serde::{Deserialize, Serialize};
 
+/// The attribute type carrying the sender's email in the signing identity.
+/// Configurable (issue #236: test environments cannot issue `pbdf.*`
+/// credentials); production keeps this default.
+pub(crate) const DEFAULT_EMAIL_ATTRIBUTE: &str = "pbdf.sidn-pbdf.email.email";
+
 #[derive(Debug, Clone)]
 pub(crate) struct AuthResult {
     pub con: Vec<Attribute>,
@@ -411,8 +416,9 @@ enum AuthMethods {
     // Check the ongoing session using a token from the request.
     Token(String),
 
-    // Check API key using an ApiKeyStore implementation.
-    Key(Rc<dyn ApiKeyStore>),
+    // Check API key using an ApiKeyStore implementation. Carries the attribute
+    // type used for the email in the derived signing identity.
+    Key(Rc<dyn ApiKeyStore>, Rc<str>),
 
     // Check the session by decoding a JWT from the request, verified against
     // the IRMA server's (lazily fetched) public key.
@@ -461,7 +467,7 @@ where
 
                     res
                 }
-                AuthMethods::Key(store) => {
+                AuthMethods::Key(store, email_attribute) => {
                     let auth = req.extract::<BearerAuth>().await?;
                     let api_key = auth.token();
 
@@ -479,10 +485,7 @@ where
                     // `signing_attrs.email`; an empty string signals disabled.
                     let mut pub_attrs: Vec<Attribute> = Vec::new();
                     if !key_data.email.is_empty() {
-                        pub_attrs.push(Attribute::new(
-                            "pbdf.sidn-pbdf.email.email",
-                            Some(&key_data.email),
-                        ));
+                        pub_attrs.push(Attribute::new(email_attribute, Some(&key_data.email)));
                     }
                     let mut priv_attrs: Vec<Attribute> = Vec::new();
 
@@ -644,6 +647,8 @@ pub struct Auth {
     method: AuthType,
     /// Optional API key store for Key auth method.
     api_key_store: Option<Rc<dyn ApiKeyStore>>,
+    /// Attribute type carrying the email in API-key signing identities.
+    email_attribute: String,
 }
 
 impl std::fmt::Debug for Auth {
@@ -665,7 +670,17 @@ impl Auth {
             irma_url,
             method,
             api_key_store: None,
+            email_attribute: DEFAULT_EMAIL_ATTRIBUTE.to_string(),
         }
+    }
+
+    /// Override the attribute type used for the email in API-key signing
+    /// identities (issue #236). Defaults to [`DEFAULT_EMAIL_ATTRIBUTE`];
+    /// test environments configure a test-scheme type here since `pbdf.*`
+    /// credentials cannot be issued outside production.
+    pub fn with_email_attribute(mut self, attribute: impl Into<String>) -> Self {
+        self.email_attribute = attribute.into();
+        self
     }
 
     /// Set the API key store for Key authentication.
@@ -695,6 +710,7 @@ where
         let url = self.irma_url.clone();
         let auth_type = self.method.clone();
         let api_key_store = self.api_key_store.clone();
+        let email_attribute = self.email_attribute.clone();
 
         async move {
             let auth_data = match auth_type {
@@ -707,7 +723,7 @@ where
                     let store = api_key_store.ok_or_else(|| {
                         log::error!("API key store required for Key auth but not configured");
                     })?;
-                    AuthMethods::Key(store)
+                    AuthMethods::Key(store, Rc::from(email_attribute.as_str()))
                 }
                 AuthType::Token => AuthMethods::Token(url),
             };
