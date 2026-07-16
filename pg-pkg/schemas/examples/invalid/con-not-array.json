@@ -1,0 +1,4 @@
+{
+  "$comment": "INVALID: con must be an array, not a single attribute object.",
+  "con": { "t": "pbdf.sidn-pbdf.email.email" }
+}

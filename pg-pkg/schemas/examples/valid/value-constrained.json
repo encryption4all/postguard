@@ -1,0 +1,7 @@
+{
+  "$comment": "v constrains disclosure to an exact value — used when the key must match a specific identity.",
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email", "v": "alice@example.com" }
+  ],
+  "validity": 120
+}

@@ -1,0 +1,7 @@
+{
+  "$comment": "The pre-condiscon shape every deployed client sends: a flat conjunction of attribute objects. Must keep parsing forever.",
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email" },
+    { "t": "pbdf.gemeente.personalData.fullname", "optional": true }
+  ]
+}

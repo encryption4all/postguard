@@ -1,0 +1,4 @@
+{
+  "$comment": "INVALID: every attribute needs t.",
+  "con": [ { "v": "alice@example.com" } ]
+}

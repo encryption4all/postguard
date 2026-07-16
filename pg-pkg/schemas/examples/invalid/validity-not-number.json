@@ -1,0 +1,5 @@
+{
+  "$comment": "INVALID: validity is a number of seconds, not a string.",
+  "con": [ { "t": "pbdf.sidn-pbdf.email.email" } ],
+  "validity": "300"
+}

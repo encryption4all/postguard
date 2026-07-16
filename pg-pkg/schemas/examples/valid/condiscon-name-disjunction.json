@@ -1,0 +1,18 @@
+{
+  "$comment": "The postguard-website sender-signing request: email plus a disjunction over name sources (condiscon).",
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email" },
+    [
+      [ { "t": "pbdf.gemeente.personalData.fullname" } ],
+      [
+        { "t": "pbdf.pbdf.passport.firstName" },
+        { "t": "pbdf.pbdf.passport.lastName" }
+      ],
+      [
+        { "t": "pbdf.pbdf.idcard.firstName" },
+        { "t": "pbdf.pbdf.idcard.lastName" }
+      ]
+    ]
+  ],
+  "validity": 300
+}

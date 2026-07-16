@@ -1,0 +1,7 @@
+{
+  "$comment": "optional:true on a top-level attribute: the PKG expands it into a disjunction with an empty option.",
+  "con": [
+    { "t": "pbdf.sidn-pbdf.email.email" },
+    { "t": "pbdf.sidn-pbdf.mobilenumber.mobilenumber", "optional": true }
+  ]
+}
