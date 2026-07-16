@@ -216,9 +216,10 @@ struct Claims {
 /// server's signing key heals on the next request instead of requiring a PKG
 /// restart.
 ///
-/// Failed fetches are negatively cached for [`FETCH_FAILURE_BACKOFF`]: during
-/// an IRMA outage a burst of JWT traffic fails fast with 503 instead of tying
-/// every worker up in back-to-back fetch timeouts.
+/// Failed fetches are negatively cached for [`FETCH_FAILURE_BACKOFF`], and
+/// concurrent fetches are de-duplicated on an async lock: a burst of JWT
+/// traffic while the key is missing costs a single upstream fetch — the rest
+/// wait and then observe either the fresh key or the fresh negative cache.
 pub(crate) struct JwtKeyCache {
     /// `{irma_url}/publickey`
     url: String,
@@ -230,6 +231,9 @@ pub(crate) struct JwtKeyCache {
     last_fetch: Cell<Option<Instant>>,
     /// When the last fetch attempt failed, if it did (negative cache).
     last_failure: Cell<Option<Instant>>,
+    /// Serializes upstream fetches so concurrent requests don't each start
+    /// their own (in-flight de-duplication).
+    fetch_lock: futures::lock::Mutex<()>,
 }
 
 /// Minimum time between rotation-triggered key refreshes (per worker).
@@ -245,6 +249,7 @@ impl JwtKeyCache {
             key: RefCell::new(None),
             last_fetch: Cell::new(None),
             last_failure: Cell::new(None),
+            fetch_lock: futures::lock::Mutex::new(()),
         }
     }
 
@@ -283,9 +288,10 @@ impl JwtKeyCache {
         })
     }
 
-    /// Fetch the key and store it, negatively caching failures so an IRMA
-    /// outage doesn't turn every JWT request into a full fetch timeout.
-    async fn fetch_and_store(&self) -> Result<(), crate::Error> {
+    /// Fetch the key, store it, and record the outcome. Caller must hold
+    /// `fetch_lock`. Failures are negatively cached; successes stamp
+    /// `last_fetch` (the rotation-refresh debounce).
+    async fn fetch_and_record(&self) -> Result<(), crate::Error> {
         if self
             .last_failure
             .get()
@@ -298,6 +304,7 @@ impl JwtKeyCache {
             Ok(key) => {
                 *self.key.borrow_mut() = Some(key);
                 self.last_failure.set(None);
+                self.last_fetch.set(Some(Instant::now()));
                 Ok(())
             }
             Err(e) => {
@@ -307,11 +314,27 @@ impl JwtKeyCache {
         }
     }
 
-    /// Re-fetch the verification key and record when we did.
+    /// Ensure the verification key is cached, fetching it if necessary.
+    ///
+    /// Concurrent callers de-duplicate on `fetch_lock`: one request does the
+    /// network I/O while the rest wait, then observe either the fresh key or
+    /// the fresh negative cache — a burst while the key is missing costs one
+    /// upstream fetch, not one per request.
+    async fn ensure_key(&self) -> Result<(), crate::Error> {
+        let _guard = self.fetch_lock.lock().await;
+
+        // A fetch that completed while we waited for the lock.
+        if self.key.borrow().is_some() {
+            return Ok(());
+        }
+
+        self.fetch_and_record().await
+    }
+
+    /// Re-fetch the verification key even though one is cached (rotation).
     async fn refresh(&self) -> Result<(), crate::Error> {
-        self.fetch_and_store().await?;
-        self.last_fetch.set(Some(Instant::now()));
-        Ok(())
+        let _guard = self.fetch_lock.lock().await;
+        self.fetch_and_record().await
     }
 
     #[cfg(test)]
@@ -348,7 +371,7 @@ impl JwtKeyCache {
     /// 401-ing every request until someone restarts the PKG.
     async fn decode(&self, jwt: &str) -> Result<Claims, crate::Error> {
         if self.key.borrow().is_none() {
-            self.refresh().await?;
+            self.ensure_key().await?;
         }
 
         let kind = {
@@ -769,10 +792,12 @@ pub mod tests {
     }
 
     /// Serve `served` at `/publickey` from a plain thread (raw HTTP, no async
-    /// runtime interplay), counting every fetch in `fetches`.
+    /// runtime interplay), counting every fetch in `fetches`. Each response is
+    /// delayed by `delay`, so tests can hold a fetch in flight.
     fn spawn_publickey_server(
         served: std::sync::Arc<std::sync::Mutex<String>>,
         fetches: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        delay: Duration,
     ) -> u16 {
         use std::io::{Read, Write};
 
@@ -784,6 +809,7 @@ pub mod tests {
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf);
                 fetches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                std::thread::sleep(delay);
                 let body = served.lock().unwrap().clone();
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -840,7 +866,7 @@ pub mod tests {
 
         let served = Arc::new(Mutex::new(PUB_A.to_string()));
         let fetches = Arc::new(AtomicUsize::new(0));
-        let port = spawn_publickey_server(served.clone(), fetches.clone());
+        let port = spawn_publickey_server(served.clone(), fetches.clone(), Duration::ZERO);
         let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
 
         // First use: lazily fetches key A and validates.
@@ -878,7 +904,7 @@ pub mod tests {
 
         let served = Arc::new(Mutex::new("not a pem".to_string()));
         let fetches = Arc::new(AtomicUsize::new(0));
-        let port = spawn_publickey_server(served, fetches.clone());
+        let port = spawn_publickey_server(served, fetches.clone(), Duration::ZERO);
         let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
 
         // First request fetches (and fails to parse the key).
@@ -895,6 +921,34 @@ pub mod tests {
         cache.clear_failure_backoff();
         assert!(cache.decode("some.jwt.here").await.is_err());
         assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    }
+
+    /// Requests that arrive while the very first key fetch is still in flight
+    /// must wait for it instead of each starting their own fetch (in-flight
+    /// de-duplication — the "thundering herd" case negative caching alone
+    /// cannot cover, since the failure is only recorded once the fetch ends).
+    #[actix_web::test]
+    async fn test_concurrent_jwt_requests_share_one_fetch() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let served = Arc::new(Mutex::new("not a pem".to_string()));
+        let fetches = Arc::new(AtomicUsize::new(0));
+        // Slow server: the first fetch is held in flight while the burst lands.
+        let port = spawn_publickey_server(served, fetches.clone(), Duration::from_millis(300));
+        let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
+
+        let (a, b, c) = futures::join!(
+            cache.decode("some.jwt.here"),
+            cache.decode("some.jwt.here"),
+            cache.decode("some.jwt.here"),
+        );
+        assert!(a.is_err() && b.is_err() && c.is_err());
+        assert_eq!(
+            fetches.load(Ordering::SeqCst),
+            1,
+            "a concurrent burst must share a single upstream fetch"
+        );
     }
 
     /// Regression test for the startup fragility where the PKG exited when the
