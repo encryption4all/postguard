@@ -215,6 +215,10 @@ struct Claims {
 /// [`MIN_REFRESH_INTERVAL`]) and the JWT retried, so rotating the IRMA
 /// server's signing key heals on the next request instead of requiring a PKG
 /// restart.
+///
+/// Failed fetches are negatively cached for [`FETCH_FAILURE_BACKOFF`]: during
+/// an IRMA outage a burst of JWT traffic fails fast with 503 instead of tying
+/// every worker up in back-to-back fetch timeouts.
 pub(crate) struct JwtKeyCache {
     /// `{irma_url}/publickey`
     url: String,
@@ -224,10 +228,15 @@ pub(crate) struct JwtKeyCache {
     /// When the key was last fetched; gates rotation-triggered refreshes so a
     /// flood of forged tokens cannot become a fetch-flood on the IRMA server.
     last_fetch: Cell<Option<Instant>>,
+    /// When the last fetch attempt failed, if it did (negative cache).
+    last_failure: Cell<Option<Instant>>,
 }
 
 /// Minimum time between rotation-triggered key refreshes (per worker).
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How long to fail fast after a failed key fetch before trying again.
+const FETCH_FAILURE_BACKOFF: Duration = Duration::from_secs(3);
 
 impl JwtKeyCache {
     fn new(irma_url: &str) -> Self {
@@ -235,6 +244,7 @@ impl JwtKeyCache {
             url: format!("{irma_url}/publickey"),
             key: RefCell::new(None),
             last_fetch: Cell::new(None),
+            last_failure: Cell::new(None),
         }
     }
 
@@ -273,12 +283,40 @@ impl JwtKeyCache {
         })
     }
 
+    /// Fetch the key and store it, negatively caching failures so an IRMA
+    /// outage doesn't turn every JWT request into a full fetch timeout.
+    async fn fetch_and_store(&self) -> Result<(), crate::Error> {
+        if self
+            .last_failure
+            .get()
+            .is_some_and(|t| t.elapsed() < FETCH_FAILURE_BACKOFF)
+        {
+            return Err(crate::Error::UpstreamError);
+        }
+
+        match self.fetch().await {
+            Ok(key) => {
+                *self.key.borrow_mut() = Some(key);
+                self.last_failure.set(None);
+                Ok(())
+            }
+            Err(e) => {
+                self.last_failure.set(Some(Instant::now()));
+                Err(e)
+            }
+        }
+    }
+
     /// Re-fetch the verification key and record when we did.
     async fn refresh(&self) -> Result<(), crate::Error> {
-        let key = self.fetch().await?;
-        *self.key.borrow_mut() = Some(key);
+        self.fetch_and_store().await?;
         self.last_fetch.set(Some(Instant::now()));
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn clear_failure_backoff(&self) {
+        self.last_failure.set(None);
     }
 
     /// Whether a rotation-triggered refresh is allowed yet.
@@ -827,6 +865,35 @@ pub mod tests {
         // Garbage tokens never trigger a refresh, debounced or not.
         cache.expire_debounce();
         assert!(cache.decode("not.a.jwt").await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    }
+
+    /// While the IRMA server is down (or serving garbage), fetch failures are
+    /// negatively cached: a burst of JWT requests fails fast with a single
+    /// upstream fetch instead of one fetch (timeout) per request.
+    #[actix_web::test]
+    async fn test_jwt_key_fetch_failure_is_negatively_cached() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let served = Arc::new(Mutex::new("not a pem".to_string()));
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let port = spawn_publickey_server(served, fetches.clone());
+        let cache = JwtKeyCache::new(&format!("http://127.0.0.1:{port}"));
+
+        // First request fetches (and fails to parse the key).
+        assert!(cache.decode("some.jwt.here").await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        // Burst within the backoff window: fail fast, no extra fetches.
+        for _ in 0..5 {
+            assert!(cache.decode("some.jwt.here").await.is_err());
+        }
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        // Once the backoff expires, fetching resumes.
+        cache.clear_failure_backoff();
+        assert!(cache.decode("some.jwt.here").await.is_err());
         assert_eq!(fetches.load(Ordering::SeqCst), 2);
     }
 
