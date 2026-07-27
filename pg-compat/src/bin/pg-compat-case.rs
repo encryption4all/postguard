@@ -29,6 +29,18 @@ fn main() -> ExitCode {
     };
 
     let manifest = read_manifest(&dir);
+
+    // The gate checks this once per reader before it spawns anything, so this
+    // is for hand-runs. Without it a version bump reaches the published reader
+    // as shifted bytes, which is the allocation abort rather than a message.
+    if manifest.wire_version != reader.wire_version {
+        println!(
+            "pg-core {version}: sample set claims wire version {}, this reader speaks {}",
+            manifest.wire_version, reader.wire_version,
+        );
+        return ExitCode::FAILURE;
+    }
+
     let Some(case) = manifest.cases.iter().find(|c| &c.name == case_name) else {
         eprintln!("the sample set has no case named {case_name}");
         return ExitCode::from(2);
