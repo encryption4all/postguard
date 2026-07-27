@@ -1,0 +1,44 @@
+name: API diff
+#
+# Breaking-change gate on the OpenAPI contract (#196).
+#
+# Cryptify's routes are unversioned, so there is no way to keep an old shape
+# running next to a new one: any breaking change to api-description.yaml
+# breaks the clients pinned to it (pg-js, pg-dotnet, the add-ins). This job
+# diffs the PR's spec against the branch it targets and fails on anything
+# oasdiff rates ERR. Additive changes pass.
+#
+# To land a genuinely breaking change: add a new versioned route, leave the
+# old one in place, and deprecate it once privacybydesign/postguard-ops#64
+# telemetry shows nobody is calling it.
+#
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+
+  breaking-changes:
+    name: oasdiff breaking changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v6
+      - name: Check out the base spec
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - name: Diff the spec against the base branch
+        uses: oasdiff/oasdiff-action/breaking@v0.1.10
+        with:
+          base: base/api-description.yaml
+          revision: api-description.yaml
+          fail-on: ERR
+          # Do not upload the spec to oasdiff.com for a side-by-side review
+          # page. The default is `true`; detection and annotations work
+          # without it, so nothing leaves CI.
+          review: false
