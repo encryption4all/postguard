@@ -20,8 +20,10 @@ A change that cannot be made additively ships under a new prefix (`/v3`), with
 `/v2` left running until its consumers are gone.
 
 `/v2/irma/...` is a legacy alias for the canonical `/v2/request/...`; both
-prefixes serve the same handlers, and the alias is kept for deployed clients
-([#257]).
+prefixes serve the same handlers today. The alias is deprecated. New clients
+should use `/v2/request/...`, and the alias will be removed once the deprecation
+process at the bottom of this file has run for it ([#257]). Until then it keeps
+working, so a deployed client on `/v2/irma/...` is not broken by this notice.
 
 Planned enforcement: an oasdiff gate that diffs the spec against `main` and
 fails on a breaking change ([#249]). Until that lands, this is a review rule.
@@ -43,7 +45,7 @@ the write default flips a major later, so nothing gets written that the
 installed base cannot open.
 
 Email envelopes are the `@e4a/pg-js` layer and carry the same guarantee; their
-compat gate is [postguard-js#131].
+compat gate is planned in [postguard-js#131].
 
 Enforcement today: `pg-core/tests/wire_format.rs` opens the committed golden
 fixtures under `pg-core/testdata/wire-format-v3/` on every
@@ -78,8 +80,9 @@ exact release rather than building against the latest one
 ## Reader list
 
 The window above resolved to concrete versions: the highest published patch of
-each line in the window. This is the list the compat gates install and run as
-readers.
+each line in the window. This is the list the compat gates will install and run
+as readers. None of those gates runs yet, so for now this list is a review rule
+like the `/v2` one above.
 
 ```
 # <registry> <package> <versions...>
@@ -95,12 +98,12 @@ process below. The npm version of `@e4a/pg-wasm` tracks the released `pg-core`
 version rather than `pg-wasm/Cargo.toml`, so read that pin from npm and not
 from the crate manifest.
 
-The gates that execute this list:
+Planned consumers of this list, each still an open issue:
 
 - [#251], the wire-compat gate as a required PR check, with the Rust half in
   [#260] and the Node half in [#261]
 - [postguard-e2e#25], the forward-direction fixture job
-- [postguard-e2e#21], the version sweep run nightly and pre-deploy
+- [postguard-e2e#21], the version sweep, to run nightly and pre-deploy
 - [postguard-js#131], the envelope-compat gate
 
 A gate that needs a different set of readers changes this file first.
