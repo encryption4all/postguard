@@ -2666,6 +2666,7 @@ dependencies = [
  "irmars",
  "js-sys",
  "rand 0.8.6",
+ "rand_chacha 0.3.1",
  "serde",
  "serde-transcode",
  "serde_json",
