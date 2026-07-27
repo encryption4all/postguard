@@ -11,7 +11,6 @@ description = "End-to-end encrypted file sharing service"
 [dependencies]
 askama = "0.16.0"
 chrono = { version = "0.4.45", features = ["unstable-locales"] }
-irma = "0.2.1"
 lettre = "0.11.22"
 log = "0.4.33"
 rand = "0.10.1"

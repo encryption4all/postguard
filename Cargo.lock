@@ -454,7 +454,6 @@ dependencies = [
  "askama",
  "chrono",
  "futures",
- "irma",
  "lettre",
  "log",
  "minreq",
