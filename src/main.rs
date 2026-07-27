@@ -1477,6 +1477,24 @@ fn build_cors(allowed_origins: AllowedOrigins) -> rocket_cors::Cors {
         .expect("unable to configure CORS")
 }
 
+/// Every route the service mounts. Single source of truth so the
+/// `api-description.yaml` drift test can compare the spec against the routes
+/// production actually serves instead of a hand-copied list.
+fn api_routes() -> Vec<rocket::Route> {
+    routes![
+        health,
+        metrics_endpoint,
+        upload_init,
+        upload_chunk,
+        upload_finalize,
+        upload_status,
+        usage,
+        email_template,
+        download,
+        staging_preview
+    ]
+}
+
 /// Build a Rocket instance from a pre-loaded config figment and verifying key.
 ///
 /// Extracted so integration tests can inject their own figment (temp data_dir,
@@ -1513,21 +1531,7 @@ pub fn build_rocket(figment: Figment, vk: Parameters<VerifyingKey>) -> Rocket<Bu
 
     rocket
         .attach(cors)
-        .mount(
-            "/",
-            routes![
-                health,
-                metrics_endpoint,
-                upload_init,
-                upload_chunk,
-                upload_finalize,
-                upload_status,
-                usage,
-                email_template,
-                download,
-                staging_preview
-            ],
-        )
+        .mount("/", api_routes())
         .attach(AdHoc::config::<CryptifyConfig>())
         .manage(Store::with_idle_ttl(
             std::time::Duration::from_secs(config.session_ttl_secs()),
@@ -3728,5 +3732,124 @@ mod email_template_tests {
         .await;
 
         assert!(vk.is_none(), "fetch must give up once the budget is spent");
+    }
+}
+
+/// Guards `api-description.yaml` against the routes the service actually
+/// mounts. The spec is hand-maintained, so a new or renamed route silently
+/// drifts away from it; this test fails the build instead.
+#[cfg(test)]
+mod api_description_tests {
+    use super::*;
+
+    const SPEC: &str = include_str!("../api-description.yaml");
+
+    /// Operations declared in the spec, as `("GET", "/health")` pairs.
+    ///
+    /// Hand-rolled rather than parsed with a YAML crate to keep the
+    /// dependency tree unchanged. It relies on the file's layout: path keys
+    /// sit at two spaces of indentation under `paths:`, HTTP methods at four.
+    /// `spec_layout_assumption_holds` fails loudly if that stops being true.
+    fn spec_operations() -> Vec<(String, String)> {
+        const METHODS: [&str; 5] = ["get", "post", "put", "delete", "patch"];
+        let mut ops = Vec::new();
+        let mut in_paths = false;
+        let mut path: Option<String> = None;
+
+        for line in SPEC.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            // A top-level key ends the `paths:` block.
+            if !line.starts_with(' ') {
+                in_paths = line.starts_with("paths:");
+                path = None;
+                continue;
+            }
+            if !in_paths {
+                continue;
+            }
+            let indent = line.len() - line.trim_start().len();
+            let key = line.trim_end().trim_start().trim_end_matches(':');
+            if indent == 2 && key.starts_with('/') {
+                path = Some(key.to_owned());
+            } else if indent == 4 && METHODS.contains(&key) {
+                if let Some(path) = path.as_ref() {
+                    ops.push((key.to_uppercase(), path.clone()));
+                }
+            }
+        }
+        ops
+    }
+
+    /// Normalize a path so a Rocket route and a spec path compare equal:
+    /// `/fileupload/<uuid>/status` and `/fileupload/{uuid}/status` both become
+    /// `/fileupload/{}/status`. Placeholder *names* are dropped on purpose —
+    /// they are labels with no effect on the wire contract, and the Rocket
+    /// binding name (`<filename>`) is not always the name that documents the
+    /// value best (`{uuid}`).
+    fn normalize_path(path: &str) -> String {
+        let mut out = String::with_capacity(path.len());
+        let mut in_placeholder = false;
+        for c in path.chars() {
+            match c {
+                '<' | '{' => {
+                    in_placeholder = true;
+                    out.push_str("{}");
+                }
+                '>' | '}' => in_placeholder = false,
+                _ if in_placeholder => {}
+                _ => out.push(c),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn spec_layout_assumption_holds() {
+        assert!(
+            !spec_operations().is_empty(),
+            "no operations parsed out of api-description.yaml — the indentation \
+             layout the parser assumes (paths at 2 spaces, methods at 4) changed"
+        );
+    }
+
+    /// Mounted routes as `("GET", "/fileupload/<uuid>/status")` pairs.
+    fn mounted_operations() -> Vec<(String, String)> {
+        api_routes()
+            .iter()
+            .map(|route| (route.method.to_string(), route.uri.path().to_string()))
+            .collect()
+    }
+
+    fn matches(ops: &[(String, String)], method: &str, path: &str) -> bool {
+        ops.iter()
+            .any(|(m, p)| m == method && normalize_path(p) == normalize_path(path))
+    }
+
+    #[test]
+    fn every_mounted_route_is_in_the_spec() {
+        let spec = spec_operations();
+        for (method, path) in mounted_operations() {
+            assert!(
+                matches(&spec, &method, &path),
+                "{} {} is mounted but missing from api-description.yaml",
+                method,
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn every_spec_operation_is_mounted() {
+        let mounted = mounted_operations();
+        for (method, path) in spec_operations() {
+            assert!(
+                matches(&mounted, &method, &path),
+                "{} {} is in api-description.yaml but no route is mounted for it",
+                method,
+                path
+            );
+        }
     }
 }

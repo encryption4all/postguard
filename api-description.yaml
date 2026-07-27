@@ -19,6 +19,8 @@ tags:
   description: "Upload usage quotas"
 - name: "Email template"
   description: "Email template linked to an API key"
+- name: "Staging"
+  description: "Endpoints that only respond on a staging deployment"
 paths:
   /health:
     get:
@@ -41,13 +43,20 @@ paths:
       summary: "Prometheus text-format metrics"
       description: |
         Returns usage counters and gauges suitable for Prometheus scraping
-        by the Grafana instance on Scaleway. Intended to be reachable only
-        from the internal monitoring network; firewall or reverse-proxy
-        allow-list in front of Cryptify.
+        by the Grafana instance on Scaleway.
+
+        Access depends on the deployment's `metrics_token` setting. With a
+        token configured, the request must carry
+        `Authorization: Bearer <metrics_token>` and anything else is
+        rejected with 401. With no token configured the endpoint is open,
+        and the deployment is expected to restrict it at the firewall or
+        reverse proxy.
 
         Exposed metrics:
           * `cryptify_uploads_total{channel}` — counter of finalized uploads.
           * `cryptify_upload_bytes_total{channel}` — counter of bytes.
+          * `cryptify_uploads_by_app_total{app}` — counter of finalized
+             uploads per client app.
           * `cryptify_storage_bytes` — gauge, current disk usage.
           * `cryptify_active_files` — gauge, current file count.
           * `cryptify_expired_files_total` — counter of uploads purged
@@ -56,8 +65,12 @@ paths:
         The `channel` label is derived from the `X-Cryptify-Source` header,
         falling back to `Authorization`/`X-Api-Key` (→ `api`), then the
         `Origin` header (`website` / `staging-website`), then `User-Agent`
-        (`outlook` / `thunderbird`), then `unknown`.
+        (`outlook` / `thunderbird`), then `unknown`. The `app` label comes
+        from the `app` field of `X-POSTGUARD-CLIENT-VERSION`.
       operationId: "metrics"
+      security:
+      - metricsBearer: []
+      - {}
       responses:
         "200":
           description: "Prometheus text exposition format"
@@ -65,12 +78,45 @@ paths:
             text/plain:
               schema:
                 type: "string"
+        "401":
+          description:
+            "A `metrics_token` is configured and the request did not present
+            it as `Authorization: Bearer <metrics_token>`."
   /fileupload/init:
     post:
         tags:
         - "File upload"
         summary: "Initialize multipart file upload"
         operationId: "initFileUpload"
+        parameters:
+        - in: "header"
+          name: "Authorization"
+          description:
+            "Optional `Bearer PG-…` API key. When present and validated by
+            pg-pkg, the upload is accounted against that tenant and gets the
+            API-key limits (100 GB); without it the upload runs on the default
+            tier (5 GB). An invalid key is not rejected here, it degrades to
+            the default tier."
+          schema:
+            type: "string"
+          required: false
+        - in: "header"
+          name: "X-Cryptify-Source"
+          description:
+            "Optional traffic-source label for the `channel` metrics label.
+            Sanitized to `[a-z0-9_-]`, truncated to 32 characters."
+          schema:
+            type: "string"
+          required: false
+        - in: "header"
+          name: "X-POSTGUARD-CLIENT-VERSION"
+          description:
+            "Optional client identification, `host,host_version,app,app_version`.
+            The `app` field becomes the `app` label on
+            `cryptify_uploads_by_app_total`."
+          schema:
+            type: "string"
+          required: false
         requestBody:
           content:
             application/json:
@@ -136,6 +182,25 @@ paths:
                         `X-Recovery-Token` header to recover from a
                         page refresh, tab crash, or navigate-away-and-back.
                         Hex-encoded 32-byte random."
+          "400":
+            description:
+              "The `recipient` address could not be parsed. A body that is not
+              syntactically valid JSON is rejected the same way but by the body
+              guard, so that response is Rocket's default error page rather
+              than the plain-text message below; a body that parses as JSON but
+              does not fit `InitBody` is the 422."
+            content:
+              text/plain:
+                schema:
+                  type: "string"
+          "422":
+            description: "The request body is not valid `InitBody` JSON."
+          "500":
+            description: "The upload file could not be created on disk."
+            content:
+              text/plain:
+                schema:
+                  type: "string"
   /fileupload/{uuid}:
     put:
       tags:
@@ -169,7 +234,13 @@ paths:
       - in: "header"
         name: "Content-Range"
         description:
-          "Which offset of a file is sent, example: `bytes 200-1000/*`."
+          "Which offset of a file is sent, example: `bytes 200-1000/*`.\n\n
+          **The end byte is EXCLUSIVE**, unlike RFC 7233. The server takes the
+          chunk length to be `end - start`, so `bytes 200-1000/*` carries 800
+          bytes at offset 200, not 801, and a chunk of length `n` at offset
+          `off` is sent as `bytes <off>-<off+n>/*`. Sending the RFC's inclusive
+          end makes the body one byte longer than the declared range and is
+          rejected with 400. `start == end` is rejected too."
         schema:
           type: "string"
         required: true
@@ -195,24 +266,21 @@ paths:
               schema:
                 description: "Identifies the new version of the upload file parts. Needs to be passed into the next file part upload request."
                 type: "string"
-        "409":
-          description: "Server file parts cryptifytoken differs from cryptifytoken in request."
-          headers:
-            cryptifytoken:
-              required: true
-              schema:
-                description:
-                  "Identifies the version of the upload file parts. Needs to be passed into the next file part upload request."
-                type: "string"
         "400":
-          description: "One of the input parameters is incorrect."
+          description:
+            "One of the input parameters is incorrect: a chunk larger than
+            the configured chunk size, a `Content-Range` start that does not
+            continue the upload, a body whose length does not match the
+            range, or a `cryptifytoken` that matches neither the current
+            token nor the previous one on the retry path. A token mismatch is
+            reported here, not as 409. A missing or unparsable
+            `cryptifytoken` / `Content-Range` header is rejected the same way
+            but by the header extractor, so that body is Rocket's default
+            error page rather than the plain-text message below."
           content:
-              application/json:
-                schema:
-                  type: "object"
-                  properties:
-                    message:
-                      type: "string"
+            text/plain:
+              schema:
+                type: "string"
         "404":
           description:
             "The upload session is not known to the server. Either the
@@ -230,6 +298,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PayloadTooLarge"
+        "500":
+          description: "The chunk could not be written to disk."
+          content:
+            text/plain:
+              schema:
+                type: "string"
+        "503":
+          description:
+            "The upload exceeds the default tier and pg-pkg was unreachable
+            for the whole retry budget, so the caller's entitlement to the
+            API-key tier could not be confirmed. Uploads that stay inside the
+            default tier are unaffected."
+          content:
+            text/plain:
+              schema:
+                type: "string"
 
   /fileupload/finalize/{uuid}:
     post:
@@ -238,6 +322,15 @@ paths:
       summary: "Finalize multipart file upload and send mail to recipient"
       operationId: "finalizeFileUpload"
       parameters:
+      - in: "header"
+        name: "cryptifytoken"
+        description:
+          "The current token, as returned by the last chunk PUT. Finalize
+          validates it too — knowing the UUID is not enough to finalize
+          someone else's upload."
+        schema:
+          type: "string"
+        required: true
       - in: "header"
         name: "Content-Range"
         description:
@@ -255,23 +348,17 @@ paths:
       responses:
         "200":
           description: "Successful operation"
-        "409":
-          description: "Server file parts cryptifytoken differs from cryptifytoken in request"
-          headers:
-            cryptifytoken:
-              required: true
-              schema:
-                description: "Identifies the version of the upload file parts. Needs to be passed into the next file part upload request."
-                type: "string"
         "400":
-          description: "One of the input parameters is incorrect."
+          description:
+            "The `cryptifytoken` header does not match the token the server
+            holds for this upload. A missing or unparsable `cryptifytoken` /
+            `Content-Range` header is rejected the same way but by the header
+            extractor, so that body is Rocket's default error page rather
+            than the plain-text message below."
           content:
-              application/json:
-                schema:
-                  type: "object"
-                  properties:
-                    message:
-                      type: "string"
+            text/plain:
+              schema:
+                type: "string"
         "404":
           description:
             "The upload session is not known to the server (see
@@ -288,7 +375,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayloadTooLarge"
         "422":
-          description: "Data is missing to form complete file."
+          description:
+            "The `Content-Range` total does not match the number of bytes the
+            server has committed, so the file is incomplete."
+        "500":
+          description:
+            "The uploaded file could not be read back, is not a valid
+            PostGuard message, carries no sender email attribute, or the
+            notification email could not be sent."
+          content:
+            text/plain:
+              schema:
+                type: "string"
 
   /fileupload/{uuid}/status:
     get:
@@ -430,6 +528,10 @@ paths:
             "No valid `Authorization: Bearer PG-…` API key was presented. Usage
             can only be queried by the authenticated tenant it is accounted
             for."
+        "503":
+          description:
+            "pg-pkg was unreachable while validating the API key, so the
+            tenant could not be established."
 
   /email-template:
     get:
@@ -474,7 +576,107 @@ paths:
       tags:
       - "File download"
       summary: "Download a file"
+      description:
+        "Streams the PostGuard-sealed file. Byte ranges are supported so an
+        interrupted download can resume: `Accept-Ranges: bytes` is advertised
+        on every response that reaches the file (200, 206 and 416, but not the
+        404), a single `Range` is answered with 206, and an unsatisfiable one
+        with 416. The server does not set a `Content-Type` on the body."
       operationId: "downloadFile"
+      parameters:
+      - in: "path"
+        name: "uuid"
+        required: true
+        description: "The unique identifier received when initializing file upload."
+        schema:
+          type: "string"
+          format: "uuid"
+      - in: "header"
+        name: "Range"
+        description:
+          "Optional single byte range, `bytes=<start>-<end>`,
+          `bytes=<start>-` or `bytes=-<suffix>`. Multiple ranges are not
+          supported and are answered with 416."
+        required: false
+        schema:
+          type: "string"
+      responses:
+        "200":
+          description: "The whole file."
+          headers:
+            Accept-Ranges:
+              required: true
+              schema:
+                type: "string"
+                enum: ["bytes"]
+            Content-Length:
+              required: true
+              schema:
+                type: "integer"
+                format: "int64"
+          content:
+            application/octet-stream:
+              schema:
+                type: "string"
+                format: "binary"
+        "206":
+          description: "The requested byte range."
+          headers:
+            Accept-Ranges:
+              required: true
+              schema:
+                type: "string"
+                enum: ["bytes"]
+            Content-Range:
+              required: true
+              description: "`bytes <start>-<end>/<total>`."
+              schema:
+                type: "string"
+            Content-Length:
+              required: true
+              schema:
+                type: "integer"
+                format: "int64"
+          content:
+            application/octet-stream:
+              schema:
+                type: "string"
+                format: "binary"
+        "404":
+          description:
+            "Uploaded file does not exist, or the path segment is not a safe
+            filename (empty, longer than 128 characters, `.`, `..`, or
+            containing a separator or NUL)."
+        "416":
+          description: "The `Range` header could not be satisfied."
+          headers:
+            Accept-Ranges:
+              required: true
+              schema:
+                type: "string"
+                enum: ["bytes"]
+            Content-Range:
+              required: true
+              description: "`bytes */<total>`."
+              schema:
+                type: "string"
+        "500":
+          description: "Seeking to the start of the requested range failed."
+
+  /staging/preview/{uuid}:
+    get:
+      tags:
+      - "Staging"
+      summary: "Preview the notification emails for an upload"
+      description:
+        "Returns the notification emails cryptify would send for an upload,
+        rendered but not delivered, so developers on the staging website can
+        inspect the message without an SMTP transport. The route is mounted on
+        every deployment but only answers when `staging_mode = true` is
+        configured; everywhere else it returns 404. Recipients that fail to
+        render are logged and left out of the response rather than failing the
+        request."
+      operationId: "stagingPreview"
       parameters:
       - in: "path"
         name: "uuid"
@@ -485,23 +687,15 @@ paths:
           format: "uuid"
       responses:
         "200":
-          description: "Successful operation."
+          description: "The rendered emails for this upload."
           content:
-            application/cryptify+octet-stream:
+            application/json:
               schema:
-                type: "string"
-                format: "binary"
-        "400":
-          description: "One of the input parameters is incorrect."
-          content:
-              application/json:
-                schema:
-                  type: "object"
-                  properties:
-                    message:
-                      type: "string"
+                $ref: "#/components/schemas/StagingPreview"
         "404":
-          description: "Uploaded file does not exist."
+          description:
+            "`staging_mode` is off, or the upload session is not known to the
+            server."
 
 components:
   securitySchemes:
@@ -511,6 +705,14 @@ components:
       description:
         "PostGuard API key, sent as `Authorization: Bearer PG-…`. Validated
         against pg-pkg's `/v2/api-key/validate` endpoint."
+    metricsBearer:
+      type: "http"
+      scheme: "bearer"
+      description:
+        "The deployment's `metrics_token`, sent as `Authorization: Bearer
+        <metrics_token>` and compared in constant time. Unrelated to the
+        PostGuard API key. Only required when the deployment configures a
+        token."
   schemas:
     PayloadTooLarge:
       type: "object"
@@ -540,6 +742,15 @@ components:
           type: "integer"
           format: "int64"
           description: "The limit value in bytes."
+        resets_at:
+          type: "string"
+          format: "date-time"
+          description:
+            "RFC-3339 timestamp at which the oldest recorded upload falls out
+            of the rolling window, partially freeing quota. Set on the
+            `rolling_window` 413 from finalize; omitted on the `per_upload`
+            413 from a chunk PUT, and when the sender has no recorded
+            uploads."
     UploadSessionNotFound:
       type: "object"
       required:
@@ -603,3 +814,52 @@ components:
             "Byte offset where the most recently committed chunk started
             (i.e. `uploaded - chunk_len`). Omitted until at least one
             chunk has been committed."
+    RenderedEmail:
+      type: "object"
+      required:
+        - recipient
+        - subject
+        - from
+        - html
+        - text
+      properties:
+        recipient:
+          type: "string"
+          description:
+            "The address this rendering targets: the recipient for a
+            notification, the sender for the confirmation copy."
+        subject:
+          type: "string"
+        from:
+          type: "string"
+          description: "The configured `email_from`, as `Name <email>`."
+        reply_to:
+          type: "string"
+          nullable: true
+          description:
+            "The sender's address on a recipient notification; null on the
+            sender's own confirmation copy."
+        html:
+          type: "string"
+        text:
+          type: "string"
+    StagingPreview:
+      type: "object"
+      required:
+        - recipients
+        - confirmation
+      properties:
+        recipients:
+          type: "array"
+          description: "One rendering per recipient of the upload."
+          items:
+            $ref: "#/components/schemas/RenderedEmail"
+        confirmation:
+          allOf:
+          - $ref: "#/components/schemas/RenderedEmail"
+          nullable: true
+          description:
+            "The sender's confirmation copy, or null when the upload was
+            initialized with `confirm: false`, the sender's email is not known
+            yet because the upload has not been finalized (the usual case when
+            previewing), or the rendering failed."

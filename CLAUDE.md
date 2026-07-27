@@ -98,6 +98,25 @@ Release-plz automation.
   rolling window). `usage_db` unset means in-memory only (old behaviour). A
   configured-but-unopenable DB panics at startup.
 
+## api-description.yaml is tied to the mounted routes by a test
+`api_routes()` in `src/main.rs` is the single mount list; `build_rocket` mounts it
+and `mod api_description_tests` compares it against `api-description.yaml`. A new,
+removed, or renamed route fails `cargo test` until the spec is updated too. The
+test only checks method + path shape (placeholder *names* are ignored, so the
+route's `<filename>` binding and the spec's `{uuid}` compare equal) — response
+codes and schemas are still on you.
+
+The spec is also the external contract for pg-js, pg-dotnet, and the add-ins, so
+a breaking edit to it needs a new versioned route rather than an in-place change
+(cryptify's routes are unversioned, so there is no other escape hatch).
+
+## Content-Range end byte is EXCLUSIVE on the chunk PUT
+`upload_chunk` rejects `start >= end` and takes the chunk length to be
+`end - start`, so `bytes 200-1000/*` is 800 bytes at offset 200, not the 801 that
+RFC 7233 would mean. `postguard-js` (`src/api/cryptify.ts:storeChunk`) sends
+`bytes <off>-<off+len>/*` to match — that is correct, not an off-by-one. Do not
+"fix" it in either repo alone; both sides move together or neither does.
+
 ## Token chain must be checked on every route touching a FileState
 The upload token chain (`SHA256(prev || chunk)`) must be validated on every route
 that operates on an existing `FileState`, not just `PUT`. An earlier version only
