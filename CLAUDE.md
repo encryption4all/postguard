@@ -24,6 +24,7 @@ Migrated from the dobby memory repo (`encryption4all/dobby`). This file is the s
 ## Release & configuration
 
 - release-plz reads conventional-commit PR titles (PRs are squash-merged, so the title becomes the commit subject) to decide the version bump. A breaking change needs `fix(scope)!:`/`feat(scope)!:` (the `!` is what the semantic-PR-title check and release-plz both key on) plus a `BREAKING CHANGE:` footer, or the break silently ships as a patch/minor bump with no changelog warning.
+- The npm package `@e4a/pg-wasm` is NOT versioned from `pg-wasm/Cargo.toml`. `delivery.yml`'s `publish-wasm` job writes `pg-wasm/pkg/package.json` from scratch and stamps it with the released pg-core version, so npm serves 0.6.1 while the crate manifest still says 0.5.5. When you need a pg-wasm version (support windows, reader pins, consumer ranges), read it from npm, never from the crate manifest.
 - `pg-wasm`'s web target: set `[package.metadata.wasm-pack.profile.release.wasm-bindgen] omit-default-module-path = true` in `pg-wasm/Cargo.toml` to drop the `new URL('index_bg.wasm', import.meta.url)` branch from generated `__wbg_init` glue (Webpack 5 otherwise statically resolves it and breaks bundler consumers that always pass an explicit `module_or_path`). Cleaner than post-build regex-stripping the generated JS.
 - `pg-pkg` (the postguard PKG service) CLI flags: `-t irma_token`, `-i irma_server_url`, `-d postgres_url`. Env vars: `IRMA_SERVER`, `DATABASE_URL`, `RUST_LOG`.
 
