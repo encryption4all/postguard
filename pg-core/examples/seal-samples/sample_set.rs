@@ -110,6 +110,18 @@ pub fn cases() -> Vec<Case> {
             plaintext: b"postguard wire-compat sample: streaming container".to_vec(),
         },
         Case {
+            name: "stream-privsig",
+            mode: "stream",
+            file: "stream-privsig.bin",
+            plaintext_file: "stream-privsig.plain",
+            private_signing: true,
+            // Stream mode puts the private signature in the encrypted payload
+            // trailer rather than in the header, so it is a different wire
+            // surface from `mem-privsig` and needs its own case.
+            plaintext: b"postguard wire-compat sample: streaming container, private signature"
+                .to_vec(),
+        },
+        Case {
             name: "stream-multi-segment",
             mode: "stream",
             file: "stream-multi-segment.bin",

@@ -25,6 +25,18 @@ PG_COMPAT_ARTIFACTS="$PWD/target/wire-compat/artifacts" \
 `PG_COMPAT_ARTIFACTS` defaults to `target/wire-compat/artifacts` relative to the
 repo root. A missing or empty set is a failure, not a skip.
 
+The test opens each case in a child process, the `pg-compat-case` binary this
+crate also builds. That is not tidiness: a published reader handed a shifted
+header does not always return an error, it can read a garbage length prefix and
+abort on the allocation. In one process that would take every remaining case
+with it, and an abort is not a panic, so `catch_unwind` cannot hold it. To open
+a single case by hand:
+
+```sh
+cargo run --manifest-path pg-compat/Cargo.toml --locked --bin pg-compat-case -- \
+  "$PWD/target/wire-compat/artifacts" 0.6.1 mem
+```
+
 ## Adding a version to the support window
 
 The list of published readers is the support window declared in [#252]; the
@@ -54,6 +66,7 @@ mem.bin                        sealed container
 mem.plain                      bytes a reader must recover from mem.bin
 mem-privsig.bin/.plain
 stream.bin/.plain
+stream-privsig.bin/.plain
 stream-multi-segment.bin/.plain
 ```
 
@@ -88,7 +101,18 @@ stream-multi-segment.bin/.plain
 - `schemaVersion`: layout of the manifest. A reader that does not recognise the
   value must fail, not skip. A gate that reads nothing and passes is worse than
   no gate.
+- `sealedBy`: which crate at which version produced the set. Informational: it
+  is the *writer*, so it is never the version a reader should check itself
+  against. Use `wireVersion` for that.
 - `wireVersion`: the container version the bytes claim (`VERSION_V3`, `2`).
+- `sender.public`: the policy the sender signed the *header* with, visible to
+  anyone who has the bytes. This is what a reader checks the header signature
+  against, so a JS reader needs it as much as a Rust one.
+- `sender.private`: the policy the sender signed the *payload* with in the
+  `*-privsig` cases. Despite the name it is not a secret key; it is the claims a
+  reader may only see after decrypting. It is present in the manifest for every
+  set, but only the cases with `privateSigning: true` were sealed with it, so
+  check it against `privateSigning` rather than against the case list.
 - `mode`: `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-js
   `toBytes` produces), `"stream"` for the segmented container (what cryptify
   stores and pg-js uploads).
@@ -112,7 +136,18 @@ stream-multi-segment.bin/.plain
 | `mem` | memory | the in-memory container, public header signature only |
 | `mem-privsig` | memory | payload signed under an encrypted private policy |
 | `stream` | stream | the segmented container, single segment |
+| `stream-privsig` | stream | payload signed under an encrypted private policy, which in stream mode lands in the payload trailer rather than the header |
 | `stream-multi-segment` | stream | two segments: STREAM counter, final-segment flag, and a populated `size_hint` in the header |
+
+### Consuming the set from another job
+
+One thing for [#261] to plan around. The proposed `wire-compat-rust` job seals
+and uploads only when the PR touches the wire surface; on every other PR it
+reports success with no artifact attached. A `wire-compat-js` job with
+`needs: wire-compat-rust` that downloads
+`wire-compat-artifacts-${{ github.sha }}` unconditionally therefore hard-fails
+on unrelated PRs rather than skipping. Repeat the same path condition on the
+download, or seal locally in the JS job instead of consuming the artifact.
 
 ### Determinism
 
@@ -128,9 +163,22 @@ artifact's name. `pg-core/tests/sample_sealer.rs` holds the sealer to that.
 Read a green run carefully. The header is a length-prefixed region and `bincode`
 ignores trailing bytes, so a field appended at the *end* of `Header` really does
 still open with 0.6.1. A field inserted anywhere else, a changed field type, or
-a reordering shifts every following byte and fails immediately. The gate reports every case at once, so the failure
-list tells you whether the break is in the header, the payload, or one mode
-only.
+a reordering shifts every following byte and the set stops opening.
+
+How it stops opening is worth knowing, because it is not a decode error. The
+shifted bytes make 0.6.1 read a garbage length prefix and attempt a
+multi-gigabyte allocation, which aborts the process rather than returning
+`Err`. That is why each case runs in its own child: the gate reports the
+aborted case by name and carries on with the rest, so the failure list still
+tells you whether the break is in the header, the payload, or one mode only.
+Expect lines like:
+
+```text
+pg-core 0.6.1: mem: reader died on signal 6 before it could report: memory allocation of 21474836480 bytes failed
+```
+
+A `VERSION_V3` bump is the one break reported before any ciphertext is touched,
+once per reader rather than once per case.
 
 [#247]: https://github.com/encryption4all/postguard/issues/247
 [#251]: https://github.com/encryption4all/postguard/issues/251

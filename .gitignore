@@ -1,5 +1,9 @@
 .idea
 target
+# A published reader in the wire-compat gate aborts rather than erroring on
+# some malformed containers, and an abort drops a core file wherever the
+# process was running.
+core
 pkg_ibe.pub
 pkg_ibe.sec
 pkg_ibs.pub
