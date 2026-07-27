@@ -29,9 +29,10 @@ fn published_readers_open_the_head_sealed_sample_set() {
         failures.join("\n  "),
     );
 
+    let versions: Vec<&str> = readers.iter().map(|r| r.version).collect();
     println!(
-        "{} case(s) opened by {} published reader(s)",
+        "{} case(s) opened by published pg-core {}",
         manifest.cases.len(),
-        readers.len(),
+        versions.join(", "),
     );
 }

@@ -71,9 +71,7 @@ pub struct Recipient {
 pub fn artifacts_dir() -> PathBuf {
     match std::env::var_os(ARTIFACTS_ENV) {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../target/wire-compat/artifacts")
-            .to_path_buf(),
+        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/wire-compat/artifacts"),
     }
 }
 
