@@ -43,7 +43,7 @@ body is a macro instantiated per version rather than a generic function.
 The sealer writes a flat directory. Nothing in it is committed and nothing is
 version-controlled: it is regenerated from HEAD on every run. The Node half of
 the gate ([#261]) consumes the same directory as a job artifact, so this layout
-is a contract — change it together with both readers and bump `schemaVersion`.
+is a contract: change it together with both readers and bump `schemaVersion`.
 
 ```
 manifest.json                  index of the set (see below)
@@ -85,17 +85,17 @@ stream-multi-segment.bin/.plain
 }
 ```
 
-- `schemaVersion` — layout of the manifest. A reader that does not recognise the
-  value must fail, not skip: a gate that quietly reads nothing is worse than no
-  gate.
-- `wireVersion` — the container version the bytes claim (`VERSION_V3`, `2`).
-- `mode` — `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-js
+- `schemaVersion`: layout of the manifest. A reader that does not recognise the
+  value must fail, not skip. A gate that reads nothing and passes is worse than
+  no gate.
+- `wireVersion`: the container version the bytes claim (`VERSION_V3`, `2`).
+- `mode`: `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-js
   `toBytes` produces), `"stream"` for the segmented container (what cryptify
   stores and pg-js uploads).
-- `privateSigning` — the payload signature uses a separate, encrypted signing
+- `privateSigning`: the payload signature uses a separate, encrypted signing
   policy. A reader must report exactly this: the private claims present when it
   is `true`, absent when it is `false`.
-- `recipients` — every recipient the container was sealed for. Each case must
+- `recipients`: every recipient the container was sealed for. Each case must
   open with *each* recipient's key, which is what exercises the multi-recipient
   KEM entries in the header.
 - `vk.json` and `usk-*.json` are shaped like real PKG responses
@@ -125,11 +125,10 @@ artifact's name. `pg-core/tests/sample_sealer.rs` holds the sealer to that.
 
 ### What "additive" turns out to mean here
 
-Worth knowing before reading a green run as permission: the header is a
-length-prefixed region and `bincode` ignores trailing bytes, so a field appended
-at the *end* of `Header` really does still open with 0.6.1. A field inserted
-anywhere else, a changed field type, or a reordering shifts every following
-byte and fails immediately. The gate reports every case at once, so the failure
+Read a green run carefully. The header is a length-prefixed region and `bincode`
+ignores trailing bytes, so a field appended at the *end* of `Header` really does
+still open with 0.6.1. A field inserted anywhere else, a changed field type, or
+a reordering shifts every following byte and fails immediately. The gate reports every case at once, so the failure
 list tells you whether the break is in the header, the payload, or one mode
 only.
 
