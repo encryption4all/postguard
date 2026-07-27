@@ -154,8 +154,9 @@ download, or seal locally in the JS job instead of consuming the artifact.
 The whole set is a pure function of one seed
 (`pg-core/examples/seal-samples/sample_set.rs`), so two runs of the same tree
 produce byte-identical files and a diff between two runs is a wire change rather
-than RNG noise. The manifest deliberately carries no timestamp or commit hash
-for the same reason; CI records which commit sealed a set in the uploaded
+than RNG noise. The policy timestamps in `sender` are a fixed constant, not a
+clock, and the manifest deliberately carries no wall-clock timestamp or commit
+hash for the same reason; CI records which commit sealed a set in the uploaded
 artifact's name. `pg-core/tests/sample_sealer.rs` holds the sealer to that.
 
 ### What "additive" turns out to mean here
