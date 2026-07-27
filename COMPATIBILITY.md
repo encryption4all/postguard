@@ -20,10 +20,11 @@ A change that cannot be made additively ships under a new prefix (`/v3`), with
 `/v2` left running until its consumers are gone.
 
 `/v2/irma/...` is a legacy alias for the canonical `/v2/request/...`; both
-prefixes serve the same handlers today. The alias is deprecated. New clients
-should use `/v2/request/...`, and the alias will be removed once the deprecation
-process at the bottom of this file has run for it ([#257]). Until then it keeps
-working, so a deployed client on `/v2/irma/...` is not broken by this notice.
+prefixes serve the same handlers today. The alias is deprecated as of
+2026-07-27. New clients should use `/v2/request/...`, and the alias will be
+removed once the deprecation process at the bottom of this file has run for it
+([#257]). Until then it keeps working, so a deployed client on `/v2/irma/...`
+is not broken by this notice.
 
 Planned enforcement: an oasdiff gate that diffs the spec against `main` and
 fails on a breaking change ([#249]). Until that lands, this is a review rule.
@@ -110,8 +111,10 @@ A gate that needs a different set of readers changes this file first.
 
 ## Deprecation
 
-1. Announce. The release that starts the clock says what is deprecated, in its
-   changelog entry and next to the item in the spec or in this file.
+1. Announce. Say what is deprecated next to the item in the spec or in this
+   file, with the date the clock starts. The next release of the affected
+   component repeats it in its changelog entry. The date is what step 3 counts
+   from, so an announcement without one does not start the window.
 2. Observe. `pg-pkg` exports `postguard_clients{client,client_version,host,...}`
    per request, so the versions in the field are measurable. Scraping it is
    [postguard-ops#64]; while that is not running there is no field data, and
