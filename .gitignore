@@ -13,3 +13,7 @@ pkg_ibs.sec
 .env
 *.pem
 *.patch
+# pg-wasm is under the root manifest's `exclude`, so the semver gate's
+# `--manifest-path pg-wasm/Cargo.toml` resolves it on its own and writes a
+# lockfile next to the manifest. The repo does not track it.
+pg-wasm/Cargo.lock
