@@ -192,3 +192,102 @@ jobs:
       - name: Clippy pg-compat
         if: steps.changes.outputs.wire == 'true'
         run: cargo clippy --manifest-path pg-compat/Cargo.toml --all-targets --locked -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # Public-API semver gate (#253). Fails a PR that breaks pg-core's or pg-wasm's
+  # public API without declaring the break.
+  #
+  # Versions here are bumped by release-plz, not by the PR that makes the
+  # change, so "declared" means the conventional-commit `!` marker that
+  # release-plz turns into a major bump. The marker is read off the PR title
+  # into SEMVER_RELEASE_TYPE; `edited` is already in this file's trigger list,
+  # so adding the `!` to the title re-runs the gate.
+  #
+  # Same always-reports shape as wire-compat-rust: the path filter is a step,
+  # not an `on: paths:` key, so a required check never sits pending.
+  # ---------------------------------------------------------------------------
+  semver-checks:
+    name: Public API semver
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter reads the PR's changed files
+    steps:
+      # pg-wasm is not published to crates.io, so its baseline is origin/main
+      # rather than a registry version, and the full history has to be here.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: changes
+        with:
+          filters: |
+            api:
+              - 'pg-core/**'
+              - 'pg-wasm/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'scripts/semver-checks.sh'
+              - 'scripts/semver-checks-test.sh'
+              - '.github/workflows/build.yml'
+
+      # Stubs cargo, so it needs no toolchain and runs in under a second. It
+      # covers the 100-vs-101 exit-code mapping the gate depends on: 100 is a
+      # semver violation, 101 is the tool or the build failing.
+      - name: Test the gate script
+        if: steps.changes.outputs.api == 'true'
+        shell: bash
+        run: ./scripts/semver-checks-test.sh
+
+      - if: steps.changes.outputs.api == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Pinned release binary rather than `cargo install` (a five-minute build)
+      # or a fourth third-party action. Bump the version and the digest together.
+      - name: Install cargo-semver-checks
+        if: steps.changes.outputs.api == 'true'
+        shell: bash
+        env:
+          VERSION: 0.49.0
+          SHA256: 72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cargo-semver-checks.tar.gz" \
+            "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${VERSION}/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${SHA256}  $RUNNER_TEMP/cargo-semver-checks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-semver-checks.tar.gz" -C "$HOME/.cargo/bin" cargo-semver-checks
+
+      # The PR title, not the commit subject: PRs are squash-merged here, so the
+      # title is what release-plz and the Conventional Commit check read. Passed
+      # through the environment rather than interpolated into the script, so a
+      # PR title cannot inject shell.
+      #
+      # The title `!` is the only accepted declaration. A `BREAKING CHANGE:`
+      # footer in the PR *body* is deliberately not accepted: this repo's
+      # squash_merge_commit_message is COMMIT_MESSAGES, so the body never reaches
+      # the squashed commit, and release-plz reads commits. Honouring a body-only
+      # footer would pass the gate on a `fix(pg-core):` PR that release-plz then
+      # publishes as a patch release of a breaking change.
+      - name: Read the breaking-change declaration off the PR title
+        id: declared
+        if: steps.changes.outputs.api == 'true'
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ "$PR_TITLE" =~ ^[a-zA-Z]+(\([^\)]*\))?!: ]]; then
+            echo "Breaking change declared in the PR title; a major bump is allowed."
+            echo "release_type=major" >> "$GITHUB_OUTPUT"
+          else
+            echo "No '!' in the PR title; any breaking change will fail the gate."
+          fi
+
+      - name: Check the public API
+        if: steps.changes.outputs.api == 'true'
+        shell: bash
+        env:
+          SEMVER_RELEASE_TYPE: ${{ steps.declared.outputs.release_type }}
+        run: ./scripts/semver-checks.sh
