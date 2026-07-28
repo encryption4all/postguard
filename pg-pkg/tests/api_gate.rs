@@ -1,13 +1,18 @@
 //! What the API breaking-change gate actually catches (issue #249).
 //!
-//! `.github/workflows/api-diff.yml` runs `oasdiff breaking` over
-//! `api-description.yaml`, and it is what stops a careless edit from breaking a
-//! deployed client. Its verdict is decided entirely by two step inputs,
-//! `fail-on` and `include-checks`, and getting them wrong fails open: the job
-//! goes green and nobody learns that the change it was supposed to stop went
-//! through. `fail-on: ERR` alone passes a removed optional response property, a
-//! removed request parameter, a changed status code and a dropped response enum
-//! value, all of which COMPATIBILITY.md forbids.
+//! The gate is `.github/workflows/api-diff.yml`, which runs `oasdiff breaking`
+//! over `api-description.yaml` and is what stops a careless edit from breaking a
+//! deployed client. It is not committed yet: the bot that wrote it has no
+//! `workflows: write`, so the YAML waits in a comment on PR #269 for a
+//! maintainer to apply. This test is the half that could be committed, and it
+//! stands on its own either way.
+//!
+//! The gate's verdict is decided entirely by two step inputs, `fail-on` and
+//! `include-checks`, and getting them wrong fails open: the job goes green and
+//! nobody learns that the change it was supposed to stop went through.
+//! `fail-on: ERR` alone passes a removed optional response property, a removed
+//! request parameter, a changed status code and a dropped response enum value,
+//! all of which COMPATIBILITY.md forbids.
 //!
 //! So the inputs are pinned here rather than only in the workflow: this test
 //! mutates the real spec, runs the real engine with the real flags, and asserts
@@ -471,9 +476,9 @@ fn every_mutation_still_applies() {
 fn the_gate_stops_breaking_changes_and_passes_additive_ones() {
     let Some(oasdiff) = oasdiff() else {
         eprintln!(
-            "skipping: oasdiff is not installed. This is the case in CI, where the gate itself \
-             runs in the API diff workflow. To run this test, `go install \
-             github.com/oasdiff/oasdiff@v1.26.1` (the version the action pins), or set OASDIFF."
+            "skipping: oasdiff is not installed, which is the case on every runner. To run this \
+             test, `go install github.com/oasdiff/oasdiff@v1.26.1` (the version the action pins), \
+             or set OASDIFF."
         );
         return;
     };
