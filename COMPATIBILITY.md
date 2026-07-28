@@ -26,8 +26,12 @@ removed once the deprecation process at the bottom of this file has run for it
 ([#257]). Until then it keeps working, so a deployed client on `/v2/irma/...`
 is not broken by this notice.
 
-Planned enforcement: an oasdiff gate that diffs the spec against `main` and
-fails on a breaking change ([#249]). Until that lands, this is a review rule.
+Enforcement is written but not running yet: the `API breaking changes (oasdiff)`
+job diffs the spec against the branch a PR targets and fails on anything oasdiff
+rates ERR ([#249]). The workflow file cannot be pushed by the bot that wrote it,
+so it sits in a comment on [#269] until a maintainer applies it. Until then the
+rules above are a review rule. A `/v3` route added next to `/v2` is additive, so
+the gate passes the escape hatch.
 
 ## Stored artifacts
 
@@ -129,6 +133,7 @@ Skipping step 2 is how you break the consumers you cannot see.
 [#257]: https://github.com/encryption4all/postguard/issues/257
 [#260]: https://github.com/encryption4all/postguard/issues/260
 [#261]: https://github.com/encryption4all/postguard/issues/261
+[#269]: https://github.com/encryption4all/postguard/pull/269
 [postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
 [postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
 [postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21
