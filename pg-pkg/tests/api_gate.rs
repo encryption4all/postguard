@@ -329,6 +329,20 @@ fn remove_a_response_enum_value(spec: &str) -> String {
     )
 }
 
+/// The rule COMPATIBILITY.md gained for this gate: the one WARN check that fires
+/// on a change the document did not already forbid, kept rather than suppressed
+/// because a client switching on `status` with no default branch breaks on a
+/// value it has never seen. Pinned here because it is the newest rule and the
+/// most fragile: it holds only at WARN, so a revert to `fail-on: ERR` drops it,
+/// and without this case the test would stay green while it did.
+fn add_a_response_enum_value(spec: &str) -> String {
+    once(
+        spec,
+        "enum: [INITIALIZED, PAIRING, CONNECTED, CANCELLED, DONE, TIMEOUT]",
+        "enum: [INITIALIZED, PAIRING, CONNECTED, CANCELLED, DONE, TIMEOUT, EXPIRED]",
+    )
+}
+
 /// `key` is the IBE user secret key: the payload the endpoint exists to return,
 /// and optional only because it is absent until the session is `DONE`.
 fn remove_optional_response_property(spec: &str) -> String {
@@ -428,6 +442,11 @@ fn mutations() -> Vec<Mutation> {
         (
             "a removed response enum value",
             remove_a_response_enum_value,
+            Gate::Stops,
+        ),
+        (
+            "a new response enum value",
+            add_a_response_enum_value,
             Gate::Stops,
         ),
         (
