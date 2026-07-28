@@ -145,7 +145,8 @@ One thing for [#261] to plan around. The `wire-compat-rust` job seals
 and uploads only when the PR touches the wire surface; on every other PR it
 reports success with no artifact attached. A `wire-compat-js` job with
 `needs: wire-compat-rust` that downloads
-`wire-compat-artifacts-${{ github.sha }}` unconditionally therefore hard-fails
+`wire-compat-artifacts-${{ github.event.pull_request.head.sha || github.sha }}`
+unconditionally therefore hard-fails
 on unrelated PRs rather than skipping. Repeat the same path condition on the
 download, or seal locally in the JS job instead of consuming the artifact.
 
