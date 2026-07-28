@@ -131,6 +131,15 @@ run_gate STUB_EXIT_PG_WASM=101 SEMVER_RELEASE_TYPE=major
 check "propagates the tool's exit code" 101 "$gate_status"
 check_silent_about "does not claim a breaking change" "Breaking public-API changes"
 
+# A build failure on the second surface must not throw away a real violation
+# already found on the first: the author would fix the baseline, re-run, and only
+# then learn about the break.
+echo "pg-core violation (100) plus pg-wasm build failure (101)"
+run_gate STUB_EXIT_PG_CORE=100 STUB_EXIT_PG_WASM=101
+check "propagates the tool's exit code" 101 "$gate_status"
+check_says "still reports the recorded break" "Breaking public-API changes in: pg-core"
+check_says "says the 101 is not a semver break" "tool or build"
+
 echo "an unrecognised exit code is not swallowed"
 run_gate STUB_EXIT_PG_CORE=2
 check "propagates the tool's exit code" 2 "$gate_status"

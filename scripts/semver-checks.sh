@@ -6,18 +6,24 @@
 # A breaking change to either surface fails this script unless the change is
 # declared as breaking. Versions in this repo are bumped by release-plz, not by
 # the PR that makes the change, so the declaration is the `!` in the
-# conventional-commit PR title (plus the `BREAKING CHANGE:` footer) that
-# release-plz turns into a major bump. CI translates that into
+# conventional-commit PR title, and only that: release-plz reads commit
+# messages, and this repo squash-merges with squash_merge_commit_message =
+# COMMIT_MESSAGES, so a `BREAKING CHANGE:` footer written in the PR body never
+# reaches the commit release-plz reads. The footer is useful prose for the
+# changelog; it is not the declaration. CI translates the title marker into
 # SEMVER_RELEASE_TYPE=major; see .github/workflows/build.yml.
 #
 # Usage:
 #   scripts/semver-checks.sh
 #
 # Environment:
-#   SEMVER_RELEASE_TYPE   major|minor|patch. Passed to --release-type, which
-#                         overrides the bump cargo-semver-checks derives from
-#                         the version numbers. Set it to `major` to allow
-#                         breaking changes through.
+#   SEMVER_RELEASE_TYPE   major|minor|patch. Passed to --release-type. Note what
+#                         `major` does: every cargo-semver-checks lint exists to
+#                         demand a bump that a declared major already grants, so
+#                         all of them skip and the run checks nothing (`0 checks:
+#                         0 pass, 253 skip`). It also reaches both invocations
+#                         below, so a `!` declared for a pg-wasm break passes any
+#                         unrelated pg-core break in the same PR as well.
 #   SEMVER_WASM_BASELINE  Git revision pg-wasm is compared against.
 #                         Default: origin/main. pg-wasm is not on crates.io, so
 #                         there is no registry baseline to fetch.
@@ -50,6 +56,16 @@ fi
 
 failed=()
 
+# Report the semver violations recorded so far, if any.
+report_breaks() {
+  [[ ${#failed[@]} -gt 0 ]] || return 0
+  echo >&2
+  echo "Breaking public-API changes in: ${failed[*]}" >&2
+  echo "Either keep the change additive, or declare the break: give the PR a" >&2
+  echo "conventional-commit title with '!' (e.g. feat(pg-core)!: ...), which is" >&2
+  echo "what release-plz reads to cut a major release." >&2
+}
+
 # Record a semver violation (exit 100) and carry on so both surfaces get
 # reported; let anything else out with the tool's own exit code.
 run_check() {
@@ -61,6 +77,12 @@ run_check() {
     failed+=("$name")
     return 0
   fi
+  # A violation already recorded for the other surface is a real break and has
+  # to be reported here too, or fixing the build failure costs a round trip to
+  # discover it. The tool-failure message goes last, because it is what the
+  # non-zero exit is about: no `!` clears it.
+  report_breaks
+  echo >&2
   echo "cargo-semver-checks failed on ${name} (exit ${ec}): tool or build" >&2
   echo "failure, not a semver break. Adding '!' to the PR title will not" >&2
   echo "clear this." >&2
@@ -107,11 +129,7 @@ run_check pg-wasm \
   ${release_type[@]+"${release_type[@]}"}
 
 if [[ ${#failed[@]} -gt 0 ]]; then
-  echo
-  echo "Breaking public-API changes in: ${failed[*]}" >&2
-  echo "Either keep the change additive, or declare the break: give the PR a" >&2
-  echo "conventional-commit title with '!' (e.g. feat(pg-core)!: ...) and a" >&2
-  echo "BREAKING CHANGE: footer, so release-plz cuts a major release." >&2
+  report_breaks
   exit 1
 fi
 
