@@ -107,7 +107,10 @@ Planned consumers of this list, each still an open issue:
 - [postguard-e2e#21], the version sweep, to run nightly and pre-deploy
 - [postguard-js#131], the envelope-compat gate
 
-A gate that needs a different set of readers changes this file first.
+A gate that needs a different set of readers changes this file first. The two
+npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, which fails
+its own test when the two lists drift; the `crates.io` line is spelled out in
+`pg-compat/Cargo.toml`.
 
 ## Deprecation
 
