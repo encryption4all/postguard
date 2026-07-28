@@ -45,7 +45,7 @@ node pg-compat-js/bin/pg-compat-case.mjs \
 understand from passing quietly (`test/manifest.test.mjs`), and a self-test that
 hands the readers a damaged copy of the set and requires a failure naming the
 case (`test/gate-teeth.test.mjs`). The last one is what catches a harness that
-has stopped reading — the gate asserting that good bytes open is an assertion a
+has stopped reading. The gate asserting that good bytes open is an assertion a
 broken harness also satisfies.
 
 ## The readers
@@ -70,7 +70,7 @@ and the gate prints which reader opened which case so that stays visible.
 only sees the header; 2.x keeps the unseal result. That is a fixed SDK
 limitation rather than something the wire format can change, so the reader
 declares it and the gate then requires the private policy to be *absent* for
-that reader — a 1.x that suddenly reported one would be a mismatch, not a quiet
+that reader. A 1.x that suddenly reported one would be a mismatch, not a quiet
 pass.
 
 Nothing else is excluded. Every case must be opened by at least one reader and
@@ -104,7 +104,7 @@ nothing else. Where a browser consumer passes `element` and scans a QR code, the
 gate passes a session callback that hands the stub a recipient id in place of a
 JWT. Everything after that is the published SDK's own code.
 
-The alternative — stubbing the unsealer instead — would test the stub.
+The alternative, stubbing the unsealer instead, would test the stub.
 
 [#247]: https://github.com/encryption4all/postguard/issues/247
 [#251]: https://github.com/encryption4all/postguard/issues/251
