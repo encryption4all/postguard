@@ -6,6 +6,8 @@ PostGuard is an Identity-Based Encryption (IBE) service for encrypting messages 
 
 PostGuard uses [Yivi](https://yivi.app), a privacy-friendly identity platform, for identity authentication. This repository contains the core protocol library, the PKG server, WASM bindings, a CLI tool, and FFI bindings. All other PostGuard tools and SDKs depend on this.
 
+What external consumers can rely on (`/v2` endpoint stability, the archival read guarantee, SDK support windows and the deprecation process) is in [COMPATIBILITY.md](./COMPATIBILITY.md).
+
 ### Workspace
 
 | Crate/package | Description |
