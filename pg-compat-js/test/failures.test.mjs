@@ -3,7 +3,7 @@
 //! which is exactly why they need holding down.
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
@@ -94,4 +94,30 @@ test('a policy that matches reports nothing', () => {
 test('a missing identity is described rather than compared away', () => {
   const message = describePolicyMismatch('private', null, { ts: 1, con: [] });
   assert.ok(message?.startsWith('private signing policy is null'), message);
+});
+
+test('a leaked pkg stub does not hold the case process open', async () => {
+  // bin/pg-compat-case.mjs ends with `process.exitCode = ...` rather than
+  // process.exit(), so the child exits only when the event loop drains. A
+  // listening server is a live handle: without unref() in startPkgStub, a stub
+  // that outlived its case would hang the child until runCase's 300s
+  // spawnSync timeout, turning a one-line failure into a stall.
+  //
+  // The invariant that prevents the leak (startPkgStub stays the last fallible
+  // statement in the pg-js reader's load(), and verify.mjs always unloads) lives
+  // in two other files. This asserts the blast radius stays survivable if either
+  // ever changes.
+  const probe = [
+    "import { startPkgStub } from './src/readers/pkg-stub.mjs';",
+    "await startPkgStub({ verifyingKey: '{}', usks: {} });",
+  ].join('\n');
+
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+    cwd: new URL('..', import.meta.url).pathname,
+    timeout: 20_000,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.signal, null, 'the child was killed — a leaked stub is holding the loop open');
+  assert.equal(result.status, 0, result.stderr);
 });

@@ -64,6 +64,17 @@ export async function startPkgStub({ verifyingKey, usks }) {
     server.listen(0, '127.0.0.1', resolve);
   });
 
+  // A listening server is a live handle, and `bin/pg-compat-case.mjs` ends with
+  // `process.exitCode = ...` rather than `process.exit()` (which would truncate
+  // stdout on macOS, where pipe writes are async). So the child exits only when
+  // the loop drains, and a stub that outlived its case would hold it open until
+  // runCase's 300s spawnSync timeout — turning a one-line failure into a stall.
+  //
+  // unref() takes this handle out of that calculation. It does not stop the
+  // server working: an in-flight request, and the client socket pg-js opens
+  // from this same process, keep the loop alive on their own.
+  server.unref();
+
   return {
     url: `http://127.0.0.1:${server.address().port}`,
     close: () => new Promise((resolve) => server.close(resolve)),

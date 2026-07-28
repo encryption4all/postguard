@@ -41,6 +41,10 @@ export function pgJsReader({ version, specifier, surfacesUnsealResult }) {
     async load({ verifyingKey, usks }) {
       const { PostGuard } = await import(specifier);
       const pkg = await startPkgStub({ verifyingKey, usks });
+      // Keep startPkgStub last: verify.mjs returns early when load() throws and
+      // never calls unload(), so anything fallible after this line leaks a
+      // running server. The stub is unref'd so that leak cannot hang the child,
+      // but it would still serve a case that should have failed cleanly.
       return { PostGuard, pkg };
     },
 
