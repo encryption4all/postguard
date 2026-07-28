@@ -28,7 +28,7 @@ removed once the deprecation process at the bottom of this file has run for it
 ([#257]). Until then it keeps working, so a deployed client on `/v2/irma/...`
 is not broken by this notice.
 
-Enforcement is written but not running yet: the `API breaking changes (oasdiff)`
+Enforcement: the `API breaking changes (oasdiff)`
 job diffs the spec against the branch a PR targets and fails on any change
 oasdiff rates WARN or ERR ([#249]). That covers every rule above except one. The
 gate compares documented paths, and this spec documents the canonical
