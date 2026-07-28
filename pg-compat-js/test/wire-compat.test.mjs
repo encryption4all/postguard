@@ -21,7 +21,11 @@ test('published JS readers open the HEAD-sealed sample set', async () => {
   assert.ok(window.length > 0, 'no published readers configured');
 
   const failures = [];
+  // Two different questions: which readers got the case open (the summary at the
+  // end), and how many were pointed at it at all (the coverage invariant below).
+  // A reader that tried and failed answers the second, not the first.
   const openedBy = new Map(manifest.cases.map((kase) => [kase.name, []]));
+  const readersFor = new Map(manifest.cases.map((kase) => [kase.name, 0]));
   const outOfScope = [];
 
   for (const reader of window) {
@@ -34,32 +38,36 @@ test('published JS readers open the HEAD-sealed sample set', async () => {
       continue;
     }
 
-    let opened = 0;
+    let inScope = 0;
     for (const kase of manifest.cases) {
       if (Object.hasOwn(reader.cannotOpen, kase.mode)) {
         outOfScope.push(`${reader.id} × ${kase.name} (${kase.mode}): ${reader.cannotOpen[kase.mode]}`);
         continue;
       }
-      failures.push(...runCase(dir, reader.id, kase.name));
-      openedBy.get(kase.name).push(reader.id);
-      opened += 1;
+
+      const caseFailures = runCase(dir, reader.id, kase.name);
+      failures.push(...caseFailures);
+      if (caseFailures.length === 0) openedBy.get(kase.name).push(reader.id);
+      readersFor.set(kase.name, readersFor.get(kase.name) + 1);
+      inScope += 1;
     }
 
-    if (opened === 0) {
+    if (inScope === 0) {
       failures.push(
-        `${reader.id}: opened no case at all, so it is not being tested; either the sample set ` +
-          'lost the modes it reads or this reader should leave the support window',
+        `${reader.id}: every case in the set is out of scope for it, so it is not being tested; ` +
+          'either the sample set lost the modes it reads or this reader should leave the support ' +
+          'window',
       );
     }
   }
 
   // The failure mode a gate must not have is passing without reading anything,
   // and a per-reader mode exclusion is exactly how that creeps in.
-  for (const [name, readerIds] of openedBy) {
-    if (readerIds.length === 0) {
+  for (const [name, count] of readersFor) {
+    if (count === 0) {
       failures.push(
-        `${name}: no reader in the support window opened this case, so nothing is holding it to ` +
-          'the wire format',
+        `${name}: no reader in the support window reads this case at all, so nothing is holding ` +
+          'it to the wire format',
       );
     }
   }

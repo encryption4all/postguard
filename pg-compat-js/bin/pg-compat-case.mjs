@@ -18,42 +18,67 @@ import { verifyCase } from '../src/verify.mjs';
 
 const USAGE = 'usage: pg-compat-case <artifacts-dir> <reader-id> <case-name>';
 
-const [dir, readerId, caseName, ...rest] = process.argv.slice(2);
-if (!dir || !readerId || !caseName || rest.length > 0) {
-  process.stderr.write(`${USAGE}\n`);
-  process.exit(2);
+/**
+ * @returns {Promise<number>} 0 when the case opened, 1 with one reported line
+ *   per failure on stdout, 2 when it never got as far as a reader (message on
+ *   stderr, which is the parent's cue that this pair should not have been run)
+ */
+async function main() {
+  const [dir, readerId, caseName, ...rest] = process.argv.slice(2);
+  if (!dir || !readerId || !caseName || rest.length > 0) {
+    process.stderr.write(`${USAGE}\n`);
+    return 2;
+  }
+
+  let selected;
+  let manifest;
+  let kase;
+  try {
+    selected = reader(readerId);
+    manifest = await readManifest(dir);
+    kase = findCase(manifest, caseName);
+  } catch (e) {
+    process.stderr.write(`${e.message}\n`);
+    return 2;
+  }
+
+  // The gate checks this once per reader before it spawns anything, so this is
+  // for hand-runs. Without it a container version bump reaches the reader as
+  // shifted bytes, which is the allocation abort rather than a message.
+  if (manifest.wireVersion !== selected.wireVersion) {
+    process.stdout.write(
+      `${selected.id}: sample set claims wire version ${manifest.wireVersion}, this reader speaks ` +
+        `${selected.wireVersion}\n`,
+    );
+    return 1;
+  }
+
+  if (Object.hasOwn(selected.cannotOpen, kase.mode)) {
+    process.stderr.write(
+      `${selected.id} cannot open a ${kase.mode}-mode case: ${selected.cannotOpen[kase.mode]}\n`,
+    );
+    return 2;
+  }
+
+  // Anything raised before the first reader call — a case file the sealer did
+  // not write, an unreadable `usk-*.json`, a partial artifact download — has to
+  // come out on stdout like every other failure. Left to Node's default
+  // handler it exits 1 with an empty stdout, and `childFailures` then keeps the
+  // last stderr line that is not a stack frame: the version banner, with the
+  // path and the errno gone.
+  let failures;
+  try {
+    failures = await verifyCase(selected, dir, manifest, kase);
+  } catch (e) {
+    failures = [`${selected.id}: ${kase.name}: ${e.message}`];
+  }
+
+  for (const failure of failures) process.stdout.write(`${failure}\n`);
+  return failures.length === 0 ? 0 : 1;
 }
 
-let selected;
-let manifest;
-let kase;
-try {
-  selected = reader(readerId);
-  manifest = await readManifest(dir);
-  kase = findCase(manifest, caseName);
-} catch (e) {
-  process.stderr.write(`${e.message}\n`);
-  process.exit(2);
-}
-
-// The gate checks this once per reader before it spawns anything, so this is
-// for hand-runs. Without it a container version bump reaches the reader as
-// shifted bytes, which is the allocation abort rather than a message.
-if (manifest.wireVersion !== selected.wireVersion) {
-  process.stdout.write(
-    `${selected.id}: sample set claims wire version ${manifest.wireVersion}, this reader speaks ` +
-      `${selected.wireVersion}\n`,
-  );
-  process.exit(1);
-}
-
-if (Object.hasOwn(selected.cannotOpen, kase.mode)) {
-  process.stderr.write(
-    `${selected.id} cannot open a ${kase.mode}-mode case: ${selected.cannotOpen[kase.mode]}\n`,
-  );
-  process.exit(2);
-}
-
-const failures = await verifyCase(selected, dir, manifest, kase);
-for (const failure of failures) process.stdout.write(`${failure}\n`);
-process.exit(failures.length === 0 ? 0 : 1);
+// `exitCode` rather than `process.exit()`: under `spawnSync` stdout is a pipe,
+// and Node's pipe writes are synchronous on Linux and Windows but asynchronous
+// on macOS, where exiting outright can drop the very lines a hand-run is being
+// read for.
+process.exitCode = await main();

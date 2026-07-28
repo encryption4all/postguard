@@ -108,9 +108,10 @@ Planned consumers of this list, each still an open issue:
 - [postguard-js#131], the envelope-compat gate
 
 A gate that needs a different set of readers changes this file first. The two
-npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, which fails
-its own test when the two lists drift; the `crates.io` line is spelled out in
-`pg-compat/Cargo.toml`.
+npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
+`test/manifest.test.mjs` parses the block above and fails when the two lists
+drift, so keep that block as rows and not as prose; the `crates.io` line is
+spelled out in `pg-compat/Cargo.toml`.
 
 ## Deprecation
 

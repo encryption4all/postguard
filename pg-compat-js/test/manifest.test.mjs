@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { SUPPORTED_SCHEMA_VERSION, readManifest } from '../src/manifest.mjs';
-import { reader, readers } from '../src/readers.mjs';
+import { installedVersion, reader, readers } from '../src/readers.mjs';
+import { declaredNpmReaders, parseNpmReaders } from '../src/support-window.mjs';
 
 /** A directory holding just a `manifest.json`. */
 async function withManifest(manifest, body) {
@@ -44,11 +45,40 @@ test('a missing set says how to seal one', async () => {
   }
 });
 
-test('the support window is the reader list in COMPATIBILITY.md', () => {
+test('the support window is the npm reader list in COMPATIBILITY.md', async () => {
+  // Read out of the document, not repeated here: a literal in this file would
+  // only detect changes to `readers.mjs`, and the drift that matters runs the
+  // other way — the window grows in the document that decides it while the gate
+  // goes on testing the set it always tested.
   assert.deepEqual(
-    readers().map((r) => r.id),
-    ['@e4a/pg-wasm@0.6.1', '@e4a/pg-js@2.3.3', '@e4a/pg-js@1.11.0'],
+    readers()
+      .map((r) => r.id)
+      .sort(),
+    (await declaredNpmReaders()).sort(),
+    'src/readers.mjs and the reader list in COMPATIBILITY.md have drifted; the document decides',
   );
+});
+
+test('a document with nothing to compare against is an error, not an empty list', () => {
+  assert.throws(() => parseNpmReaders('## Reader list\n\nprose, no block\n'), /no reader-list block/);
+  assert.throws(
+    () => parseNpmReaders('```\n# <registry> <package> <versions...>\ncrates.io pg-core 0.6.1\n```\n'),
+    /holds no npm row/,
+  );
+  assert.throws(
+    () => parseNpmReaders('```\n# <registry> <package> <versions...>\nnpm @e4a/pg-js\n```\n'),
+    /lists no version/,
+  );
+});
+
+test('every reader is labelled with the version npm installed for it', async () => {
+  for (const r of readers()) {
+    assert.equal(
+      await installedVersion(r.specifier),
+      r.version,
+      `${r.id} loads the alias ${r.specifier}, which npm resolved to another version`,
+    );
+  }
 });
 
 test('an unknown reader id names the ones there are', () => {

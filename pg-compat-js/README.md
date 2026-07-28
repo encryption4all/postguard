@@ -81,13 +81,21 @@ nothing is worse than no check.
 
 The list of published readers is the support window declared in
 [`COMPATIBILITY.md`](../COMPATIBILITY.md); `src/readers.mjs` and that document
-are meant to be the same list, and `test/manifest.test.mjs` fails when they
-drift. Adding one is:
+are meant to be the same list. `test/manifest.test.mjs` parses the `Reader list`
+block in that document and fails when the two drift, so the document is where a
+version lands first:
 
-1. `package.json`: `"pg-js-2-4-0": "npm:@e4a/pg-js@2.4.0"`. An alias, because
+1. [`COMPATIBILITY.md`](../COMPATIBILITY.md): the version on that package's `npm`
+   row in the `Reader list` block. It decides; the rest of this list is the gate
+   catching up.
+2. `package.json`: `"pg-js-2-4-0": "npm:@e4a/pg-js@2.4.0"`. An alias, because
    several versions of one package have to coexist in one `node_modules`.
-2. `src/readers.mjs`: one more entry in `readers()`.
-3. `npm install`, and commit the lockfile it moves. CI installs with `npm ci`.
+3. `src/readers.mjs`: one more entry in `readers()`.
+4. `npm install`, and commit the lockfile it moves. CI installs with `npm ci`.
+
+Steps 2 and 3 name the version twice, so the entry's `version` is also compared
+against the one npm resolved the alias to: a typo in either place is a red run
+rather than a gate that runs one version and labels it another.
 
 Set `wireVersion` on the entry when the reader speaks a container version other
 than `VERSION_V3`. Unlike the Rust half, which reads the constant out of the

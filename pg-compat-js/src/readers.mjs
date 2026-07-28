@@ -23,6 +23,9 @@
 //! open(handle, case)       -> {plaintext, identity, recipients}
 //! ```
 
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
 import { WIRE_VERSION } from './manifest.mjs';
 import { pgJsReader } from './readers/pg-js.mjs';
 import { pgWasmReader } from './readers/pg-wasm.mjs';
@@ -44,6 +47,30 @@ export function readers() {
     pgJsReader({ version: '2.3.3', specifier: 'pg-js-2-3-3', surfacesUnsealResult: true }),
     pgJsReader({ version: '1.11.0', specifier: 'pg-js-1-11-0', surfacesUnsealResult: false }),
   ].map((reader) => ({ wireVersion: WIRE_VERSION, ...reader }));
+}
+
+/**
+ * The version npm actually installed under a reader's alias.
+ *
+ * The `version` declared above and the `npm:` alias in `package.json` that
+ * decides which code gets loaded are two independent strings, and adding a
+ * reader is documented as editing both. A typo in either makes the gate run one
+ * version while labelling every message with another, which is a support window
+ * that is quietly wrong rather than a red run. `test/manifest.test.mjs` compares
+ * them.
+ *
+ * Read off disk rather than imported: neither published package lists
+ * `package.json` in its `exports`, so `import('<alias>/package.json')` is
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+ *
+ * @param {string} specifier the npm alias the reader is installed under
+ * @returns {Promise<string>} the installed package's own version
+ */
+export async function installedVersion(specifier) {
+  const path = fileURLToPath(
+    new URL(`../node_modules/${specifier}/package.json`, import.meta.url),
+  );
+  return JSON.parse(await readFile(path, 'utf8')).version;
 }
 
 /**

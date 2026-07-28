@@ -8,7 +8,7 @@
 //! up here rather than the next time someone touches `Header`.
 
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -63,6 +63,23 @@ test('a truncated container is reported, not read as a shorter one', async () =>
     (dir) => {
       const failures = runCase(dir, WASM_READER, 'mem');
       assert.ok(failures.length > 0, 'a truncated container was reported as opening cleanly');
+    },
+  );
+});
+
+test('a case file the set does not have names the file, not Node', async () => {
+  await withDamagedSet(
+    (dir) => unlink(join(dir, 'stream.bin')),
+    (dir) => {
+      const failures = runCase(dir, WASM_READER, 'stream');
+      // The reachable version of this is a partial artifact download in CI, or a
+      // manifest naming a file the sealer did not write. Read through the child's
+      // stdout it is an ENOENT and a path; left to Node's default handler the
+      // child says nothing on stdout and the last line of its stack dump, which
+      // is all the parent can salvage, is `Node.js v22.x`.
+      assert.equal(failures.length, 1, JSON.stringify(failures));
+      assert.match(failures[0], /stream\.bin/);
+      assert.doesNotMatch(failures[0], /before it could report/);
     },
   );
 });
