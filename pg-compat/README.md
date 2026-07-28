@@ -150,7 +150,7 @@ surface; on every other PR it reports success with no artifact attached. A
 `wire-compat-js` job with `needs: wire-compat-rust` that downloads
 `wire-compat-artifacts-${{ github.sha }}` unconditionally would therefore
 hard-fail on unrelated PRs rather than skipping. The proposed `wire-compat-js`
-job for `pg-compat-js` ([#261], YAML in a comment on that PR and not applied
+job for `pg-compat-js` ([#261], YAML in a comment on PR #267 and not applied
 yet) gates every expensive step on
 `needs.wire-compat-rust.outputs.sealed == 'success'`, the seal step's own
 outcome, published by the job that owns it. Re-running the path filter in the

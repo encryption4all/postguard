@@ -50,27 +50,31 @@ export function readers() {
 }
 
 /**
- * The version npm actually installed under a reader's alias.
+ * The package npm actually installed under a reader's alias.
  *
- * The `version` declared above and the `npm:` alias in `package.json` that
- * decides which code gets loaded are two independent strings, and adding a
- * reader is documented as editing both. A typo in either makes the gate run one
- * version while labelling every message with another, which is a support window
- * that is quietly wrong rather than a red run. `test/manifest.test.mjs` compares
- * them.
+ * The `package` and `version` declared above and the `npm:` alias in
+ * `package.json` that decides which code gets loaded are independent strings,
+ * and adding a reader is documented as editing both places. A typo in either
+ * makes the gate run one package or version while labelling every message with
+ * another, which is a support window that is quietly wrong rather than a red
+ * run. Both halves are returned because either one alone leaves the other open:
+ * `npm:@e4a/pg-wasm@2.4.0` under a `pg-js-2-4-0` alias has the version the
+ * entry declares and not the package. `test/manifest.test.mjs` compares them.
  *
  * Read off disk rather than imported: neither published package lists
  * `package.json` in its `exports`, so `import('<alias>/package.json')` is
  * `ERR_PACKAGE_PATH_NOT_EXPORTED`.
  *
  * @param {string} specifier the npm alias the reader is installed under
- * @returns {Promise<string>} the installed package's own version
+ * @returns {Promise<{name: string, version: string}>} as the installed
+ *   `package.json` gives them
  */
-export async function installedVersion(specifier) {
+export async function installedPackage(specifier) {
   const path = fileURLToPath(
     new URL(`../node_modules/${specifier}/package.json`, import.meta.url),
   );
-  return JSON.parse(await readFile(path, 'utf8')).version;
+  const { name, version } = JSON.parse(await readFile(path, 'utf8'));
+  return { name, version };
 }
 
 /**

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { SUPPORTED_SCHEMA_VERSION, readManifest } from '../src/manifest.mjs';
-import { installedVersion, reader, readers } from '../src/readers.mjs';
+import { installedPackage, reader, readers } from '../src/readers.mjs';
 import { declaredNpmReaders, parseNpmReaders } from '../src/support-window.mjs';
 
 /** A directory holding just a `manifest.json`. */
@@ -71,12 +71,12 @@ test('a document with nothing to compare against is an error, not an empty list'
   );
 });
 
-test('every reader is labelled with the version npm installed for it', async () => {
+test('every reader is labelled with the package npm installed for it', async () => {
   for (const r of readers()) {
-    assert.equal(
-      await installedVersion(r.specifier),
-      r.version,
-      `${r.id} loads the alias ${r.specifier}, which npm resolved to another version`,
+    assert.deepEqual(
+      await installedPackage(r.specifier),
+      { name: r.package, version: r.version },
+      `${r.id} loads the alias ${r.specifier}, which npm resolved to another package or version`,
     );
   }
 });

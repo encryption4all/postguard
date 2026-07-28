@@ -93,9 +93,10 @@ version lands first:
 3. `src/readers.mjs`: one more entry in `readers()`.
 4. `npm install`, and commit the lockfile it moves. CI installs with `npm ci`.
 
-Steps 2 and 3 name the version twice, so the entry's `version` is also compared
-against the one npm resolved the alias to: a typo in either place is a red run
-rather than a gate that runs one version and labels it another.
+Steps 2 and 3 name the package and version twice, so the entry's `package` and
+`version` are also compared against what npm resolved the alias to: a typo in
+either place is a red run rather than a gate that runs one package or version
+and labels it another.
 
 Set `wireVersion` on the entry when the reader speaks a container version other
 than `VERSION_V3`. Unlike the Rust half, which reads the constant out of the
