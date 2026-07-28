@@ -26,7 +26,10 @@ export function childFailures(label, result) {
     .filter((line) => line !== '');
   if (reported.length > 0) return reported;
 
-  return [`${label}: reader ${exitDescription(result)} before it could report${stderrTail(result.stderr)}`];
+  return [
+    `${label}: reader ${exitDescription(result)} before it could report` +
+      stderrTail(result.stderr),
+  ];
 }
 
 /**

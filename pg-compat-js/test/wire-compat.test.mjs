@@ -45,7 +45,8 @@ test('published JS readers open the HEAD-sealed sample set', async () => {
     if (manifest.wireVersion !== reader.wireVersion) {
       // Every case would fail the same way; say it once.
       failures.push(
-        `${reader.id}: sample set claims wire version ${manifest.wireVersion}, this reader speaks ` +
+        `${reader.id}: sample set claims wire version ${manifest.wireVersion}, ` +
+          `this reader speaks ` +
           `${reader.wireVersion}`,
       );
       continue;
@@ -54,7 +55,9 @@ test('published JS readers open the HEAD-sealed sample set', async () => {
     let inScope = 0;
     for (const kase of manifest.cases) {
       if (Object.hasOwn(reader.cannotOpen, kase.mode)) {
-        outOfScope.push(`${reader.id} × ${kase.name} (${kase.mode}): ${reader.cannotOpen[kase.mode]}`);
+        outOfScope.push(
+          `${reader.id} × ${kase.name} (${kase.mode}): ${reader.cannotOpen[kase.mode]}`,
+        );
         continue;
       }
 
@@ -93,5 +96,7 @@ test('published JS readers open the HEAD-sealed sample set', async () => {
   );
 
   for (const line of outOfScope) console.log(`not covered — ${line}`);
-  for (const [name, readerIds] of openedBy) console.log(`${name}: opened by ${readerIds.join(', ')}`);
+  for (const [name, readerIds] of openedBy) {
+    console.log(`${name}: opened by ${readerIds.join(', ')}`);
+  }
 });

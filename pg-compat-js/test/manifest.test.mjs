@@ -25,7 +25,8 @@ async function withManifest(manifest, body) {
 }
 
 test('a newer schema version is refused rather than skipped', async () => {
-  await withManifest({ schemaVersion: SUPPORTED_SCHEMA_VERSION + 1, cases: [{ name: 'mem' }] }, async (dir) => {
+  const ahead = { schemaVersion: SUPPORTED_SCHEMA_VERSION + 1, cases: [{ name: 'mem' }] };
+  await withManifest(ahead, async (dir) => {
     await assert.rejects(readManifest(dir), /is not the 1 this reader understands/);
   });
 });
@@ -60,9 +61,15 @@ test('the support window is the npm reader list in COMPATIBILITY.md', async () =
 });
 
 test('a document with nothing to compare against is an error, not an empty list', () => {
-  assert.throws(() => parseNpmReaders('## Reader list\n\nprose, no block\n'), /no reader-list block/);
   assert.throws(
-    () => parseNpmReaders('```\n# <registry> <package> <versions...>\ncrates.io pg-core 0.6.1\n```\n'),
+    () => parseNpmReaders('## Reader list\n\nprose, no block\n'),
+    /no reader-list block/,
+  );
+  assert.throws(
+    () =>
+      parseNpmReaders(
+        '```\n# <registry> <package> <versions...>\ncrates.io pg-core 0.6.1\n```\n',
+      ),
     /holds no npm row/,
   );
   assert.throws(

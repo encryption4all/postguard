@@ -38,8 +38,9 @@ export function pgWasmReader({ version, specifier }) {
     },
 
     async open(module, { mode, ciphertext, verifyingKey, recipientId, usk }) {
-      if (mode === 'memory') return openMemory(module, { ciphertext, verifyingKey, recipientId, usk });
-      if (mode === 'stream') return openStream(module, { ciphertext, verifyingKey, recipientId, usk });
+      const args = { ciphertext, verifyingKey, recipientId, usk };
+      if (mode === 'memory') return openMemory(module, args);
+      if (mode === 'stream') return openStream(module, args);
       throw new Error(`unknown mode ${mode}`);
     },
   };

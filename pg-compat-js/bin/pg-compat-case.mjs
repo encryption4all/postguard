@@ -47,7 +47,8 @@ async function main() {
   // shifted bytes, which is the allocation abort rather than a message.
   if (manifest.wireVersion !== selected.wireVersion) {
     process.stdout.write(
-      `${selected.id}: sample set claims wire version ${manifest.wireVersion}, this reader speaks ` +
+      `${selected.id}: sample set claims wire version ${manifest.wireVersion}, ` +
+        `this reader speaks ` +
         `${selected.wireVersion}\n`,
     );
     return 1;

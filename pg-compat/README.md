@@ -149,8 +149,9 @@ The `wire-compat-rust` job seals and uploads only when the PR touches the wire
 surface; on every other PR it reports success with no artifact attached. A
 `wire-compat-js` job with `needs: wire-compat-rust` that downloads
 `wire-compat-artifacts-${{ github.event.pull_request.head.sha || github.sha }}`
-unconditionally would therefore hard-fail on unrelated PRs rather than skipping. The `wire-compat-js` job
-for `pg-compat-js` ([#261]) gates every expensive step on
+unconditionally would therefore hard-fail on unrelated PRs rather than
+skipping. The `wire-compat-js` job for `pg-compat-js` ([#261]) gates every
+expensive step on
 `needs.wire-compat-rust.outputs.sealed == 'success'`, the seal step's own
 outcome, published by the job that owns it. Re-running the path filter in the
 second job would leave two copies of it that have to agree forever, and the run
