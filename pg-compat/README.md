@@ -141,7 +141,7 @@ stream-multi-segment.bin/.plain
 
 ### Consuming the set from another job
 
-One thing for [#261] to plan around. The proposed `wire-compat-rust` job seals
+One thing for [#261] to plan around. The `wire-compat-rust` job seals
 and uploads only when the PR touches the wire surface; on every other PR it
 reports success with no artifact attached. A `wire-compat-js` job with
 `needs: wire-compat-rust` that downloads
