@@ -1,6 +1,6 @@
 [workspace]
 members = ["pg-core", "pg-cli", "pg-pkg", "pg-ffi"]
-exclude = ["pg-wasm"]
+exclude = ["pg-wasm", "pg-compat"]
 
 resolver = "2"
 

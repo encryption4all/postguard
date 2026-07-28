@@ -49,6 +49,10 @@ tokio-util = { version = "0.7.4", features = ["compat"] }
 serde-transcode = "1.1.1"
 criterion = "0.8"
 rand = "0.8.5"
+# Reproducible-by-contract RNG for the wire-compat sample sealer. `StdRng` is
+# explicitly not guaranteed stable across rand releases; `ChaCha20Rng` is, and
+# it is already in the tree via rand's `std_rng`.
+rand_chacha = "0.3"
 futures = { version = "0.3", features = ["io-compat"] }
 futures-util = "0.3.25"
 
@@ -72,6 +76,12 @@ test = []
 name = "main"
 harness = false
 required-features = ["test", "rust", "stream"]
+
+# Seals the deterministic sample set consumed by the wire-compat gate (#260).
+[[example]]
+name = "seal-samples"
+path = "examples/seal-samples/main.rs"
+required-features = ["rust", "stream"]
 
 [package.metadata.docs.rs]
 all-features = true

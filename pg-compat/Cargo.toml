@@ -1,0 +1,22 @@
+[package]
+name = "pg-compat"
+description = "Opens HEAD-sealed sample containers with published pg-core releases (wire-compat gate)."
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Deliberately NOT a workspace member: the whole point is to depend on pg-core
+# as published on crates.io, not on the pg-core in this tree. The root
+# Cargo.toml lists this directory under `exclude`, and this crate keeps its own
+# Cargo.lock so CI resolves the same dependency versions every run.
+
+[dependencies]
+# The support window (#252): one renamed entry per published pg-core release
+# that must keep reading what HEAD seals. Adding a version is this line plus one
+# `reader!` invocation in src/lib.rs.
+pg-core-0-6-1 = { package = "pg-core", version = "=0.6.1", features = ["stream"] }
+
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
