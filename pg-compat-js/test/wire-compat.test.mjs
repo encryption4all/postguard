@@ -20,6 +20,19 @@ test('published JS readers open the HEAD-sealed sample set', async () => {
   const window = readers();
   assert.ok(window.length > 0, 'no published readers configured');
 
+  // Pin WHICH cases must be present, not just that some are. The coverage
+  // invariants below are computed from the manifest, so a sealer that silently
+  // stopped emitting the memory-mode cases would keep them satisfied: every
+  // remaining case still has a reader, and pg-wasm still has cases in scope
+  // from the stream ones. Both halves would go green having lost the only
+  // coverage memory mode has (pg-js is stream-only in both directions).
+  assert.deepEqual(
+    manifest.cases.map((kase) => kase.name).sort(),
+    ['mem', 'mem-privsig', 'stream', 'stream-multi-segment', 'stream-privsig'],
+    'the sealed case set changed; update this list deliberately and check the ' +
+      'readers still cover the new shape',
+  );
+
   const failures = [];
   // Two different questions: which readers got the case open (the summary at the
   // end), and how many were pointed at it at all (the coverage invariant below).

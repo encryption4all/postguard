@@ -43,22 +43,29 @@ export function exitDescription(result) {
 }
 
 /**
- * The last line of the child's stderr that says something, which for a wasm
+ * The first line of the child's stderr that says something, which for a wasm
  * reader out of memory is the allocation message and for a thrown error is the
- * error. Node's stack frames are dropped: they point into generated wasm glue
- * and carry nothing about the wire format.
+ * error.
+ *
+ * Noise is dropped rather than kept: stack frames point into generated wasm
+ * glue, and Node's crash dump ends with a `Node.js v22.x` banner after the
+ * `node:events:NN` / `throw er;` / `^` preamble. Taking the LAST surviving line
+ * surfaced that banner and dropped the actual error — on exactly the run where
+ * this message matters most, a child that died before it could report (a failed
+ * top-level import from a partial `npm ci`, an unhandled rejection at :84).
  *
  * @param {string} stderr
  * @returns {string}
  */
 export function stderrTail(stderr) {
-  const last = stderr
+  const noise = /^(at |Node\.js v|node:|throw |\^+$)/;
+  const first = stderr
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('at '))
-    .at(-1);
+    .filter((line) => line !== '' && !noise.test(line))
+    .at(0);
 
-  return last === undefined ? '' : `: ${last}`;
+  return first === undefined ? '' : `: ${first}`;
 }
 
 /**

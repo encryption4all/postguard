@@ -73,6 +73,14 @@ export async function readManifest(dir) {
   if (!Array.isArray(manifest.cases) || manifest.cases.length === 0) {
     throw new Error('the sample set lists no cases; the gate would pass without reading anything');
   }
+  // The same reasoning one level down: verify.mjs loops over a case's
+  // recipients, so an empty list runs no iterations, collects no failures, and
+  // reports as opened cleanly without checkOpened ever running.
+  for (const kase of manifest.cases) {
+    if (!Array.isArray(kase.recipients) || kase.recipients.length === 0) {
+      throw new Error(`case ${kase.name} lists no recipients; it would pass without being opened`);
+    }
+  }
 
   return manifest;
 }
