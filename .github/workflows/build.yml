@@ -111,6 +111,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # paths-filter reads the PR's changed files
+    # wire-compat-js (#261) opens the same bytes with the published npm readers.
+    # It downloads the artifact the seal step below produces, so it gates on the
+    # same outcome the upload gates on rather than re-running the path filter and
+    # drifting out of step with it.
+    outputs:
+      sealed: ${{ steps.seal.outcome }}
     steps:
       - uses: actions/checkout@v4
       # SHA-pinned as the one action new to this repo; the rest follow the
@@ -123,6 +129,7 @@ jobs:
               - 'pg-core/**'
               - 'pg-wasm/**'
               - 'pg-compat/**'
+              - 'pg-compat-js/**'
               # pg-core has no lockfile of its own: the bytes HEAD seals are a
               # function of the ROOT lockfile (a bincode-next/ibe/serde bump
               # touches only these two files). Root Cargo.toml also holds the
@@ -192,3 +199,60 @@ jobs:
       - name: Clippy pg-compat
         if: steps.changes.outputs.wire == 'true'
         run: cargo clippy --manifest-path pg-compat/Cargo.toml --all-targets --locked -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # The Node half of the same gate (#261): the containers wire-compat-rust
+  # sealed must also open with the published npm readers in COMPATIBILITY.md's
+  # support window. It downloads rather than re-seals, so both halves are held
+  # to the same bytes and a non-deterministic sealer cannot hide between them.
+  #
+  # `if: !cancelled()` rather than the default: a red wire-compat-rust is
+  # exactly when it is worth knowing whether the JS readers broke the same way,
+  # and the artifact is uploaded before that job's read step for this reason.
+  # Without it, `needs` would skip this job on the run where it has the most to
+  # say.
+  # ---------------------------------------------------------------------------
+  wire-compat-js:
+    name: Wire compat (published pg-wasm/pg-js)
+    runs-on: ubuntu-latest
+    needs: wire-compat-rust
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every step below is behind the seal outcome, not just the download.
+      # `outcome` is 'skipped' when the path filter said no (nothing to open,
+      # report success) and 'failure' when sealing itself broke (wire-compat-rust
+      # owns that failure; do not report it twice).
+      - if: needs.wire-compat-rust.outputs.sealed == 'success'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: pg-compat-js/package-lock.json
+
+      - name: Download the sample set
+        if: needs.wire-compat-rust.outputs.sealed == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: wire-compat-artifacts-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/wire-compat-artifacts
+
+      # ci, not install: the readers are pinned by pg-compat-js/package-lock.json,
+      # and a gate that quietly resolved a different reader would be measuring
+      # something other than the support window.
+      - name: Install the published readers
+        if: needs.wire-compat-rust.outputs.sealed == 'success'
+        shell: bash
+        working-directory: pg-compat-js
+        run: npm ci
+
+      - name: Open the set with published pg-wasm/pg-js
+        if: needs.wire-compat-rust.outputs.sealed == 'success'
+        shell: bash
+        working-directory: pg-compat-js
+        env:
+          PG_COMPAT_ARTIFACTS: ${{ runner.temp }}/wire-compat-artifacts
+        run: npm test
