@@ -90,3 +90,70 @@ jobs:
           retry_on: error
           timeout_minutes: 20
           command: wasm-pack test --release --headless --\${{ matrix.browser }} ./pg-wasm
+
+  # ---------------------------------------------------------------------------
+  # Wire compatibility: HEAD-sealed containers must open with published readers
+  # (#251 / #260). #261 adds a wire-compat-js job that downloads the artifact
+  # this job uploads.
+  #
+  # The path filter is a step, not an `on: paths:` key, on purpose: a job that
+  # is skipped by a path filter never reports, so a required check would sit
+  # pending forever on PRs that do not touch the wire surface. This shape always
+  # reports and only does the expensive work when it needs to.
+  # ---------------------------------------------------------------------------
+  wire-compat-rust:
+    name: Wire compat (published pg-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # SHA-pinned: this step decides whether the gate's teeth engage, so a
+      # retagged action could silently skip the check.
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: changes
+        with:
+          filters: |
+            wire:
+              - 'pg-core/**'
+              - 'pg-wasm/**'
+              - 'pg-compat/**'
+              - '.github/workflows/build.yml'
+
+      - if: steps.changes.outputs.wire == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # pg-compat is outside the workspace, so the per-crate matrices above
+      # do not lint it.
+      - name: Format pg-compat
+        if: steps.changes.outputs.wire == 'true'
+        run: cargo fmt --manifest-path pg-compat/Cargo.toml --all -- --check
+
+      - name: Clippy pg-compat
+        if: steps.changes.outputs.wire == 'true'
+        run: cargo clippy --manifest-path pg-compat/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: Seal the sample set with HEAD
+        id: seal
+        if: steps.changes.outputs.wire == 'true'
+        shell: bash
+        run: |
+          cargo run --locked -p pg-core --features stream --example seal-samples \
+            -- "$RUNNER_TEMP/wire-compat-artifacts"
+
+      # Hand-off to wire-compat-js (#261). Uploaded before the reader runs so a
+      # red gate still leaves the bytes that broke it.
+      - name: Upload the sample set
+        if: steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wire-compat-artifacts-${{ github.sha }}
+          path: ${{ runner.temp }}/wire-compat-artifacts
+          retention-days: 7
+
+      - name: Open it with published pg-core
+        if: steps.changes.outputs.wire == 'true'
+        shell: bash
+        env:
+          PG_COMPAT_ARTIFACTS: ${{ runner.temp }}/wire-compat-artifacts
+        run: cargo test --manifest-path pg-compat/Cargo.toml --locked
