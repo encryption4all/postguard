@@ -81,9 +81,10 @@ exact release rather than building against the latest one
 ## Reader list
 
 The window above resolved to concrete versions: the highest published patch of
-each line in the window. This is the list the compat gates will install and run
-as readers. None of those gates runs yet, so for now this list is a review rule
-like the `/v2` one above.
+each line in the window. This is the list the compat gates install and run as
+readers: `wire-compat-rust` in build.yml enforces the crates.io rows and
+`wire-compat-js` the npm rows (`pg-compat-js/test/manifest.test.mjs`
+machine-reads the fenced block below — keep its format).
 
 ```
 # <registry> <package> <versions...>
