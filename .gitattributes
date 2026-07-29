@@ -1,0 +1,7 @@
+# pg-pkg/tests/api_gate.rs locates blocks in this spec with multi-line raw-string
+# anchors. rustc normalises CRLF to LF inside raw strings, but the file read off
+# disk keeps whatever git wrote, so on a Windows checkout (core.autocrlf=true is
+# the Git for Windows default) every anchor misses and the suite goes red on a
+# clean tree. Keeping the stored bytes is also what makes the oasdiff gate's
+# verdict reproducible off a local checkout.
+pg-pkg/api-description.yaml -text
