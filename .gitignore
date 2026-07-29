@@ -1,5 +1,6 @@
 .idea
 target
+node_modules
 # A published reader in the wire-compat gate aborts rather than erroring on
 # some malformed containers, and an abort drops a core file wherever the
 # process was running. The name depends on kernel.core_pattern, which is `core`
