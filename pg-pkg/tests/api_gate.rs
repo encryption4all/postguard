@@ -4,9 +4,11 @@
 //! over `api-description.yaml` and is what stops a careless edit from breaking a
 //! deployed client.
 //!
-//! The gate's verdict is decided entirely by two step inputs, `fail-on` and
-//! `include-checks`, and getting them wrong fails open: the job goes green and
-//! nobody learns that the change it was supposed to stop went through.
+//! The gate's verdict is decided by two step inputs, `fail-on` and
+//! `include-checks`, plus the pinned action ref that decides which engine
+//! version reads them, and getting any of the three wrong fails open: the job
+//! goes green and nobody learns that the change it was supposed to stop went
+//! through.
 //! `fail-on: ERR` alone passes a removed optional response property, a removed
 //! request parameter, a changed status code and a dropped response enum value,
 //! all of which COMPATIBILITY.md forbids.
@@ -14,8 +16,8 @@
 //! So the inputs are pinned here as well as in the workflow: this test mutates
 //! the real spec, runs the real engine with the real flags, and asserts which
 //! mutations the gate stops. [`the_workflow_step_matches_the_pinned_inputs`]
-//! reads the two values back out of the YAML, so editing one side without the
-//! other fails here instead of silently weakening the gate.
+//! reads all three back out of the YAML, so editing one side without the other
+//! fails here instead of silently weakening the gate.
 //!
 //! The engine is not vendored, so the verdict test needs `oasdiff` on `PATH`
 //! (or `OASDIFF` pointing at it) and skips when it is absent, which is the case
@@ -41,6 +43,13 @@ const FAIL_ON: &str = "WARN";
 /// opt-in, so they do not run unless named.
 const INCLUDE_CHECKS: &str =
     "response-non-success-status-removed,response-property-enum-value-removed";
+
+/// The action ref in the workflow's oasdiff step. This is the third input the
+/// verdicts depend on, and the least obvious: it pins the *engine*, because
+/// `v0.1.10`'s Dockerfile is `FROM tufin/oasdiff:v1.26.1` and every verdict
+/// below was measured against v1.26.1. A bump with no re-measurement is the
+/// same fail-open `FAIL_ON` guards against, so it is pinned here too.
+const ACTION_REF: &str = "oasdiff/oasdiff-action/breaking@0ab8ad204b00d25acc5ae87106281433e288d0c1";
 
 /// Whether the gate stops a change, i.e. whether the job goes red.
 #[derive(Debug, PartialEq, Eq)]
@@ -526,6 +535,12 @@ fn the_workflow_step_matches_the_pinned_inputs() {
         INCLUDE_CHECKS,
         "the workflow's oasdiff step and INCLUDE_CHECKS disagree, so the \
          verdicts this test pins are not the ones CI reaches"
+    );
+    assert!(
+        workflow.contains(ACTION_REF),
+        "the workflow's oasdiff step does not use {ACTION_REF}, so CI is not \
+         running the engine (tufin/oasdiff:v1.26.1) the verdicts this test pins \
+         were measured against"
     );
 }
 
