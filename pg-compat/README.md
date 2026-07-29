@@ -113,12 +113,16 @@ stream-multi-segment.bin/.plain
   reader may only see after decrypting. It is present in the manifest for every
   set, but only the cases with `privateSigning: true` were sealed with it, so
   check it against `privateSigning` rather than against the case list.
-- `mode`: `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-js
-  `toBytes` produces), `"stream"` for the segmented container (what cryptify
-  stores and pg-js uploads).
+- `mode`: `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-wasm's
+  `seal()` produces), `"stream"` for the segmented container (what cryptify
+  stores). pg-js is stream mode in both directions — `toBytes()` seals with
+  `sealStream` and its decrypt path only has a `StreamUnsealer` — so the
+  memory-mode cases are reachable from JS through pg-wasm alone.
 - `privateSigning`: the payload signature uses a separate, encrypted signing
   policy. A reader must report exactly this: the private claims present when it
-  is `true`, absent when it is `false`.
+  is `true`, absent when it is `false` — unless it is a reader that cannot
+  surface a private policy at all, which pg-js 1.x is; see
+  [`pg-compat-js/README.md`](../pg-compat-js/README.md).
 - `recipients`: every recipient the container was sealed for. Each case must
   open with *each* recipient's key, which is what exercises the multi-recipient
   KEM entries in the header.
@@ -141,14 +145,18 @@ stream-multi-segment.bin/.plain
 
 ### Consuming the set from another job
 
-One thing for [#261] to plan around. The `wire-compat-rust` job seals
-and uploads only when the PR touches the wire surface; on every other PR it
-reports success with no artifact attached. A `wire-compat-js` job with
-`needs: wire-compat-rust` that downloads
+The `wire-compat-rust` job seals and uploads only when the PR touches the wire
+surface; on every other PR it reports success with no artifact attached. A
+`wire-compat-js` job with `needs: wire-compat-rust` that downloads
 `wire-compat-artifacts-${{ github.event.pull_request.head.sha || github.sha }}`
-unconditionally therefore hard-fails
-on unrelated PRs rather than skipping. Repeat the same path condition on the
-download, or seal locally in the JS job instead of consuming the artifact.
+unconditionally would therefore hard-fail on unrelated PRs rather than
+skipping. The `wire-compat-js` job for `pg-compat-js` ([#261]) gates every
+expensive step on
+`needs.wire-compat-rust.outputs.sealed == 'success'`, the seal step's own
+outcome, published by the job that owns it. Re-running the path filter in the
+second job would leave two copies of it that have to agree forever, and the run
+where they stop agreeing is one that downloads an artifact nobody produced. The
+job still always reports, which is what a required check needs.
 
 ### Determinism
 

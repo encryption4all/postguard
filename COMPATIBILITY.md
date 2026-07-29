@@ -28,19 +28,16 @@ removed once the deprecation process at the bottom of this file has run for it
 ([#257]). Until then it keeps working, so a deployed client on `/v2/irma/...`
 is not broken by this notice.
 
-Enforcement: the `API breaking changes (oasdiff)`
-job diffs the spec against the branch a PR targets and fails on any change
-oasdiff rates WARN or ERR ([#249]). That covers every rule above except one. The
-gate compares documented paths, and this spec documents the canonical
-`/v2/request/...` paths only, so dropping the `/v2/irma/...` alias handlers
-before the deprecation above has run passes it; that one stays a review rule. A
-`/v3` route added next to `/v2` reads as additive, so the gate passes the escape
-hatch. `pg-pkg/tests/api_gate.rs` pins which changes the gate stops and which it
-lets through; run it before changing what the gate checks.
-
-The workflow file cannot be pushed by the bot that wrote it, so it sits in a
-comment on [#269] until a maintainer applies it. Until then all of the above is
-a review rule.
+Enforcement: the `API breaking changes (oasdiff)` job in
+`.github/workflows/api-diff.yml` diffs the spec against the branch a PR targets
+and fails on any change oasdiff rates WARN or ERR ([#249]). That covers every
+rule above except one. The gate compares documented paths, and this spec
+documents the canonical `/v2/request/...` paths only, so dropping the
+`/v2/irma/...` alias handlers before the deprecation above has run passes it;
+that one stays a review rule. A `/v3` route added next to `/v2` reads as
+additive, so the gate passes the escape hatch. `pg-pkg/tests/api_gate.rs` pins
+which changes the gate stops and which it lets through; run it before changing
+what the gate checks.
 
 ## Stored artifacts
 
@@ -94,9 +91,14 @@ exact release rather than building against the latest one
 ## Reader list
 
 The window above resolved to concrete versions: the highest published patch of
-each line in the window. This is the list the compat gates will install and run
-as readers. None of those gates runs yet, so for now this list is a review rule
-like the `/v2` one above.
+each line in the window. This is the list the compat gates install and run as
+readers, but they do not yet cover it evenly: `wire-compat-js` enforces the npm
+rows (`pg-compat-js/test/manifest.test.mjs` machine-reads the fenced block
+below, so a drifted npm row goes red — keep that block as rows, not prose),
+while `wire-compat-rust` covers only the one crates.io version pinned in
+`pg-compat/Cargo.toml`. Nothing reads the crates.io rows themselves, so a row
+there can drift from that manifest unnoticed; see the coverage note below the
+block.
 
 ```
 # <registry> <package> <versions...>
@@ -112,15 +114,32 @@ process below. The npm version of `@e4a/pg-wasm` tracks the released `pg-core`
 version rather than `pg-wasm/Cargo.toml`, so read that pin from npm and not
 from the crate manifest.
 
-Planned consumers of this list, each still an open issue:
+Live consumers of this list:
 
-- [#251], the wire-compat gate as a required PR check, with the Rust half in
-  [#260] and the Node half in [#261]
+- `wire-compat-rust` in `.github/workflows/build.yml` ([#260]), a required PR
+  check: seals with HEAD and opens with the pinned published `pg-core`
+- `wire-compat-js` in the same file ([#261]): opens the same bytes with the
+  published npm readers
+
+Planned consumers, each still an open issue:
+
+- [#251], its remaining tracking work, including making `wire-compat-js`
+  required alongside the Rust half ([#262])
 - [postguard-e2e#25], the forward-direction fixture job
 - [postguard-e2e#21], the version sweep, to run nightly and pre-deploy
 - [postguard-js#131], the envelope-compat gate
 
-A gate that needs a different set of readers changes this file first.
+A gate that needs a different set of readers changes this file first. The two
+npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
+`test/manifest.test.mjs` parses the block above and fails when the two lists
+drift, so keep that block as rows and not as prose.
+
+Known coverage gaps in the rows above, tracked in [#268]: on the `crates.io`
+line only `0.6.1` is pinned in `pg-compat/Cargo.toml`, so `0.5.10` is declared
+here and opened by no gate, and nothing compares the crates.io rows against that
+manifest the way the npm rows are compared against `readers.mjs`. The `nuget`
+row has no gate at all — `E4A.PostGuard` is a producer-only SDK, so a reader
+gate would need a decrypt path it does not have.
 
 ## Deprecation
 
@@ -142,7 +161,8 @@ Skipping step 2 is how you break the consumers you cannot see.
 [#257]: https://github.com/encryption4all/postguard/issues/257
 [#260]: https://github.com/encryption4all/postguard/issues/260
 [#261]: https://github.com/encryption4all/postguard/issues/261
-[#269]: https://github.com/encryption4all/postguard/pull/269
+[#262]: https://github.com/encryption4all/postguard/issues/262
+[#268]: https://github.com/encryption4all/postguard/issues/268
 [postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
 [postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
 [postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21

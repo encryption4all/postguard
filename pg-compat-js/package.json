@@ -1,0 +1,19 @@
+{
+  "name": "pg-compat-js",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Opens HEAD-sealed sample containers with published @e4a/pg-wasm and @e4a/pg-js releases (wire-compat gate).",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "pg-js-1-11-0": "npm:@e4a/pg-js@1.11.0",
+    "pg-js-2-3-3": "npm:@e4a/pg-js@2.3.3",
+    "pg-wasm-0-6-1": "npm:@e4a/pg-wasm@0.6.1"
+  }
+}
