@@ -2,10 +2,7 @@
 //!
 //! The gate is `.github/workflows/api-diff.yml`, which runs `oasdiff breaking`
 //! over `api-description.yaml` and is what stops a careless edit from breaking a
-//! deployed client. It is not committed yet: the bot that wrote it has no
-//! `workflows: write`, so the YAML waits in a comment on PR #269 for a
-//! maintainer to apply. This test is the half that could be committed, and it
-//! stands on its own either way.
+//! deployed client.
 //!
 //! The gate's verdict is decided entirely by two step inputs, `fail-on` and
 //! `include-checks`, and getting them wrong fails open: the job goes green and
@@ -14,15 +11,15 @@
 //! request parameter, a changed status code and a dropped response enum value,
 //! all of which COMPATIBILITY.md forbids.
 //!
-//! So the inputs are pinned here rather than only in the workflow: this test
-//! mutates the real spec, runs the real engine with the real flags, and asserts
-//! which mutations the gate stops. Change [`FAIL_ON`] or [`INCLUDE_CHECKS`]
-//! without changing the workflow to match and the two drift apart with nothing
-//! to say so; change the workflow without running this and the gate weakens.
+//! So the inputs are pinned here as well as in the workflow: this test mutates
+//! the real spec, runs the real engine with the real flags, and asserts which
+//! mutations the gate stops. [`the_workflow_step_matches_the_pinned_inputs`]
+//! reads the two values back out of the YAML, so editing one side without the
+//! other fails here instead of silently weakening the gate.
 //!
-//! The engine is not vendored, so the test needs `oasdiff` on `PATH` (or
-//! `OASDIFF` pointing at it) and skips when it is absent, which is the case in
-//! CI. Install the version the action pins, so a local verdict is CI's verdict:
+//! The engine is not vendored, so the verdict test needs `oasdiff` on `PATH`
+//! (or `OASDIFF` pointing at it) and skips when it is absent, which is the case
+//! in CI. Install the version the action pins, so a local verdict is CI's:
 //!
 //! ```text
 //! go install github.com/oasdiff/oasdiff@v1.26.1
@@ -72,6 +69,35 @@ impl Gate {
 
 fn spec_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("api-description.yaml")
+}
+
+fn workflow_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(".github/workflows/api-diff.yml")
+}
+
+/// The value of the `key:` mapping entry in the workflow, with the surrounding
+/// comment lines ignored. Requires exactly one such entry, so a second oasdiff
+/// step (or an input moved into a matrix) fails the test rather than having one
+/// of the two verdicts silently go unchecked.
+fn workflow_input(workflow: &str, key: &str) -> String {
+    let needle = format!("{key}:");
+    let values: Vec<&str> = workflow
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| line.strip_prefix(&needle))
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        values.len(),
+        1,
+        "expected exactly one `{key}:` in {}, found {}",
+        workflow_path().display(),
+        values.len()
+    );
+    values[0].to_owned()
 }
 
 /// The `oasdiff` binary, or `None` when it is not installed.
@@ -475,6 +501,32 @@ fn mutations() -> Vec<Mutation> {
             Gate::Stops,
         ),
     ]
+}
+
+/// The verdicts below are only CI's verdicts if CI runs the engine with these
+/// flags, and nothing else compares the two: `the_gate_stops_...` skips on every
+/// runner, so a `fail-on` edited down to `ERR` in the workflow alone would land
+/// green. This test needs no engine, so it runs in CI, where it is the only
+/// thing standing between the workflow and the promises this file makes about
+/// it.
+#[test]
+fn the_workflow_step_matches_the_pinned_inputs() {
+    let path = workflow_path();
+    let workflow =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+
+    assert_eq!(
+        workflow_input(&workflow, "fail-on"),
+        FAIL_ON,
+        "the workflow's oasdiff step and FAIL_ON disagree, so the verdicts this \
+         test pins are not the ones CI reaches"
+    );
+    assert_eq!(
+        workflow_input(&workflow, "include-checks"),
+        INCLUDE_CHECKS,
+        "the workflow's oasdiff step and INCLUDE_CHECKS disagree, so the \
+         verdicts this test pins are not the ones CI reaches"
+    );
 }
 
 /// Every mutation must still edit the spec, whether or not oasdiff is
