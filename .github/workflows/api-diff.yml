@@ -1,0 +1,107 @@
+name: API diff
+#
+# Breaking-change gate on the pg-pkg OpenAPI contract (#249).
+#
+# pg-pkg/api-description.yaml is the pinned v2 HTTP contract (#242), one of the
+# three seams COMPATIBILITY.md guarantees. This job diffs the PR's spec against
+# the branch the PR targets and fails on any change oasdiff rates WARN or ERR.
+#
+# Escape hatch, not a wall: pg-pkg's routes are versioned (unlike cryptify's,
+# whose gate this mirrors), so a change /v2 cannot take additively goes under a
+# new prefix (/v3/...) with /v2 left running, and /v2 is retired later through
+# the deprecation process in COMPATIBILITY.md, once postguard-ops#64 telemetry
+# shows nobody calls it. A /v3 route added next to /v2 reads as additive, so
+# this gate passes it. Reach for that before reaching for err-ignore.
+#
+# Why WARN and not ERR
+# --------------------
+# `fail-on: ERR` would leave four of the changes COMPATIBILITY.md forbids
+# passing silently, because oasdiff rates them WARN, and on this spec that is
+# most of the "no removing a route or a field" rule: only `status` is ever
+# `required`, so `key` (the IBE user secret key the endpoint exists to return),
+# `proofStatus`, `pubSignKey` and the rest are optional, and removing or
+# renaming an optional response property is WARN. So is removing a request
+# parameter. Measured on this spec against oasdiff v1.26.1:
+#
+#   mutation                                     fail-on ERR   fail-on WARN
+#   optional response property removed (`key`)   passes        fails
+#   optional response property renamed           passes        fails
+#   required path parameter removed              passes        fails
+#   response enum value added                    passes        fails
+#
+# The fourth is the rule COMPATIBILITY.md gains alongside this gate; see below.
+#
+# WARN adds 31 checks on top of ERR's 213. All but one are changes
+# COMPATIBILITY.md already forbids (request-parameter-removed,
+# request-property-removed, response-body-media-type-schema-removed, and the
+# constraint-narrowing *-set family). The exception is
+# response-property-enum-value-added: adding a value to SessionStatus or
+# ProofStatus fails this gate. That is deliberate, and COMPATIBILITY.md now
+# says so too. A client that switches on the enum without a default branch
+# breaks on a value it has never seen, so a new status is a /v3 change (or an
+# x-extensible-enum one), not an additive one. It is the one rule here that
+# only WARN enforces, so it is also the first casualty of a revert to ERR;
+# pg-pkg/tests/api_gate.rs pins it.
+#
+# Two more checks are opt-in: they rate ERR but only run when named, so they
+# need the include-checks input below. Without it, changing a 401 to a 403 and
+# dropping an enum value from a response both pass. Keep include-checks and
+# fail-on in step with the local-repro command in CLAUDE.md, or a local run
+# quietly disagrees with CI.
+#
+# Not covered: the gate compares documented paths, and the spec documents the
+# canonical /v2/request/... paths only (see its "Path prefix aliases" note), so
+# dropping the /v2/irma/... alias handlers before #257's deprecation has run
+# passes this gate. That one stays a review rule.
+#
+# There is deliberately no `on: paths:` filter. A path-filtered job reports no
+# status on the PRs it skips, so as a required check it would leave every PR
+# that does not touch the spec pending forever. The job is two checkouts and one
+# container, so it just always runs.
+#
+
+on:
+  pull_request:
+    # `edited` included for base retargets (e.g. a stacked PR's base merging):
+    # this job's verdict depends on the base sha, and without `edited` a stale
+    # verdict stays attached to the unchanged head sha.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+
+  breaking-changes:
+    name: API breaking changes (oasdiff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v6
+        with:
+          # The spec is all this job reads, and the oasdiff container gets the
+          # workspace mounted; do not leave a push token in .git/config for it.
+          persist-credentials: false
+      - name: Check out the base spec
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: Diff the spec against the base branch
+        # Pinned by sha because this step is the gate's verdict. The tag pins
+        # the engine: v0.1.10 is FROM tufin/oasdiff:v1.26.1, so a local
+        # `oasdiff v1.26.1` reproduces what CI decides here.
+        uses: oasdiff/oasdiff-action/breaking@0ab8ad204b00d25acc5ae87106281433e288d0c1 # v0.1.10
+        with:
+          base: base/pg-pkg/api-description.yaml
+          revision: pg-pkg/api-description.yaml
+          fail-on: WARN
+          # Both of these rate ERR but are opt-in, so they do not run unless
+          # named: a changed non-success status (401 -> 403) and an enum value
+          # dropped from a response property.
+          include-checks: response-non-success-status-removed,response-property-enum-value-removed
+          # Do not upload the two specs to oasdiff.com for a side-by-side
+          # review page. The default is `true`; the detection and the inline
+          # annotations work without it, so nothing leaves CI.
+          review: false

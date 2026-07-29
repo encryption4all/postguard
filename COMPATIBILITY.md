@@ -14,7 +14,9 @@ Changes to `/v2` are additive only. New endpoints, new optional request fields
 and new response fields are allowed, so a client written against an older
 revision of the spec keeps working. These are not allowed on `/v2`: removing a
 route or a field, renaming either, narrowing a type, making an optional field
-required, or changing the status code for a condition a client already handles.
+required, changing the status code for a condition a client already handles, or
+adding a value to a response enum, since a client that switches on `status`
+without a default branch breaks on a value it has never seen.
 
 A change that cannot be made additively ships under a new prefix (`/v3`), with
 `/v2` left running until its consumers are gone.
@@ -26,8 +28,16 @@ removed once the deprecation process at the bottom of this file has run for it
 ([#257]). Until then it keeps working, so a deployed client on `/v2/irma/...`
 is not broken by this notice.
 
-Planned enforcement: an oasdiff gate that diffs the spec against `main` and
-fails on a breaking change ([#249]). Until that lands, this is a review rule.
+Enforcement: the `API breaking changes (oasdiff)` job in
+`.github/workflows/api-diff.yml` diffs the spec against the branch a PR targets
+and fails on any change oasdiff rates WARN or ERR ([#249]). That covers every
+rule above except one. The gate compares documented paths, and this spec
+documents the canonical `/v2/request/...` paths only, so dropping the
+`/v2/irma/...` alias handlers before the deprecation above has run passes it;
+that one stays a review rule. A `/v3` route added next to `/v2` reads as
+additive, so the gate passes the escape hatch. `pg-pkg/tests/api_gate.rs` pins
+which changes the gate stops and which it lets through; run it before changing
+what the gate checks.
 
 ## Stored artifacts
 
