@@ -1,16 +1,67 @@
 name: API diff
 #
-# Breaking-change gate on the OpenAPI contract (#196).
+# Breaking-change gate on the OpenAPI contract (#196, #202).
 #
 # Cryptify's routes are unversioned, so there is no way to keep an old shape
 # running next to a new one: any breaking change to api-description.yaml
 # breaks the clients pinned to it (pg-js, pg-dotnet, the add-ins). This job
 # diffs the PR's spec against the branch it targets and fails on anything
-# oasdiff rates ERR. Additive changes pass.
+# oasdiff rates WARN or ERR.
 #
 # To land a genuinely breaking change: add a new versioned route, leave the
 # old one in place, and deprecate it once privacybydesign/postguard-ops#64
-# telemetry shows nobody is calling it.
+# telemetry shows nobody is calling it. A versioned route added beside the
+# unversioned one reads as additive, so this gate passes it. Reach for that
+# before reaching for err-ignore.
+#
+# Why WARN and not ERR
+# --------------------
+# `fail-on: ERR` left several of the changes this contract forbids passing
+# silently, because oasdiff rates them WARN. Measured on this spec against
+# oasdiff v1.26.1:
+#
+#   mutation                                  fail-on ERR   fail-on WARN
+#   optional response property removed        passes        fails
+#   optional response property renamed        passes        fails
+#   request parameter removed                 passes        fails
+#   request property removed                  passes        fails
+#   request parameter constraint narrowed     passes        fails
+#   response enum value added                 passes        fails
+#
+# The first five are the "no removing or narrowing" rule, and at ERR the
+# request side of it and the optional half of the response side were both
+# unguarded. This spec marks most fields `required`, which does make a removed
+# *required* response property an ERR, but that is not the whole rule.
+#
+# WARN adds 30 checks on top of ERR's 212. All but one are changes the contract
+# already forbids (request-parameter-removed, request-property-removed,
+# response-body-media-type-schema-removed, the constraint-narrowing *-set
+# family). The exception is the sixth row above,
+# response-property-enum-value-added: adding a value to
+# UploadSessionNotFound.reason or PayloadTooLarge.limit fails this gate even
+# though a wider response enum is additive on paper. That is deliberate.
+# Today's consumers do tolerate it (pg-js reads `reason` as
+# `parsed.reason ?? 'unknown'`), but nothing stops a future client from
+# switching on those codes, and a gate that asks for a decision beats one that
+# passes it silently. It is the one rule here that only WARN enforces, so it is
+# also the first casualty of a revert to ERR; mod api_gate_tests in
+# src/main.rs pins it.
+#
+# There is no standing way to switch just that check off, so do not go looking
+# for one: warn-ignore takes a file whose lines must each contain the whole
+# rendered change text, per operation and naming the new value, not a check id.
+# CLAUDE.md has the details and the x-extensible-enum trade-off.
+#
+# Two more checks are opt-in: they rate ERR but only run when named, so they
+# need the include-checks input below. Without it, changing a 401 to a 403 and
+# dropping an enum value from a response both pass. mod api_gate_tests reads
+# this file and asserts fail-on and include-checks are the constants it pins,
+# so editing one side alone fails `cargo test`.
+#
+# There is deliberately no `on: paths:` filter. A path-filtered job reports no
+# status on the PRs it skips, so as a required check it would leave every PR
+# that does not touch the spec pending forever. The job is two checkouts and
+# one container, so it just always runs.
 #
 
 on:
@@ -37,7 +88,11 @@ jobs:
         with:
           base: base/api-description.yaml
           revision: api-description.yaml
-          fail-on: ERR
+          fail-on: WARN
+          # Both of these rate ERR but are opt-in, so they do not run unless
+          # named: a changed non-success status (401 -> 403) and an enum value
+          # dropped from a response property.
+          include-checks: response-non-success-status-removed,response-property-enum-value-removed
           # Do not upload the spec to oasdiff.com for a side-by-side review
           # page. The default is `true`; detection and annotations work
           # without it, so nothing leaves CI.

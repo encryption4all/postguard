@@ -110,6 +110,78 @@ The spec is also the external contract for pg-js, pg-dotnet, and the add-ins, so
 a breaking edit to it needs a new versioned route rather than an in-place change
 (cryptify's routes are unversioned, so there is no other escape hatch).
 
+## The oasdiff gate's settings, and the test that pins them
+
+`.github/workflows/api-diff.yml` diffs the PR's `api-description.yaml` against
+the base branch. Its whole behaviour is two step inputs, and a wrong pair fails
+open: the job goes green and nobody learns the change went through. So
+`mod api_gate_tests` in `src/main.rs` mutates the real spec one way per rule,
+runs the real engine with the flags the action's entrypoint builds, and asserts
+stop-or-pass. It also reads the committed workflow and asserts its two inputs
+are the constants the module pins, and that the job still triggers on
+`pull_request` with no path filter and no `if:` — settings on a gate that never
+runs fail open just as quietly. So the two cannot drift apart unnoticed.
+
+The settings the gate needs are `fail-on: WARN` plus
+`include-checks: response-non-success-status-removed,response-property-enum-value-removed`.
+**The committed workflow does not have them yet**: it is still `fail-on: ERR`
+with no `include-checks`. The new pair sits in the `api-diff.yml` patch on
+PR #203 and needs a maintainer to apply it, because the App cannot push
+`.github/workflows/`. Until that lands, the gate is passing everything in the
+list below, and `the_workflow_uses_the_settings_this_module_pins` is red saying
+so. Tighten this paragraph back to plain present tense in that same PR once the
+maintainer's commit is on the branch.
+
+Measured on this spec against oasdiff v1.26.1, `fail-on: ERR` on its own passes
+several changes the contract forbids. A `401` that becomes a `403` and a
+dropped response enum value rate ERR but are opt-in, so they never run unless
+named, which is what `include-checks` is for. The rest rate WARN, not ERR: a removed
+or renamed optional response property, a removed request parameter, a removed
+request property, and the constraint-narrowing `*-set` family. Those gaps are
+spec-independent, so they apply here even though this spec marks most fields
+`required` (which does make a removed *required* response property an ERR).
+
+WARN adds 30 checks on top of ERR's 212 (`oasdiff checks -s warn -f json`; the
+table output has two rows more than that, a header and a trailing blank). All
+but one of the 30 are changes the contract
+already forbids. The exception is `response-property-enum-value-added`: adding
+a value to `UploadSessionNotFound.reason` or `PayloadTooLarge.limit` fails the
+gate even though a wider response enum is additive on paper, and today's
+consumers do tolerate it (pg-js reads `reason` as `parsed.reason ?? 'unknown'`,
+a plain string, and the tb-addon passes it through). It is kept anyway: nothing
+stops a future client from switching on those codes, and a red gate that asks
+for a decision beats a silent pass. It is also the only rule here that WARN
+alone enforces, so it is the first casualty of a revert to ERR, which is why
+the test pins it.
+
+Two things to know before reaching for a suppression. `--warn-ignore` and
+`--err-ignore` do not take check ids or partial regexes: the ignore file is
+matched by asking whether an ignore line *contains* the rendered change text,
+so a line has to spell out the whole thing in lowercase, per affected
+operation, including the new value:
+
+```
+in api put /fileupload/{uuid} added the new `quota_exceeded` enum value to the `reason` response property for the response status `404`
+```
+
+A bare `response-property-enum-value-added`, or even `.*`, suppresses nothing
+(verified on v1.26.1). So there is no standing "ignore this check" setting;
+every future enum value needs its own lines. And `x-extensible-enum` in place
+of `enum:`, which oasdiff's own message suggests, makes it skip that property
+altogether: adding a value passes, but so does *removing* one, so that trade
+buys the false positive back with a gap.
+
+The mutation test needs the engine, which no runner has, so it skips in CI. The
+other two do run there: `every_api_gate_mutation_still_applies` catches a spec
+edit that strands an anchor, and
+`the_workflow_uses_the_settings_this_module_pins` catches the workflow and the
+constants disagreeing. To run the mutation test for real:
+
+```
+go install github.com/oasdiff/oasdiff@v1.26.1   # the version the action tag pins
+cargo test --all-targets api_gate
+```
+
 ## Content-Range end byte is EXCLUSIVE on the chunk PUT
 `upload_chunk` rejects `start >= end` and takes the chunk length to be
 `end - start`, so `bytes 200-1000/*` is 800 bytes at offset 200, not the 801 that

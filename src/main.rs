@@ -3853,3 +3853,830 @@ mod api_description_tests {
         }
     }
 }
+
+/// Guards the settings of the API breaking-change gate (issue #202).
+///
+/// The gate is `.github/workflows/api-diff.yml`, which runs `oasdiff breaking`
+/// over `api-description.yaml` and is what stops a careless edit from breaking
+/// a deployed client. Its whole behaviour is two step inputs, `fail-on` and
+/// `include-checks`, and getting them wrong **fails open**: the job goes green
+/// and nobody learns that the change it was supposed to stop went through.
+///
+/// So the inputs are pinned here. This module mutates the real spec one way
+/// per rule, runs the real engine with the flags the action's entrypoint
+/// builds, and asserts which mutations the gate stops.
+///
+/// The two halves are tied together rather than kept in step by hand:
+/// [`the_workflow_uses_the_settings_this_module_pins`] reads the committed
+/// workflow and asserts its `fail-on` and `include-checks` are [`FAIL_ON`] and
+/// [`INCLUDE_CHECKS`], and that the job still runs at all — on `pull_request`,
+/// with no path filter and no `if:`. Edit either side alone and that test says
+/// so. It reads nothing but the repo tree, so unlike the mutation test it runs
+/// on every runner.
+///
+/// The engine is not vendored, so these tests need `oasdiff` on `PATH` (or
+/// `OASDIFF` pointing at it) and skip when it is absent, which is the case on
+/// every runner. Install the version the action pins, so a local verdict is
+/// CI's verdict:
+///
+/// ```text
+/// go install github.com/oasdiff/oasdiff@v1.26.1
+/// cargo test --all-targets api_gate
+/// ```
+#[cfg(test)]
+mod api_gate_tests {
+    use std::env;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    /// `fail-on` in the workflow's oasdiff step. WARN, not ERR: at ERR the gate
+    /// passes a removed or renamed optional response property, a removed
+    /// request parameter or property, and the constraint-narrowing `*-set`
+    /// family, all of which break a pinned client on unversioned routes.
+    const FAIL_ON: &str = "WARN";
+
+    /// `include-checks` in the workflow's oasdiff step. Both rate ERR but are
+    /// opt-in, so they do not run unless named.
+    const INCLUDE_CHECKS: &str =
+        "response-non-success-status-removed,response-property-enum-value-removed";
+
+    /// The gate itself, embedded so the two constants above cannot claim
+    /// settings the committed job does not use.
+    const WORKFLOW: &str = include_str!("../.github/workflows/api-diff.yml");
+
+    /// Path of the workflow, for failure messages.
+    const WORKFLOW_PATH: &str = ".github/workflows/api-diff.yml";
+
+    /// The value of the `key: value` step input in the workflow, or `None`
+    /// when the key is absent.
+    ///
+    /// Hand-rolled rather than parsed with a YAML crate to keep the dependency
+    /// tree unchanged, the same way `mod api_description_tests` above reads the
+    /// spec. It relies on the input sitting alone on its line; comment lines
+    /// are skipped, so the header comment's prose about `fail-on` does not
+    /// count. More than one occurrence is a panic, because then "the
+    /// workflow's setting" is not a single thing.
+    fn workflow_input(key: &str) -> Option<String> {
+        let prefix = format!("{key}:");
+        let values: Vec<String> = WORKFLOW
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| line.strip_prefix(prefix.as_str()))
+            .map(|value| value.trim().trim_matches(['"', '\'']).to_owned())
+            .collect();
+        assert!(
+            values.len() <= 1,
+            "{WORKFLOW_PATH} sets {key} {} times, so which one the gate runs \
+             with is anyone's guess: {values:?}",
+            values.len()
+        );
+        values.into_iter().next()
+    }
+
+    /// The non-comment lines of the workflow's `on:` block, from `on:` up to
+    /// `jobs:`.
+    ///
+    /// Deliberately loose about the YAML shape, because `on:` is legal as a
+    /// mapping, a list or a bare scalar and all three name the event inside
+    /// this window. Matching the mapping form byte-for-byte would go red on a
+    /// rewrite that changes nothing about when the gate runs, and a check that
+    /// cries wolf is the one that gets deleted.
+    fn trigger_block() -> Vec<&'static str> {
+        WORKFLOW
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .skip_while(|line| !line.starts_with("on:"))
+            .take_while(|line| !line.starts_with("jobs:"))
+            .collect()
+    }
+
+    /// The constants above are only worth something if they describe the job
+    /// that actually runs. Nothing else checks that: a wrong pair fails open,
+    /// and so does a right pair the workflow never got.
+    ///
+    /// A gate that is present and correctly configured but never *triggered*
+    /// fails open the same way and is the one thing the settings cannot show,
+    /// so the trigger is asserted first: on `pull_request`, with no path filter
+    /// and no `if:`. The workflow's own header comment names the foreseeable
+    /// edit ("There is deliberately no `on: paths:` filter"), and a later
+    /// `paths:` would skip the gate on every PR that does not touch the spec
+    /// while everything below here stayed green.
+    ///
+    /// This needs no `oasdiff`, so it runs in CI where the mutation test skips.
+    /// It is red on the branch that changes the settings until a maintainer
+    /// applies the workflow patch (the App has no `workflows: write`), which is
+    /// the intended order: the test goes green when the gate is real.
+    #[test]
+    fn the_workflow_uses_the_settings_this_module_pins() {
+        assert!(
+            WORKFLOW.contains("uses: oasdiff/oasdiff-action/breaking@"),
+            "{WORKFLOW_PATH} no longer runs oasdiff-action/breaking, so this \
+             module pins the settings of a job that is gone"
+        );
+
+        let triggers = trigger_block();
+        assert!(
+            triggers.iter().any(|line| line.contains("pull_request")),
+            "{WORKFLOW_PATH} no longer triggers on `pull_request`, so the \
+             settings pinned below belong to a gate that never sees one: \
+             {triggers:?}"
+        );
+        assert!(
+            !triggers
+                .iter()
+                .any(|line| line.starts_with("paths:") || line.starts_with("paths-ignore:")),
+            "{WORKFLOW_PATH} has a path filter on its trigger, so the gate is \
+             skipped on the PRs that do not touch the spec rather than passing \
+             them, and as a required check it leaves those PRs pending forever: \
+             {triggers:?}"
+        );
+        assert!(
+            !WORKFLOW
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.starts_with('#'))
+                .any(|line| line.starts_with("if:")),
+            "{WORKFLOW_PATH} has an `if:` condition, so the gate can be skipped \
+             on the very PRs it exists to judge while the settings below still \
+             read correctly"
+        );
+
+        let expected = [
+            ("fail-on", Some(FAIL_ON)),
+            ("include-checks", Some(INCLUDE_CHECKS)),
+        ];
+        let wrong: Vec<String> = expected
+            .iter()
+            .filter_map(|(key, want)| {
+                let got = workflow_input(key);
+                (got.as_deref() != *want).then(|| {
+                    format!(
+                        "  {key}: the gate runs with {}, this module pins {}",
+                        got.as_deref().unwrap_or("nothing"),
+                        want.unwrap_or("nothing"),
+                    )
+                })
+            })
+            .collect();
+
+        assert!(
+            wrong.is_empty(),
+            "{WORKFLOW_PATH} and this module disagree about what the gate \
+             does:\n{}\n\
+             Whichever side is behind, the other is a claim nothing backs: at \
+             fail-on=ERR with no include-checks the gate passes ten of the \
+             changes the spec's contract forbids, and the mutation test below \
+             would certify settings it does not use.",
+            wrong.join("\n"),
+        );
+    }
+
+    /// Whether the gate stops a change, i.e. whether the job goes red.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Gate {
+        /// Additive as far as a deployed client is concerned.
+        Passes,
+        /// Breaking: cryptify's routes are unversioned, so this reaches every
+        /// client pinned to the spec the moment it deploys.
+        Stops,
+    }
+
+    impl Gate {
+        fn verb(&self) -> &'static str {
+            match self {
+                Gate::Passes => "pass",
+                Gate::Stops => "stop",
+            }
+        }
+
+        fn past(&self) -> &'static str {
+            match self {
+                Gate::Passes => "passed",
+                Gate::Stops => "stopped",
+            }
+        }
+    }
+
+    fn spec_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("api-description.yaml")
+    }
+
+    /// The `oasdiff` binary, or `None` when it is not installed.
+    fn oasdiff() -> Option<PathBuf> {
+        if let Some(explicit) = env::var_os("OASDIFF") {
+            return Some(PathBuf::from(explicit));
+        }
+        let found = Command::new("oasdiff")
+            .arg("--help")
+            .output()
+            .is_ok_and(|out| out.status.success());
+        found.then(|| PathBuf::from("oasdiff"))
+    }
+
+    /// Replaces `old` with `new`, requiring `old` to occur exactly once so a
+    /// spec edit that moves an anchor fails loudly instead of silently mutating
+    /// nothing.
+    fn once(text: &str, old: &str, new: &str) -> String {
+        assert_eq!(
+            text.matches(old).count(),
+            1,
+            "anchor is not unique in the spec, so this mutation no longer means \
+             what it says: {old:?}"
+        );
+        text.replacen(old, new, 1)
+    }
+
+    /// The half-open byte range of the block starting at `start` and ending
+    /// where the next `end` begins.
+    fn block(text: &str, start: &str, end: &str) -> (usize, usize) {
+        let from = text.find(start).unwrap_or_else(|| panic!("no {start:?}"));
+        let to = text[from..]
+            .find(end)
+            .unwrap_or_else(|| panic!("no {end:?} after {start:?}"));
+        (from, from + to)
+    }
+
+    /// Runs the gate exactly as the workflow's step does: the committed spec as
+    /// the base, `revision` as the PR's version.
+    ///
+    /// The entrypoint of `oasdiff/oasdiff-action/breaking@v0.1.10` turns the
+    /// step inputs into `--allow-external-refs=false --include-checks <checks>
+    /// --composed=false --fail-on <level>`, so those are the flags used here.
+    /// Exit 0 is a clean diff and exit 1 is "breaking changes found"; anything
+    /// else is the engine refusing the input, which means the mutation produced
+    /// a spec oasdiff cannot load and any verdict read off it is meaningless.
+    fn gate(oasdiff: &Path, revision: &Path) -> Gate {
+        let out = Command::new(oasdiff)
+            .arg("breaking")
+            .arg(spec_path())
+            .arg(revision)
+            .arg("--allow-external-refs=false")
+            .args(["--include-checks", INCLUDE_CHECKS])
+            .arg("--composed=false")
+            .args(["--fail-on", FAIL_ON])
+            .output()
+            .expect("run oasdiff");
+
+        match out.status.code() {
+            Some(0) => Gate::Passes,
+            Some(1) => Gate::Stops,
+            other => panic!(
+                "oasdiff exited {other:?} instead of 0 or 1, so it never reached \
+                 a verdict:\n{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
+            ),
+        }
+    }
+
+    // The spec blocks the mutations below anchor on. Each is unique in the
+    // spec, and `once` fails the test if that ever stops being true.
+
+    const RECOVERY_TOKEN_PARAMETER: &str = r##"      - in: "header"
+        name: "X-Recovery-Token"
+        description:
+          "Bearer credential issued in the `recovery_token` field of
+          the `upload_init` response. Compared in constant time on the
+          server. Missing / empty → 401."
+        schema:
+          type: "string"
+        required: true
+"##;
+
+    const RANGE_PARAMETER: &str = r##"      - in: "header"
+        name: "Range"
+        description:
+          "Optional single byte range, `bytes=<start>-<end>`,
+          `bytes=<start>-` or `bytes=-<suffix>`. Multiple ranges are not
+          supported and are answered with 416."
+        required: false
+        schema:
+          type: "string"
+"##;
+
+    const NOTIFY_RECIPIENTS_PROPERTY: &str = r##"                  notifyRecipients:
+                    type: "boolean"
+                    default: true
+                    example: true
+                    description: "Whether to email each recipient with a download link. Optional; defaults to true. Set to false to upload silently when the encrypted payload reaches recipients through another channel and a Cryptify-sent notification would be a duplicate."
+"##;
+
+    const SESSION_NOT_FOUND_REASONS: &str = r##"            - "expired_or_unknown"
+            - "invalid_uuid"
+            - "file_missing"
+"##;
+
+    const UPLOAD_STATUS_REQUIRED: &str = r##"      required:
+        - uploaded
+        - cryptify_token
+      properties:
+        uploaded:
+"##;
+
+    const USAGE_EMAIL_SCHEMA: &str = r##"        required: false
+        schema:
+          type: "string"
+          format: "email"
+"##;
+
+    const EMAIL_TEMPLATE_503: &str =
+        "        \"503\":\n          description: \"pg-pkg was unreachable while validating the API key.\"\n";
+
+    // -----------------------------------------------------------------------
+    // Additive: allowed, so the gate must let these through. A gate that stops
+    // an additive change is worse than no gate, because the way around it is to
+    // switch it off.
+    // -----------------------------------------------------------------------
+
+    fn add_endpoint(spec: &str) -> String {
+        once(
+            spec,
+            "  /metrics:\n",
+            r##"  /echo:
+    get:
+      tags:
+        - "Health"
+      summary: "Echo the request back"
+      operationId: "echo"
+      responses:
+        "200":
+          description: "ok"
+  /metrics:
+"##,
+        )
+    }
+
+    fn add_optional_response_property(spec: &str) -> String {
+        once(
+            spec,
+            "        prev_token:\n          type: \"string\"\n",
+            r##"        stalled:
+          type: "boolean"
+          description: "Whether the upload has seen no chunk for a while."
+        prev_token:
+          type: "string"
+"##,
+        )
+    }
+
+    fn add_optional_request_property(spec: &str) -> String {
+        once(
+            spec,
+            "                  notifyRecipients:\n",
+            r##"                  clientHint:
+                    type: "string"
+                    description: "Free-form client identification."
+                  notifyRecipients:
+"##,
+        )
+    }
+
+    fn add_required_response_property(spec: &str) -> String {
+        once(
+            spec,
+            UPLOAD_STATUS_REQUIRED,
+            r##"      required:
+        - uploaded
+        - cryptify_token
+        - chunk_size
+      properties:
+        chunk_size:
+          type: "integer"
+          format: "int64"
+        uploaded:
+"##,
+        )
+    }
+
+    fn add_optional_query_parameter(spec: &str) -> String {
+        once(
+            spec,
+            "      operationId: \"health\"\n",
+            r##"      operationId: "health"
+      parameters:
+      - in: "query"
+        name: "verbose"
+        required: false
+        schema:
+          type: "boolean"
+"##,
+        )
+    }
+
+    fn add_response_status(spec: &str) -> String {
+        once(
+            spec,
+            EMAIL_TEMPLATE_503,
+            &format!(
+                "        \"429\":\n          description: \"Rate limited.\"\n{EMAIL_TEMPLATE_503}"
+            ),
+        )
+    }
+
+    fn edit_a_description(spec: &str) -> String {
+        once(
+            spec,
+            "summary: \"Health check endpoint\"",
+            "summary: \"Health check endpoint (liveness)\"",
+        )
+    }
+
+    /// The only escape hatch cryptify has. Its routes are unversioned, so a
+    /// change the current shape cannot take additively ships as a new versioned
+    /// route with the old one left running. If the gate stopped this there
+    /// would be no way to make a breaking change at all.
+    fn add_versioned_route_beside_the_unversioned_one(spec: &str) -> String {
+        let (from, to) = block(spec, "  /usage:\n", "  /email-template:\n");
+        let versioned = once(&spec[from..to], "  /usage:\n", "  /v2/usage:\n");
+        let versioned = once(
+            &versioned,
+            "operationId: \"getUsage\"\n",
+            "operationId: \"getUsageV2\"\n",
+        );
+        once(
+            spec,
+            "  /email-template:\n",
+            &format!("{versioned}  /email-template:\n"),
+        )
+    }
+
+    /// A wider *request* enum is additive: the server accepts a language it did
+    /// not before, and no deployed client sends one it does not know about.
+    fn add_a_request_enum_value(spec: &str) -> String {
+        once(
+            spec,
+            "enum: [\"EN\", \"NL\"]",
+            "enum: [\"EN\", \"NL\", \"DE\"]",
+        )
+    }
+
+    fn add_optional_response_header(spec: &str) -> String {
+        once(
+            spec,
+            r##"          description: "Successful operation"
+        "400":
+          description:
+            "The `cryptifytoken` header does not match the token the server
+"##,
+            r##"          description: "Successful operation"
+          headers:
+            X-Upload-Id:
+              schema:
+                type: "string"
+        "400":
+          description:
+            "The `cryptifytoken` header does not match the token the server
+"##,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Breaking: each one breaks a client written against today's spec, and on
+    // unversioned routes there is nowhere for such a client to stay.
+    // -----------------------------------------------------------------------
+
+    fn remove_route(spec: &str) -> String {
+        let (from, to) = block(spec, "  /email-template:\n", "  /filedownload/{uuid}:\n");
+        format!("{}{}", &spec[..from], &spec[to..])
+    }
+
+    fn request_property_becomes_required(spec: &str) -> String {
+        once(
+            spec,
+            "                  - confirm\n",
+            "                  - confirm\n                  - notifyRecipients\n",
+        )
+    }
+
+    /// A client that handles 401 by prompting for an API key sees an unhandled
+    /// 403.
+    fn change_a_status_code(spec: &str) -> String {
+        once(
+            spec,
+            r##"        "401":
+          description:
+            "No valid `Authorization: Bearer PG-…` API key was presented. Usage
+"##,
+            r##"        "403":
+          description:
+            "No valid `Authorization: Bearer PG-…` API key was presented. Usage
+"##,
+        )
+    }
+
+    fn remove_a_non_success_status(spec: &str) -> String {
+        once(spec, EMAIL_TEMPLATE_503, "")
+    }
+
+    fn remove_a_response_enum_value(spec: &str) -> String {
+        once(
+            spec,
+            SESSION_NOT_FOUND_REASONS,
+            "            - \"expired_or_unknown\"\n            - \"invalid_uuid\"\n",
+        )
+    }
+
+    /// The one rule the gate adds on top of "no removing or narrowing": a
+    /// widened *response* enum is a change a client cannot see coming, and it
+    /// is caught only at WARN, so a revert to `fail-on: ERR` drops it silently
+    /// unless it is pinned here. See CLAUDE.md for the reasoning.
+    fn add_a_response_enum_value(spec: &str) -> String {
+        once(
+            spec,
+            SESSION_NOT_FOUND_REASONS,
+            &format!("{SESSION_NOT_FOUND_REASONS}            - \"quota_exceeded\"\n"),
+        )
+    }
+
+    /// `prev_offset` is optional only because it is absent until the first
+    /// chunk lands; a resuming client reads it on every recovery.
+    fn remove_optional_response_property(spec: &str) -> String {
+        once(
+            spec,
+            r##"        prev_offset:
+          type: "integer"
+          format: "int64"
+          description:
+            "Byte offset where the most recently committed chunk started
+            (i.e. `uploaded - chunk_len`). Omitted until at least one
+            chunk has been committed."
+"##,
+            "",
+        )
+    }
+
+    fn rename_optional_response_property(spec: &str) -> String {
+        once(
+            spec,
+            "        prev_token:\n          type: \"string\"\n",
+            "        previous_token:\n          type: \"string\"\n",
+        )
+    }
+
+    fn remove_required_response_property(spec: &str) -> String {
+        once(
+            spec,
+            r##"      required:
+        - uploaded
+        - cryptify_token
+      properties:
+        uploaded:
+          type: "integer"
+          format: "int64"
+          description:
+            "Total bytes the server has committed for this upload so far.
+            The client should resume from this offset."
+"##,
+            "      required:\n        - cryptify_token\n      properties:\n",
+        )
+    }
+
+    fn narrow_a_response_property_type(spec: &str) -> String {
+        once(
+            spec,
+            "                  window_days:\n                    type: \"integer\"\n",
+            "                  window_days:\n                    type: \"string\"\n",
+        )
+    }
+
+    /// The constraint-narrowing `*-set` family: a value the server used to
+    /// accept now fails validation.
+    fn narrow_a_request_parameter(spec: &str) -> String {
+        once(
+            spec,
+            USAGE_EMAIL_SCHEMA,
+            &format!("{USAGE_EMAIL_SCHEMA}          maxLength: 64\n"),
+        )
+    }
+
+    fn remove_a_required_request_parameter(spec: &str) -> String {
+        once(spec, RECOVERY_TOKEN_PARAMETER, "")
+    }
+
+    fn remove_an_optional_request_parameter(spec: &str) -> String {
+        once(spec, RANGE_PARAMETER, "")
+    }
+
+    fn remove_a_request_property(spec: &str) -> String {
+        once(spec, NOTIFY_RECIPIENTS_PROPERTY, "")
+    }
+
+    fn remove_a_response_media_type(spec: &str) -> String {
+        once(
+            spec,
+            r##"        "200":
+          description: "Service is healthy"
+          content:
+            text/plain:
+              schema:
+                type: "string"
+                example: "OK"
+"##,
+            "        \"200\":\n          description: \"Service is healthy\"\n",
+        )
+    }
+
+    fn remove_a_required_response_header(spec: &str) -> String {
+        once(
+            spec,
+            r##"          headers:
+            cryptifytoken:
+              required: true
+              schema:
+                description: "Identifies the new version of the upload file parts. Needs to be passed into the next file part upload request."
+                type: "string"
+"##,
+            "",
+        )
+    }
+
+    type Mutation = (&'static str, fn(&str) -> String, Gate);
+
+    fn mutations() -> Vec<Mutation> {
+        vec![
+            ("a new endpoint", add_endpoint, Gate::Passes),
+            (
+                "a new optional response property",
+                add_optional_response_property,
+                Gate::Passes,
+            ),
+            (
+                "a new optional request property",
+                add_optional_request_property,
+                Gate::Passes,
+            ),
+            (
+                "a new required response property",
+                add_required_response_property,
+                Gate::Passes,
+            ),
+            (
+                "a new optional query parameter",
+                add_optional_query_parameter,
+                Gate::Passes,
+            ),
+            ("a new response status", add_response_status, Gate::Passes),
+            ("an edited description", edit_a_description, Gate::Passes),
+            (
+                "a versioned route beside the unversioned one",
+                add_versioned_route_beside_the_unversioned_one,
+                Gate::Passes,
+            ),
+            (
+                "a new request enum value",
+                add_a_request_enum_value,
+                Gate::Passes,
+            ),
+            (
+                "a new optional response header",
+                add_optional_response_header,
+                Gate::Passes,
+            ),
+            ("a removed route", remove_route, Gate::Stops),
+            (
+                "a request property becoming required",
+                request_property_becomes_required,
+                Gate::Stops,
+            ),
+            ("a changed status code", change_a_status_code, Gate::Stops),
+            (
+                "a removed non-success status",
+                remove_a_non_success_status,
+                Gate::Stops,
+            ),
+            (
+                "a removed response enum value",
+                remove_a_response_enum_value,
+                Gate::Stops,
+            ),
+            (
+                "a new response enum value",
+                add_a_response_enum_value,
+                Gate::Stops,
+            ),
+            (
+                "a removed optional response property",
+                remove_optional_response_property,
+                Gate::Stops,
+            ),
+            (
+                "a renamed optional response property",
+                rename_optional_response_property,
+                Gate::Stops,
+            ),
+            (
+                "a removed required response property",
+                remove_required_response_property,
+                Gate::Stops,
+            ),
+            (
+                "a narrowed response property type",
+                narrow_a_response_property_type,
+                Gate::Stops,
+            ),
+            (
+                "a narrowed request parameter constraint",
+                narrow_a_request_parameter,
+                Gate::Stops,
+            ),
+            (
+                "a removed required request parameter",
+                remove_a_required_request_parameter,
+                Gate::Stops,
+            ),
+            (
+                "a removed optional request parameter",
+                remove_an_optional_request_parameter,
+                Gate::Stops,
+            ),
+            (
+                "a removed request property",
+                remove_a_request_property,
+                Gate::Stops,
+            ),
+            (
+                "a removed response media type",
+                remove_a_response_media_type,
+                Gate::Stops,
+            ),
+            (
+                "a removed required response header",
+                remove_a_required_response_header,
+                Gate::Stops,
+            ),
+        ]
+    }
+
+    /// Every mutation must still edit the spec, whether or not oasdiff is
+    /// installed, so a spec edit that strands an anchor is caught in CI too.
+    #[test]
+    fn every_api_gate_mutation_still_applies() {
+        let spec = fs::read_to_string(spec_path()).expect("read the spec");
+        for (name, mutate, _) in mutations() {
+            assert_ne!(
+                mutate(&spec),
+                spec,
+                "the mutation for {name} changed nothing, so whatever it \
+                 asserts is vacuous"
+            );
+        }
+    }
+
+    #[test]
+    fn the_api_gate_stops_breaking_changes_and_passes_additive_ones() {
+        let Some(oasdiff) = oasdiff() else {
+            eprintln!(
+                "skipping: oasdiff is not installed, which is the case on every \
+                 runner. To run this test, `go install \
+                 github.com/oasdiff/oasdiff@v1.26.1` (the version the action \
+                 pins), or set OASDIFF."
+            );
+            return;
+        };
+
+        let spec = fs::read_to_string(spec_path()).expect("read the spec");
+        let dir = env::temp_dir().join(format!("cryptify-api-gate-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create the scratch directory");
+
+        // The unmutated spec first: without this, a gate that stopped
+        // everything would satisfy every Stops case below and only look half
+        // broken.
+        let unchanged = dir.join("unchanged.yaml");
+        fs::write(&unchanged, &spec).expect("write the spec");
+        let baseline = gate(&oasdiff, &unchanged);
+
+        let mut wrong = Vec::new();
+        if baseline != Gate::Passes {
+            wrong.push("  no change at all: the gate should pass it, it stopped it".to_owned());
+        }
+        for (name, mutate, expected) in mutations() {
+            let slug: String = name
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect();
+            let revision = dir.join(format!("{slug}.yaml"));
+            fs::write(&revision, mutate(&spec)).expect("write the mutated spec");
+            let actual = gate(&oasdiff, &revision);
+            if actual != expected {
+                wrong.push(format!(
+                    "  {name}: the gate should {} it, it {} it",
+                    expected.verb(),
+                    actual.past()
+                ));
+            }
+        }
+
+        fs::remove_dir_all(&dir).ok();
+        assert!(
+            wrong.is_empty(),
+            "the gate's verdict on {} of {} changes is not what fail-on={FAIL_ON} \
+             and include-checks={INCLUDE_CHECKS} are supposed to deliver:\n{}",
+            wrong.len(),
+            mutations().len() + 1,
+            wrong.join("\n"),
+        );
+    }
+}
