@@ -18,3 +18,7 @@ pkg_ibs.sec
 # `--manifest-path pg-wasm/Cargo.toml` resolves it on its own and writes a
 # lockfile next to the manifest. The repo does not track it.
 pg-wasm/Cargo.lock
+
+# Tracked JWT-rotation test fixtures; `*.pem` above would otherwise leave them
+# tracked-and-ignored, which release-plz refuses to run against.
+!pg-pkg/testdata/jwt_rotation/*.pem
