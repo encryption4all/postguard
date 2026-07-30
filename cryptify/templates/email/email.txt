@@ -1,0 +1,25 @@
+{{header}} {{subheader}}
+{{file_size}} - {{expires_str}} {{expiry_date}}
+{% if html_content != "" %}
+
+{{html_content}}
+{% endif %}
+
+{{download_str}}:
+{{url}}
+
+{{link_str}}:
+{{url}}
+{% if confirm != "" %}
+
+{{confirm}}
+{% endif %}
+{% if sender_email != "" %}
+
+---
+{{files_from}} {{sender_email}}
+{% if !sender_attributes.is_empty() %}
+{% for attr in sender_attributes %}- {{attr.1}}
+{% endfor %}
+{% endif %}
+{% endif %}

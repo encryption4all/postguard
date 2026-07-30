@@ -1,0 +1,865 @@
+openapi: "3.0.3"
+info:
+  title: "Cryptify API"
+  description: "This is the cryptify server that manages encrypted files."
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8000
+    description: Development server
+tags:
+- name: "Health"
+  description: "Health check"
+- name: "Metrics"
+  description: "Prometheus scrape endpoint"
+- name: "File upload"
+  description: "Upload files"
+- name: "File download"
+  description: "Download files"
+- name: "Usage"
+  description: "Upload usage quotas"
+- name: "Email template"
+  description: "Email template linked to an API key"
+- name: "Staging"
+  description: "Endpoints that only respond on a staging deployment"
+paths:
+  /health:
+    get:
+      tags:
+        - "Health"
+      summary: "Health check endpoint"
+      operationId: "health"
+      responses:
+        "200":
+          description: "Service is healthy"
+          content:
+            text/plain:
+              schema:
+                type: "string"
+                example: "OK"
+  /metrics:
+    get:
+      tags:
+        - "Metrics"
+      summary: "Prometheus text-format metrics"
+      description: |
+        Returns usage counters and gauges suitable for Prometheus scraping
+        by the Grafana instance on Scaleway.
+
+        Access depends on the deployment's `metrics_token` setting. With a
+        token configured, the request must carry
+        `Authorization: Bearer <metrics_token>` and anything else is
+        rejected with 401. With no token configured the endpoint is open,
+        and the deployment is expected to restrict it at the firewall or
+        reverse proxy.
+
+        Exposed metrics:
+          * `cryptify_uploads_total{channel}` — counter of finalized uploads.
+          * `cryptify_upload_bytes_total{channel}` — counter of bytes.
+          * `cryptify_uploads_by_app_total{app}` — counter of finalized
+             uploads per client app.
+          * `cryptify_storage_bytes` — gauge, current disk usage.
+          * `cryptify_active_files` — gauge, current file count.
+          * `cryptify_expired_files_total` — counter of uploads purged
+             before finalization.
+
+        The `channel` label is derived from the `X-Cryptify-Source` header,
+        falling back to `Authorization`/`X-Api-Key` (→ `api`), then the
+        `Origin` header (`website` / `staging-website`), then `User-Agent`
+        (`outlook` / `thunderbird`), then `unknown`. The `app` label comes
+        from the `app` field of `X-POSTGUARD-CLIENT-VERSION`.
+      operationId: "metrics"
+      security:
+      - metricsBearer: []
+      - {}
+      responses:
+        "200":
+          description: "Prometheus text exposition format"
+          content:
+            text/plain:
+              schema:
+                type: "string"
+        "401":
+          description:
+            "A `metrics_token` is configured and the request did not present
+            it as `Authorization: Bearer <metrics_token>`."
+  /fileupload/init:
+    post:
+        tags:
+        - "File upload"
+        summary: "Initialize multipart file upload"
+        operationId: "initFileUpload"
+        parameters:
+        - in: "header"
+          name: "Authorization"
+          description:
+            "Optional `Bearer PG-…` API key. When present and validated by
+            pg-pkg, the upload is accounted against that tenant and gets the
+            API-key limits (100 GB); without it the upload runs on the default
+            tier (5 GB). An invalid key is not rejected here, it degrades to
+            the default tier."
+          schema:
+            type: "string"
+          required: false
+        - in: "header"
+          name: "X-Cryptify-Source"
+          description:
+            "Optional traffic-source label for the `channel` metrics label.
+            Sanitized to `[a-z0-9_-]`, truncated to 32 characters."
+          schema:
+            type: "string"
+          required: false
+        - in: "header"
+          name: "X-POSTGUARD-CLIENT-VERSION"
+          description:
+            "Optional client identification, `host,host_version,app,app_version`.
+            The `app` field becomes the `app` label on
+            `cryptify_uploads_by_app_total`."
+          schema:
+            type: "string"
+          required: false
+        requestBody:
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - recipient
+                  - mailContent
+                  - mailLang
+                  - confirm
+                properties:
+                  recipient:
+                    type: "string"
+                    format: "email"
+                    example: "recipient@example.com"
+                    description: "Email address of the recipient"
+                  mailContent:
+                    type: "string"
+                    example: "Here is your encrypted file"
+                    description: "Content to include in the email"
+                  mailLang:
+                    type: "string"
+                    enum: ["EN", "NL"]
+                    example: "EN"
+                    description: "Email language (EN or NL)"
+                  confirm:
+                    type: "boolean"
+                    example: true
+                    description: "Whether to send a confirmation email to the sender"
+                  notifyRecipients:
+                    type: "boolean"
+                    default: true
+                    example: true
+                    description: "Whether to email each recipient with a download link. Optional; defaults to true. Set to false to upload silently when the encrypted payload reaches recipients through another channel and a Cryptify-sent notification would be a duplicate."
+        responses:
+          "200":
+            description: "Successful operation"
+            headers:
+                cryptifytoken:
+                  description: "Identifies the initial version of the file to be uploaded. Needs to be passed into the file part upload request."
+                  required: true
+                  schema:
+                    type: "string"
+            content:
+              application/json:
+                schema:
+                  type: "object"
+                  required:
+                    - uuid
+                    - recovery_token
+                  properties:
+                    uuid:
+                      type: "string"
+                      format: "uuid"
+                      description: "Unique identifier for the file upload"
+                    recovery_token:
+                      type: "string"
+                      description:
+                        "Bearer credential for the cross-refresh-resume
+                        status endpoint (`GET /fileupload/{uuid}/status`).
+                        The client should store this alongside the UUID
+                        (e.g. in IndexedDB) and present it in an
+                        `X-Recovery-Token` header to recover from a
+                        page refresh, tab crash, or navigate-away-and-back.
+                        Hex-encoded 32-byte random."
+          "400":
+            description:
+              "The `recipient` address could not be parsed. A body that is not
+              syntactically valid JSON is rejected the same way but by the body
+              guard, so that response is Rocket's default error page rather
+              than the plain-text message below; a body that parses as JSON but
+              does not fit `InitBody` is the 422."
+            content:
+              text/plain:
+                schema:
+                  type: "string"
+          "422":
+            description: "The request body is not valid `InitBody` JSON."
+          "500":
+            description: "The upload file could not be created on disk."
+            content:
+              text/plain:
+                schema:
+                  type: "string"
+  /fileupload/{uuid}:
+    put:
+      tags:
+      - "File upload"
+      summary: "Upload a file part"
+      description:
+        "Append a single chunk to the upload identified by `uuid`.\n\n
+        **Idempotent retry contract.** A chunk PUT whose response was lost
+        in flight can be safely retried with the *previous* `cryptifytoken`
+        value (the one the client sent on the failed attempt) at the same
+        `Content-Range` offset and with the same body. The server detects
+        this case — the request matches the cached `(prev_token, offset,
+        length, sha256)` of the most recently committed chunk — and
+        replays the previously returned `cryptifytoken` without
+        re-writing the file or double-counting against quotas. If the
+        request looks like a retry but the body bytes differ, the server
+        responds 400; clients must not retry the same offset with
+        different bytes.\n\n
+        Retries are only honoured for the *most recently committed*
+        chunk. If a client falls behind by more than one chunk it must
+        start a new upload."
+      operationId: "uploadFilePart"
+      parameters:
+      - in: "header"
+        name: "cryptifytoken"
+        description:
+          "Identifies the version of the upload file parts. Part of the header from the last fileupload response. On a retry of a chunk whose response was lost, send the *previous* token (the one originally sent on the failed PUT)."
+        schema:
+          type: "string"
+        required: true
+      - in: "header"
+        name: "Content-Range"
+        description:
+          "Which offset of a file is sent, example: `bytes 200-1000/*`.\n\n
+          **The end byte is EXCLUSIVE**, unlike RFC 7233. The server takes the
+          chunk length to be `end - start`, so `bytes 200-1000/*` carries 800
+          bytes at offset 200, not 801, and a chunk of length `n` at offset
+          `off` is sent as `bytes <off>-<off+n>/*`. Sending the RFC's inclusive
+          end makes the body one byte longer than the declared range and is
+          rejected with 400. `start == end` is rejected too."
+        schema:
+          type: "string"
+        required: true
+      - in: "path"
+        name: "uuid"
+        required: true
+        description: "The unique identifier received when initializing file upload."
+        schema:
+          type: "string"
+          format: "uuid"
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: "string"
+              format: "binary"
+      responses:
+        "200":
+          description: "Successful operation."
+          headers:
+            cryptifytoken:
+              required: true
+              schema:
+                description: "Identifies the new version of the upload file parts. Needs to be passed into the next file part upload request."
+                type: "string"
+        "400":
+          description:
+            "One of the input parameters is incorrect: a chunk larger than
+            the configured chunk size, a `Content-Range` start that does not
+            continue the upload, a body whose length does not match the
+            range, or a `cryptifytoken` that matches neither the current
+            token nor the previous one on the retry path. A token mismatch is
+            reported here, not as 409. A missing or unparsable
+            `cryptifytoken` / `Content-Range` header is rejected the same way
+            but by the header extractor, so that body is Rocket's default
+            error page rather than the plain-text message below."
+          content:
+            text/plain:
+              schema:
+                type: "string"
+        "404":
+          description:
+            "The upload session is not known to the server. Either the
+            client never called `/fileupload/init`, the session was idle
+            past the configured TTL and got evicted, or the on-disk file
+            has been removed. Clients should not retry — start a new
+            upload via `/fileupload/init`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionNotFound"
+        "413":
+          description: "The upload exceeds the per-upload size limit (5 GB for non-API-key uploads, 100 GB for API-key uploads)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayloadTooLarge"
+        "500":
+          description: "The chunk could not be written to disk."
+          content:
+            text/plain:
+              schema:
+                type: "string"
+        "503":
+          description:
+            "The upload exceeds the default tier and pg-pkg was unreachable
+            for the whole retry budget, so the caller's entitlement to the
+            API-key tier could not be confirmed. Uploads that stay inside the
+            default tier are unaffected."
+          content:
+            text/plain:
+              schema:
+                type: "string"
+
+  /fileupload/finalize/{uuid}:
+    post:
+      tags:
+      - "File upload"
+      summary: "Finalize multipart file upload and send mail to recipient"
+      operationId: "finalizeFileUpload"
+      parameters:
+      - in: "header"
+        name: "cryptifytoken"
+        description:
+          "The current token, as returned by the last chunk PUT. Finalize
+          validates it too — knowing the UUID is not enough to finalize
+          someone else's upload."
+        schema:
+          type: "string"
+        required: true
+      - in: "header"
+        name: "Content-Range"
+        description:
+          "Indicates the final file size: `bytes */1073741824`."
+        schema:
+          type: "string"
+        required: true
+      - in: "path"
+        name: "uuid"
+        description: "The unique identifier received when initializing file upload."
+        required: true
+        schema:
+          type: "string"
+          format: "uuid"
+      responses:
+        "200":
+          description: "Successful operation"
+        "400":
+          description:
+            "The `cryptifytoken` header does not match the token the server
+            holds for this upload. A missing or unparsable `cryptifytoken` /
+            `Content-Range` header is rejected the same way but by the header
+            extractor, so that body is Rocket's default error page rather
+            than the plain-text message below."
+          content:
+            text/plain:
+              schema:
+                type: "string"
+        "404":
+          description:
+            "The upload session is not known to the server (see
+            `/fileupload/{uuid}` 404 for details). Clients should not
+            retry — start a new upload via `/fileupload/init`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionNotFound"
+        "413":
+          description: "The sender has exceeded the rolling 14-day upload limit (5 GB for non-API-key uploads, 100 GB for API-key uploads)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayloadTooLarge"
+        "422":
+          description:
+            "The `Content-Range` total does not match the number of bytes the
+            server has committed, so the file is incomplete."
+        "500":
+          description:
+            "The uploaded file could not be read back, is not a valid
+            PostGuard message, carries no sender email attribute, or the
+            notification email could not be sent."
+          content:
+            text/plain:
+              schema:
+                type: "string"
+
+  /fileupload/{uuid}/status:
+    get:
+      tags:
+      - "File upload"
+      summary: "Read upload state for cross-refresh resume"
+      description:
+        "Returns the rolling-token state of an in-flight upload so a
+        client that lost track of the session (page refresh, tab crash,
+        navigate-away-and-back) can rehydrate and feed the next chunk
+        PUT through the idempotent-retry path
+        (`PUT /fileupload/{uuid}`). Authenticates via the
+        `X-Recovery-Token` header issued at `upload_init`. **Behaviour
+        on resume conflict:** if two clients hold the same UUID and
+        recovery token (e.g. two tabs), the first chunk PUT to land
+        wins and the second sees a 4xx as soon as it tries to advance
+        past the now-stale state — single-active-resumer semantics, no
+        lease enforcement on the server side. A successful call also
+        resets the session's idle eviction deadline so the very next
+        chunk PUT does not 404 because the rehydrate window aged out."
+      operationId: "uploadStatus"
+      parameters:
+      - in: "header"
+        name: "X-Recovery-Token"
+        description:
+          "Bearer credential issued in the `recovery_token` field of
+          the `upload_init` response. Compared in constant time on the
+          server. Missing / empty → 401."
+        schema:
+          type: "string"
+        required: true
+      - in: "path"
+        name: "uuid"
+        required: true
+        description: "The unique identifier received when initializing file upload."
+        schema:
+          type: "string"
+          format: "uuid"
+      responses:
+        "200":
+          description: "Successful operation."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadStatus"
+        "401":
+          description:
+            "Missing or empty `X-Recovery-Token` header. Note: a
+            *valid-format* token that simply does not match the stored
+            value returns 404 with the same body shape as an evicted
+            session, deliberately, so attackers cannot probe for live
+            UUIDs by varying the token."
+        "404":
+          description:
+            "The upload session is not known to the server, OR the
+            recovery token does not match the stored value. The two
+            cases are deliberately collapsed — same response shape as
+            `PUT /fileupload/{uuid}` — to avoid leaking session
+            existence."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionNotFound"
+
+  /usage:
+    get:
+      tags:
+      - "Usage"
+      summary: "Get rolling upload usage for the authenticated tenant"
+      description:
+        "Returns the bytes uploaded by the authenticated API-key tenant in the
+        last 14 days, together with the applicable limits. **Requires a valid
+        `Authorization: Bearer PG-…` API key**: usage is accounted per validated
+        tenant and is never looked up by a caller-supplied email, so an
+        unauthenticated caller cannot query an arbitrary address. Requests
+        without a valid key are rejected with 401."
+      operationId: "getUsage"
+      parameters:
+      - in: "header"
+        name: "Authorization"
+        description:
+          "`Bearer PG-…` API key validated against pg-pkg. Required; a missing,
+          malformed, or rejected key returns 401."
+        schema:
+          type: "string"
+        required: true
+      - in: "query"
+        name: "email"
+        description:
+          "Optional. Echoed back in the response `email` field for the
+          frontend's convenience. It does NOT influence the usage lookup, which
+          is keyed to the validated tenant."
+        required: false
+        schema:
+          type: "string"
+          format: "email"
+      responses:
+        "200":
+          description: "Usage information for the authenticated tenant."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - email
+                  - used_bytes
+                  - limit_bytes
+                  - window_days
+                  - per_upload_limit_bytes
+                properties:
+                  email:
+                    type: "string"
+                    format: "email"
+                  used_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description: "Bytes uploaded by this email in the rolling window."
+                  limit_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description: "Rolling-window upload limit in bytes for the authenticated API-key tenant (100 GB)."
+                  window_days:
+                    type: "integer"
+                    description: "Length of the rolling window in days."
+                  per_upload_limit_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description: "Maximum size of a single upload in bytes for the authenticated API-key tenant (100 GB)."
+                  resets_at:
+                    type: "string"
+                    format: "date-time"
+                    nullable: true
+                    description:
+                      "RFC-3339 timestamp at which the oldest recorded upload
+                      falls out of the rolling window, partially freeing quota.
+                      Null if the sender has no recorded uploads."
+        "401":
+          description:
+            "No valid `Authorization: Bearer PG-…` API key was presented. Usage
+            can only be queried by the authenticated tenant it is accounted
+            for."
+        "503":
+          description:
+            "pg-pkg was unreachable while validating the API key, so the
+            tenant could not be established."
+
+  /email-template:
+    get:
+      tags:
+      - "Email template"
+      summary: "Get the email template linked to an API key"
+      description:
+        "Returns the email template pg-pkg has linked to the caller's API key.
+        The key is validated through the same flow the upload endpoints use:
+        send it in an `Authorization: Bearer PG-…` header. Unlike the upload
+        endpoints, a missing or invalid key is rejected here rather than
+        degraded to the default tier."
+      operationId: "getEmailTemplate"
+      security:
+      - apiKeyBearer: []
+      responses:
+        "200":
+          description: "The email template linked to the validated API key."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - tenant_id
+                  - email_template
+                properties:
+                  tenant_id:
+                    type: "string"
+                    description: "Tenant the API key resolved to on pg-pkg."
+                  email_template:
+                    type: "string"
+                    description: "The email template linked to the API key."
+        "401":
+          description: "No valid `PG-…` API key was presented."
+        "404":
+          description: "The API key is valid but has no email template configured."
+        "503":
+          description: "pg-pkg was unreachable while validating the API key."
+
+  /filedownload/{uuid}:
+    get:
+      tags:
+      - "File download"
+      summary: "Download a file"
+      description:
+        "Streams the PostGuard-sealed file. Byte ranges are supported so an
+        interrupted download can resume: `Accept-Ranges: bytes` is advertised
+        on every response that reaches the file (200, 206 and 416, but not the
+        404), a single `Range` is answered with 206, and an unsatisfiable one
+        with 416. The server does not set a `Content-Type` on the body."
+      operationId: "downloadFile"
+      parameters:
+      - in: "path"
+        name: "uuid"
+        required: true
+        description: "The unique identifier received when initializing file upload."
+        schema:
+          type: "string"
+          format: "uuid"
+      - in: "header"
+        name: "Range"
+        description:
+          "Optional single byte range, `bytes=<start>-<end>`,
+          `bytes=<start>-` or `bytes=-<suffix>`. Multiple ranges are not
+          supported and are answered with 416."
+        required: false
+        schema:
+          type: "string"
+      responses:
+        "200":
+          description: "The whole file."
+          headers:
+            Accept-Ranges:
+              required: true
+              schema:
+                type: "string"
+                enum: ["bytes"]
+            Content-Length:
+              required: true
+              schema:
+                type: "integer"
+                format: "int64"
+          content:
+            application/octet-stream:
+              schema:
+                type: "string"
+                format: "binary"
+        "206":
+          description: "The requested byte range."
+          headers:
+            Accept-Ranges:
+              required: true
+              schema:
+                type: "string"
+                enum: ["bytes"]
+            Content-Range:
+              required: true
+              description: "`bytes <start>-<end>/<total>`."
+              schema:
+                type: "string"
+            Content-Length:
+              required: true
+              schema:
+                type: "integer"
+                format: "int64"
+          content:
+            application/octet-stream:
+              schema:
+                type: "string"
+                format: "binary"
+        "404":
+          description:
+            "Uploaded file does not exist, or the path segment is not a safe
+            filename (empty, longer than 128 characters, `.`, `..`, or
+            containing a separator or NUL)."
+        "416":
+          description: "The `Range` header could not be satisfied."
+          headers:
+            Accept-Ranges:
+              required: true
+              schema:
+                type: "string"
+                enum: ["bytes"]
+            Content-Range:
+              required: true
+              description: "`bytes */<total>`."
+              schema:
+                type: "string"
+        "500":
+          description: "Seeking to the start of the requested range failed."
+
+  /staging/preview/{uuid}:
+    get:
+      tags:
+      - "Staging"
+      summary: "Preview the notification emails for an upload"
+      description:
+        "Returns the notification emails cryptify would send for an upload,
+        rendered but not delivered, so developers on the staging website can
+        inspect the message without an SMTP transport. The route is mounted on
+        every deployment but only answers when `staging_mode = true` is
+        configured; everywhere else it returns 404. Recipients that fail to
+        render are logged and left out of the response rather than failing the
+        request."
+      operationId: "stagingPreview"
+      parameters:
+      - in: "path"
+        name: "uuid"
+        required: true
+        description: "The unique identifier received when initializing file upload."
+        schema:
+          type: "string"
+          format: "uuid"
+      responses:
+        "200":
+          description: "The rendered emails for this upload."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StagingPreview"
+        "404":
+          description:
+            "`staging_mode` is off, or the upload session is not known to the
+            server."
+
+components:
+  securitySchemes:
+    apiKeyBearer:
+      type: "http"
+      scheme: "bearer"
+      description:
+        "PostGuard API key, sent as `Authorization: Bearer PG-…`. Validated
+        against pg-pkg's `/v2/api-key/validate` endpoint."
+    metricsBearer:
+      type: "http"
+      scheme: "bearer"
+      description:
+        "The deployment's `metrics_token`, sent as `Authorization: Bearer
+        <metrics_token>` and compared in constant time. Unrelated to the
+        PostGuard API key. Only required when the deployment configures a
+        token."
+  schemas:
+    PayloadTooLarge:
+      type: "object"
+      required:
+        - error
+        - limit
+        - used_bytes
+        - limit_bytes
+      properties:
+        error:
+          type: "string"
+          description: "Human-readable explanation of which limit was hit."
+        limit:
+          type: "string"
+          enum:
+            - "per_upload"
+            - "rolling_window"
+          description: "Which limit tripped the 413 response."
+        used_bytes:
+          type: "integer"
+          format: "int64"
+          description:
+            "Bytes already attributed to the sender in the relevant window.
+            For per_upload, this is the bytes already written for the current
+            upload before the rejected chunk."
+        limit_bytes:
+          type: "integer"
+          format: "int64"
+          description: "The limit value in bytes."
+        resets_at:
+          type: "string"
+          format: "date-time"
+          description:
+            "RFC-3339 timestamp at which the oldest recorded upload falls out
+            of the rolling window, partially freeing quota. Set on the
+            `rolling_window` 413 from finalize; omitted on the `per_upload`
+            413 from a chunk PUT, and when the sender has no recorded
+            uploads."
+    UploadSessionNotFound:
+      type: "object"
+      required:
+        - error
+        - uuid
+        - reason
+      properties:
+        error:
+          type: "string"
+          enum:
+            - "upload_session_not_found"
+          description: "Stable machine-readable error code for clients."
+        uuid:
+          type: "string"
+          format: "uuid"
+          description: "The upload UUID the request targeted."
+        reason:
+          type: "string"
+          enum:
+            - "expired_or_unknown"
+            - "invalid_uuid"
+            - "file_missing"
+          description:
+            "Why the session is not retrievable. `expired_or_unknown`
+            means the session was either evicted after its idle TTL or
+            never existed (clients cannot tell these apart, by design).
+            `invalid_uuid` means the path UUID is malformed.
+            `file_missing` means the in-memory session exists but the
+            on-disk file is gone (server-state inconsistency)."
+    UploadStatus:
+      type: "object"
+      required:
+        - uploaded
+        - cryptify_token
+      properties:
+        uploaded:
+          type: "integer"
+          format: "int64"
+          description:
+            "Total bytes the server has committed for this upload so far.
+            The client should resume from this offset."
+        cryptify_token:
+          type: "string"
+          description:
+            "Current value of the rolling token. The client must send this
+            as `cryptifytoken` on the next chunk PUT."
+        prev_token:
+          type: "string"
+          description:
+            "Token the client sent on the most recently committed chunk
+            (i.e. the value of `cryptify_token` *before* that chunk
+            advanced it). Combined with `prev_offset`, lets the client
+            re-issue the most recent chunk on the idempotent-retry path
+            (PUT `/fileupload/{uuid}`) if it is unsure whether the chunk
+            was committed. Omitted until at least one chunk has been
+            committed."
+        prev_offset:
+          type: "integer"
+          format: "int64"
+          description:
+            "Byte offset where the most recently committed chunk started
+            (i.e. `uploaded - chunk_len`). Omitted until at least one
+            chunk has been committed."
+    RenderedEmail:
+      type: "object"
+      required:
+        - recipient
+        - subject
+        - from
+        - html
+        - text
+      properties:
+        recipient:
+          type: "string"
+          description:
+            "The address this rendering targets: the recipient for a
+            notification, the sender for the confirmation copy."
+        subject:
+          type: "string"
+        from:
+          type: "string"
+          description: "The configured `email_from`, as `Name <email>`."
+        reply_to:
+          type: "string"
+          nullable: true
+          description:
+            "The sender's address on a recipient notification; null on the
+            sender's own confirmation copy."
+        html:
+          type: "string"
+        text:
+          type: "string"
+    StagingPreview:
+      type: "object"
+      required:
+        - recipients
+        - confirmation
+      properties:
+        recipients:
+          type: "array"
+          description: "One rendering per recipient of the upload."
+          items:
+            $ref: "#/components/schemas/RenderedEmail"
+        confirmation:
+          allOf:
+          - $ref: "#/components/schemas/RenderedEmail"
+          nullable: true
+          description:
+            "The sender's confirmation copy, or null when the upload was
+            initialized with `confirm: false`, the sender's email is not known
+            yet because the upload has not been finalized (the usual case when
+            previewing), or the rendering failed."

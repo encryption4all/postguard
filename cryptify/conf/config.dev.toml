@@ -1,0 +1,22 @@
+[default]
+address = "0.0.0.0"
+port = 8000
+server_url = "http://localhost:8080/" # Postguard frontend (via nginx)
+data_dir = "/tmp/data"
+email_from = "noreply@postguard.local"
+smtp_url = "mailcrab"
+smtp_port = 1025
+smtp_tls = false
+# smtp_username = "user"
+# smtp_password = "pw"
+allowed_origins = "^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$"
+usage_db = "/app/data/usage.db"
+# pkg_url = "https://pkg.postguard.eu/"
+# pkg_url = "https://pkg.staging.yivi.app"
+pkg_url = "http://postguard-pkg:8087"
+chunk_size = 5000000
+# Leave unset in dev so /metrics is freely scrapable. In prod set this (or the
+# ROCKET_METRICS_TOKEN env var) so /metrics requires `Authorization: Bearer <token>`.
+# metrics_token = "dev-token"
+# When true, finalize logs the email it WOULD have sent and skips SMTP.
+# staging_mode = true

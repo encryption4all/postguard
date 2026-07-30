@@ -1,0 +1,19 @@
+services:
+  mailcrab:
+    image: marlonb/mailcrab:latest
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+    networks: [default]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    depends_on:
+      - mailcrab
+    volumes:
+      - ".:/app"
+      - "./conf/config.toml/:/app/config.toml:ro"
+    ports:
+        - "8000:8000"
