@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: install cargo-chef once ─────────────────────────────────────────
-FROM rust:1.91.1-slim AS chef
+# 1.96.1 matches cryptify's Dockerfile, and >=1.94 is now a hard floor: sqlx
+# 0.9 declares rust-version 1.94.0, and sqlx 0.9 is what the workspace needs
+# for pg-pkg and cryptify to agree on one libsqlite3-sys.
+FROM rust:1.96.1-slim-trixie AS chef
 RUN apt-get update && apt-get --no-install-recommends install -y libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
@@ -9,11 +12,14 @@ WORKDIR /app
 
 # ── Stage 2: compute the dependency recipe ───────────────────────────────────
 FROM chef AS planner
-COPY pg-core ./pg-core
-COPY pg-pkg  ./pg-pkg
-COPY pg-cli  ./pg-cli
-COPY pg-ffi  ./pg-ffi
-COPY pg-wasm ./pg-wasm
+COPY pg-core  ./pg-core
+COPY pg-pkg   ./pg-pkg
+COPY pg-cli   ./pg-cli
+COPY pg-ffi   ./pg-ffi
+COPY pg-wasm  ./pg-wasm
+# A workspace member cargo cannot read is a hard error even for a build that
+# never compiles it: `cargo chef prepare` loads every member's manifest.
+COPY cryptify ./cryptify
 COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -25,11 +31,14 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --profile ${CARGO_PROFILE} --bin pg-pkg --recipe-path recipe.json
 
 # Copy sources and build the application binary
-COPY pg-core ./pg-core
-COPY pg-pkg  ./pg-pkg
-COPY pg-cli  ./pg-cli
-COPY pg-ffi  ./pg-ffi
-COPY pg-wasm ./pg-wasm
+COPY pg-core  ./pg-core
+COPY pg-pkg   ./pg-pkg
+COPY pg-cli   ./pg-cli
+COPY pg-ffi   ./pg-ffi
+COPY pg-wasm  ./pg-wasm
+# A workspace member cargo cannot read is a hard error even for a build that
+# never compiles it: `cargo chef prepare` loads every member's manifest.
+COPY cryptify ./cryptify
 COPY Cargo.toml Cargo.lock ./
 RUN cargo build --profile ${CARGO_PROFILE} --bin pg-pkg
 
