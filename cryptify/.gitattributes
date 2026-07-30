@@ -1,7 +1,0 @@
-# `mod api_gate_tests` in src/main.rs locates blocks of api-description.yaml by
-# multi-line anchors copied verbatim out of it. rustc normalises CRLF to LF
-# inside raw strings, but a CRLF checkout of the spec keeps its `\r\n`, so on a
-# Windows clone (git installs with core.autocrlf=true) every anchor would miss
-# and the test suite would go red on a clean tree. `-text` keeps the checked-out
-# bytes equal to the stored ones in both directions.
-api-description.yaml -text

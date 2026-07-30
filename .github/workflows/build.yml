@@ -26,46 +26,57 @@ jobs:
   #       uses: SonarSource/sonarqube-scan-action@v6
   #       env:
   #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  # The matrix keys on the crate directory rather than a `pg-` suffix, because
+  # `cryptify` does not carry that prefix. This renames the check contexts from
+  # `Test workspace (core)` to `Test workspace (pg-core)`; nothing required
+  # points at them today (only the two `Wire compat` contexts are required), but
+  # a ruleset added later must use the new names.
   test:
     name: Test workspace
     strategy:
       matrix:
-        workspace: [core, pkg, cli, ffi]
+        crate: [pg-core, pg-pkg, pg-cli, pg-ffi, cryptify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - if: ${{ matrix.workspace == 'core' }}
-        run: cargo test --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --features test,rust,stream
-      - if: ${{ matrix.workspace != 'core' }}
-        run: cargo test --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all-features
+      - if: ${{ matrix.crate == 'pg-core' }}
+        run: cargo test --manifest-path pg-core/Cargo.toml --features test,rust,stream
+      # cryptify declares no features of its own, so `--all-targets` (what its
+      # own CI ran) is the equivalent invocation.
+      - if: ${{ matrix.crate == 'cryptify' }}
+        run: cargo test --manifest-path cryptify/Cargo.toml --all-targets
+      - if: ${{ matrix.crate != 'pg-core' && matrix.crate != 'cryptify' }}
+        run: cargo test --manifest-path ${{ matrix.crate }}/Cargo.toml --all-features
 
   format:
     name: Format workspace
     strategy:
       matrix:
-        workspace: [core, pkg, cli, ffi]
+        crate: [pg-core, pg-pkg, pg-cli, pg-ffi, cryptify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo fmt --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all -- --check
+      - run: cargo fmt --manifest-path ${{ matrix.crate }}/Cargo.toml --all -- --check
 
   clippy:
     name: Clippy workspace
     strategy:
       matrix:
-        workspace: [core, pkg, cli, ffi]
+        crate: [pg-core, pg-pkg, pg-cli, pg-ffi, cryptify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - if: ${{ matrix.workspace == 'core' }}
+      - if: ${{ matrix.crate == 'pg-core' }}
         run: cargo clippy --manifest-path pg-core/Cargo.toml --all-targets --features test,rust,stream -- -D warnings
-      - if: ${{ matrix.workspace != 'core' }}
-        run: cargo clippy --manifest-path pg-${{ matrix.workspace }}/Cargo.toml --all-targets --all-features -- -D warnings
+      - if: ${{ matrix.crate == 'cryptify' }}
+        run: cargo clippy --manifest-path cryptify/Cargo.toml --all-targets -- -D warnings
+      - if: ${{ matrix.crate != 'pg-core' && matrix.crate != 'cryptify' }}
+        run: cargo clippy --manifest-path ${{ matrix.crate }}/Cargo.toml --all-targets --all-features -- -D warnings
 
   test-wasm-browsers:
     name: Run wasm tests in browsers

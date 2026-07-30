@@ -22,3 +22,17 @@ git_only = true
 name = "pg-ffi"
 publish = false
 git_only = true
+
+# cryptify: Docker only, no crates.io publish
+#
+# Its tags in the old repo were bare `v0.1.27`; this workspace's git_tag_name
+# makes them `cryptify-v0.1.28` onward. The old tags are not reachable from
+# here (a subtree import brings commits, not tags), so release-plz sees no
+# previous release for this package and would otherwise changelog the whole
+# imported history into one entry. `git_release_enable = false` on the first
+# release, or a hand-placed `cryptify-v0.1.27` tag on the import commit, is
+# what stops that; see the note on encryption4all/postguard#255.
+[[package]]
+name = "cryptify"
+publish = false
+git_only = true

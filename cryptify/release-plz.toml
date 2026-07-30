@@ -1,6 +1,0 @@
-[workspace]
-publish = false
-
-[[package]]
-name = "cryptify"
-git_only = true

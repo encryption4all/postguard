@@ -1,7 +1,27 @@
-fn main() {
-    println!("cargo:rerun-if-changed=Cargo.lock");
+use std::path::PathBuf;
 
-    let lock = std::fs::read_to_string("Cargo.lock").expect("Cargo.lock not readable");
+/// Locate `Cargo.lock`. Standalone it sits beside this manifest; as a workspace
+/// member it sits at the workspace root, so walk up until one turns up.
+fn find_lockfile() -> PathBuf {
+    let mut dir = PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set by cargo"),
+    );
+    loop {
+        let candidate = dir.join("Cargo.lock");
+        if candidate.is_file() {
+            return candidate;
+        }
+        if !dir.pop() {
+            panic!("no Cargo.lock found at or above CARGO_MANIFEST_DIR");
+        }
+    }
+}
+
+fn main() {
+    let lockfile = find_lockfile();
+    println!("cargo:rerun-if-changed={}", lockfile.display());
+
+    let lock = std::fs::read_to_string(&lockfile).expect("Cargo.lock not readable");
     let version = lock
         .split("[[package]]")
         .find_map(|block| {

@@ -3903,7 +3903,7 @@ mod api_gate_tests {
 
     /// The gate itself, embedded so the two constants above cannot claim
     /// settings the committed job does not use.
-    const WORKFLOW: &str = include_str!("../.github/workflows/api-diff.yml");
+    const WORKFLOW: &str = include_str!("../../.github/workflows/api-diff.yml");
 
     /// Path of the workflow, for failure messages.
     const WORKFLOW_PATH: &str = ".github/workflows/api-diff.yml";

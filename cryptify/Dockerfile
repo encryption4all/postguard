@@ -8,12 +8,17 @@ RUN cargo install cargo-chef --locked
 WORKDIR /app
 
 # ── Stage 2: compute the dependency recipe ───────────────────────────────────
+# Build context is the REPO ROOT, not cryptify/: as a workspace member this
+# crate resolves against the root manifest and the root lockfile, and cargo
+# refuses to read a member without its siblings' manifests present. Build it
+# with `docker build -f cryptify/Dockerfile .` from the repo root.
 FROM chef AS planner
-COPY Cargo.toml ./Cargo.toml
-COPY Cargo.lock ./Cargo.lock
-COPY build.rs   ./build.rs
-COPY src        ./src
-COPY templates  ./templates
+COPY pg-core   ./pg-core
+COPY pg-pkg    ./pg-pkg
+COPY pg-cli    ./pg-cli
+COPY pg-ffi    ./pg-ffi
+COPY cryptify  ./cryptify
+COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ── Stage 3: cook (compile) only the dependencies ────────────────────────────
@@ -21,14 +26,15 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 ARG CARGO_PROFILE=release
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --profile ${CARGO_PROFILE} --recipe-path recipe.json
+RUN cargo chef cook --profile ${CARGO_PROFILE} --bin cryptify --recipe-path recipe.json
 
 # Copy sources and build the application binary
-COPY Cargo.toml ./Cargo.toml
-COPY Cargo.lock ./Cargo.lock
-COPY build.rs   ./build.rs
-COPY src        ./src
-COPY templates  ./templates
+COPY pg-core   ./pg-core
+COPY pg-pkg    ./pg-pkg
+COPY pg-cli    ./pg-cli
+COPY pg-ffi    ./pg-ffi
+COPY cryptify  ./cryptify
+COPY Cargo.toml Cargo.lock ./
 RUN cargo build --profile ${CARGO_PROFILE} --bin cryptify
 
 # ── Stage 4: minimal runtime image ───────────────────────────────────────────
