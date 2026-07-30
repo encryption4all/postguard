@@ -19,6 +19,10 @@ pkg_ibs.sec
 # lockfile next to the manifest. The repo does not track it.
 pg-wasm/Cargo.lock
 
-# Tracked JWT-rotation test fixtures; `*.pem` above would otherwise leave them
-# tracked-and-ignored, which release-plz refuses to run against.
+# #241's JWT-rotation fixtures are committed, and `*.pem` above would otherwise
+# leave them tracked *and* ignored. release-plz refuses to run against a repo in
+# that state, which took delivery.yml's `Release-plz PR` job down (#273); the
+# `Release-plz release` job is separate and kept working, so nothing looked
+# broken. `git ls-files -ci --exclude-standard` lists what is in that state, and
+# must stay empty.
 !pg-pkg/testdata/jwt_rotation/*.pem

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.6...pg-cli-v0.3.7) - 2026-07-30
+
+### Added
+
+- *(api)* accept Yivi condiscon in IrmaAuthRequest ([#198](https://github.com/encryption4all/postguard/pull/198))
+
+### Other
+
+- *(pg-cli)* drop useless borrow in decrypt eprintln (clippy) ([#231](https://github.com/encryption4all/postguard/pull/231))
+- bump reqwest 0.12 → 0.13 and inquire 0.6 → 0.9 ([#196](https://github.com/encryption4all/postguard/pull/196))
+- consume irmars from crates.io and bump reqwest to 0.12 ([#192](https://github.com/encryption4all/postguard/pull/192))
+
 ## [0.3.6](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.5...pg-cli-v0.3.6) - 2026-05-16
 
 ### Other

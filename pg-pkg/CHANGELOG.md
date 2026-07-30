@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.11...pg-pkg-v0.6.0) - 2026-07-30
+
+### Added
+
+- *(pkg)* configurable email attribute type for API-key signing identities ([#244](https://github.com/encryption4all/postguard/pull/244))
+- *(api)* pin the v2 HTTP contract and reject unknown request fields ([#242](https://github.com/encryption4all/postguard/pull/242))
+- *(pkg)* proxy IRMA /statusevents SSE endpoint ([#200](https://github.com/encryption4all/postguard/pull/200))
+- *(api)* accept Yivi condiscon in IrmaAuthRequest ([#198](https://github.com/encryption4all/postguard/pull/198))
+
+### Fixed
+
+- *(pkg)* refresh the IRMA JWT verification key on signature mismatch ([#241](https://github.com/encryption4all/postguard/pull/241))
+- *(pkg)* fetch the IRMA JWT verification key lazily instead of at startup ([#240](https://github.com/encryption4all/postguard/pull/240))
+- *(pg-pkg)* rate-limit on real client IP (X-Forwarded-For) behind a trusted proxy ([#230](https://github.com/encryption4all/postguard/pull/230))
+- *(pg-pkg)* add per-IP rate limiting to /v2 API endpoints ([#224](https://github.com/encryption4all/postguard/pull/224)) ([#226](https://github.com/encryption4all/postguard/pull/226))
+- *(pg-pkg)* validate session token path param before upstream URL ([#225](https://github.com/encryption4all/postguard/pull/225))
+- *(pg-pkg)* mask internal error details in HTTP responses ([#221](https://github.com/encryption4all/postguard/pull/221))
+- *(pg-pkg)* [**breaking**] require explicit --allowed-origins for CORS ([#216](https://github.com/encryption4all/postguard/pull/216)) ([#219](https://github.com/encryption4all/postguard/pull/219))
+
+### Other
+
+- breaking-change gate on the pg-pkg OpenAPI contract (oasdiff) ([#269](https://github.com/encryption4all/postguard/pull/269))
+- clear clippy warning backlog for the clippy CI job ([#193](https://github.com/encryption4all/postguard/pull/193)) ([#229](https://github.com/encryption4all/postguard/pull/229))
+- bump reqwest 0.12 → 0.13 and inquire 0.6 → 0.9 ([#196](https://github.com/encryption4all/postguard/pull/196))
+- consume irmars from crates.io and bump reqwest to 0.12 ([#192](https://github.com/encryption4all/postguard/pull/192))
+- bump bincode-next 3.0.0-rc.13 to 3.0.0-rc.14 ([#191](https://github.com/encryption4all/postguard/pull/191))
+- address cargo audit advisories
+
 ## [0.5.11](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.10...pg-pkg-v0.5.11) - 2026-05-16
 
 ### Added
