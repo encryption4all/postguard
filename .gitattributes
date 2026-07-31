@@ -5,3 +5,7 @@
 # clean tree. Keeping the stored bytes is also what makes the oasdiff gate's
 # verdict reproducible off a local checkout.
 pg-pkg/api-description.yaml -text
+
+# cryptify's `mod api_gate_tests` in src/main.rs pins its own gate the same
+# way, with anchors copied verbatim out of its spec. Same reasoning.
+cryptify/api-description.yaml -text

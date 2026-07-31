@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend.dev.Dockerfile
+    container_name: backend-dev
+    depends_on:
+      - mailcrab
+    volumes:
+      - "./src:/app/src"
+      - "./templates:/app/templates"
+      - "./conf/config.dev.toml:/app/config.toml:ro"
+    ports:
+      - "8000:8000"
+    environment:
+      - ROCKET_CONFIG=config.toml
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+    networks: [default]
+
+  mailcrab:
+    image: marlonb/mailcrab:latest
+    container_name: mailcrab-dev
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+    networks: [default]
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    container_name: swagger-ui-dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - "./api-description.yaml:/openapi.yaml:ro"
+    environment:
+      - SWAGGER_JSON=/openapi.yaml
+    networks: [default]

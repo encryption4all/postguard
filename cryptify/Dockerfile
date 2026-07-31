@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: install cargo-chef once ─────────────────────────────────────────
-# 1.96.1 matches cryptify's Dockerfile, and >=1.94 is now a hard floor: sqlx
-# 0.9 declares rust-version 1.94.0, and sqlx 0.9 is what the workspace needs
-# for pg-pkg and cryptify to agree on one libsqlite3-sys.
 FROM rust:1.96.1-slim-trixie AS chef
 RUN apt-get update && apt-get --no-install-recommends install -y libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
@@ -11,15 +8,16 @@ RUN cargo install cargo-chef --locked
 WORKDIR /app
 
 # ── Stage 2: compute the dependency recipe ───────────────────────────────────
+# Build context is the REPO ROOT, not cryptify/: as a workspace member this
+# crate resolves against the root manifest and the root lockfile, and cargo
+# refuses to read a member without its siblings' manifests present. Build it
+# with `docker build -f cryptify/Dockerfile .` from the repo root.
 FROM chef AS planner
-COPY pg-core  ./pg-core
-COPY pg-pkg   ./pg-pkg
-COPY pg-cli   ./pg-cli
-COPY pg-ffi   ./pg-ffi
-COPY pg-wasm  ./pg-wasm
-# A workspace member cargo cannot read is a hard error even for a build that
-# never compiles it: `cargo chef prepare` loads every member's manifest.
-COPY cryptify ./cryptify
+COPY pg-core   ./pg-core
+COPY pg-pkg    ./pg-pkg
+COPY pg-cli    ./pg-cli
+COPY pg-ffi    ./pg-ffi
+COPY cryptify  ./cryptify
 COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -28,35 +26,32 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 ARG CARGO_PROFILE=release
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --profile ${CARGO_PROFILE} --bin pg-pkg --recipe-path recipe.json
+RUN cargo chef cook --profile ${CARGO_PROFILE} --bin cryptify --recipe-path recipe.json
 
 # Copy sources and build the application binary
-COPY pg-core  ./pg-core
-COPY pg-pkg   ./pg-pkg
-COPY pg-cli   ./pg-cli
-COPY pg-ffi   ./pg-ffi
-COPY pg-wasm  ./pg-wasm
-# A workspace member cargo cannot read is a hard error even for a build that
-# never compiles it: `cargo chef prepare` loads every member's manifest.
-COPY cryptify ./cryptify
+COPY pg-core   ./pg-core
+COPY pg-pkg    ./pg-pkg
+COPY pg-cli    ./pg-cli
+COPY pg-ffi    ./pg-ffi
+COPY cryptify  ./cryptify
 COPY Cargo.toml Cargo.lock ./
-RUN cargo build --profile ${CARGO_PROFILE} --bin pg-pkg
+RUN cargo build --profile ${CARGO_PROFILE} --bin cryptify
 
 # ── Stage 4: minimal runtime image ───────────────────────────────────────────
-# Use a Debian-based runtime that provides glibc so the builder's binary can run.
 FROM debian:trixie-slim
 ARG CARGO_PROFILE=release
+ENV ROCKET_CONFIG=config.toml
 RUN groupadd -r nonroot \
-    && useradd -r -g nonroot nonroot
-RUN apt-get update && apt-get --no-install-recommends install -y ca-certificates libssl3 curl \
+    && useradd -r -g nonroot nonroot \
+    && apt-get update \
+    && apt-get --no-install-recommends install -y ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/${CARGO_PROFILE}/pg-pkg /usr/local/bin/pg-pkg
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY --from=builder /app/target/${CARGO_PROFILE}/cryptify /usr/local/bin/cryptify
 RUN mkdir -p /app && chown nonroot:nonroot /app
 WORKDIR /app
 USER nonroot
+RUN mkdir -p /tmp/data
 
-EXPOSE 8087
+EXPOSE 8000
 
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/usr/local/bin/cryptify"]

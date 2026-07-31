@@ -1,6 +1,16 @@
 name: API diff
 #
-# Breaking-change gate on the pg-pkg OpenAPI contract (#249).
+# Breaking-change gate on both OpenAPI contracts (#249, cryptify#196/#202).
+#
+# Two specs, one matrix: pg-pkg/api-description.yaml (versioned /v2 routes)
+# and cryptify/api-description.yaml (unversioned). The matrix is not
+# cosmetic. Both pg-pkg/tests/api_gate.rs and cryptify's `mod
+# api_gate_tests` read this file and require exactly one `fail-on:` and one
+# `include-checks:` line, so that neither can claim a setting the committed
+# job does not use. Two separate oasdiff steps would give two of each and
+# fail both suites; the matrix varies only the spec paths, leaving the two
+# settings written once. Keep it that way: moving `fail-on` into the matrix
+# would remove the literal both tests look for.
 #
 # pg-pkg/api-description.yaml is the pinned v2 HTTP contract (#242), one of the
 # three seams COMPATIBILITY.md guarantees. This job diffs the PR's spec against
@@ -73,8 +83,15 @@ permissions:
 jobs:
 
   breaking-changes:
-    name: API breaking changes (oasdiff)
+    name: API breaking changes (${{ matrix.spec }})
     runs-on: ubuntu-latest
+    strategy:
+      # One spec's verdict must not cancel the other's.
+      fail-fast: false
+      matrix:
+        spec:
+          - pg-pkg/api-description.yaml
+          - cryptify/api-description.yaml
     steps:
       - name: Check out the pull request
         uses: actions/checkout@v6
@@ -94,8 +111,8 @@ jobs:
         # `oasdiff v1.26.1` reproduces what CI decides here.
         uses: oasdiff/oasdiff-action/breaking@0ab8ad204b00d25acc5ae87106281433e288d0c1 # v0.1.10
         with:
-          base: base/pg-pkg/api-description.yaml
-          revision: pg-pkg/api-description.yaml
+          base: base/${{ matrix.spec }}
+          revision: ${{ matrix.spec }}
           fail-on: WARN
           # Both of these rate ERR but are opt-in, so they do not run unless
           # named: a changed non-success status (401 -> 403) and an enum value

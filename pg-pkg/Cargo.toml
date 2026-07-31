@@ -20,7 +20,7 @@ actix-web = "4.1.0"
 actix-http = "3"
 actix-web-httpauth = "0.8.0"
 async-trait = "0.1"
-sqlx = { version = "0.8", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
+sqlx = { version = "0.9", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
 arrayref = "0.3.5"
 futures-util = "0.3"
 irma = { package = "irmars", version = "0.2.2" }

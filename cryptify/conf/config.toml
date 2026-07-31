@@ -1,0 +1,18 @@
+[global]
+server_url = "https://postguard.nl/"
+address = "0.0.0.0"
+data_dir = "/tmp/data"
+email_from = "noreply@postguard.nl"
+smtp_url = "mailcrab"
+smtp_port = 1025
+# smtp_username = "user"
+# smtp_password = "pw"
+# Browser callers that consume the upload/download API cross-origin.
+# `postguard.(eu|nl)` is the website; `addin.postguard.eu` is the Outlook
+# add-in (prod); `localhost:3000` is the Office add-in dev server.
+allowed_origins = "^https://(postguard\\.(eu|nl)|addin\\.postguard\\.eu|localhost:3000)$"
+pkg_url = "https://pkg.postguard.eu/"
+# Bearer token required to scrape /metrics. Prefer injecting it as a secret
+# via the ROCKET_METRICS_TOKEN env var rather than committing it here. When
+# unset, /metrics is publicly accessible (a startup warning is logged).
+# metrics_token = "change-me"
