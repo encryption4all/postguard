@@ -7,10 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-07-31
+
+First release since the crate moved into the postguard workspace
+(encryption4all/postguard#255), covering everything merged in the cryptify repo
+after v0.1.27 (2026-05-16).
+
 ### Security
 
 - require a validated API key on `GET /usage` and reject unauthenticated callers with 401 (GHSA-5rhx-xgvv-h78h)
 - compare `cryptify_token` values in constant time, matching the recovery-token path
+- bump lettre 0.11.21 -> 0.11.22 (RUSTSEC-2026-0141)
+
+### Added
+
+- expose Prometheus `/metrics` endpoint for usage dashboards
+- *(metrics)* require a bearer token on `/metrics` when configured
+- *(metrics)* pre-seed known channels at zero on startup
+- *(metrics)* capture `X-POSTGUARD-CLIENT-VERSION` client identity
+- *(email)* staging-only `/staging/preview/<uuid>` + shared render API
+- *(email)* replace unicode checkmark with inline PNG image
+- *(email)* remove circle around signer-verified checkmark
+- add `GET /email-template` endpoint keyed on API key
+- persist rolling-quota usage to SQLite (`usage_db`)
+- configurable email attribute type for the finalize sender check
+
+### Fixed
+
+- *(email)* address encryption4all/postguard#197 deliverability + show disclosed signer name
+- *(email)* larger, selectable download-link code block in recipient email
+- *(cors)* allow Office add-in origins (addin.postguard.eu + localhost:3000) and DELETE method
+- *(cors)* allow `X-Cryptify-Source` in browser preflights
+- return generic body from 5xx responses, log detail server-side
+- retry the startup verifying-key fetch instead of panicking
+
+### Other
+
+- add the oasdiff breaking-change gate, and pin its severity settings with a test
+- true up `api-description.yaml` with the mounted routes
+- add semantic PR title check workflow
+- replace `pkg_url` with https://pkg.postguard.eu/
+- bump pg-core 0.6.0 -> 0.6.1
+- remove unused `qrcode`, `strum`, `strum_macros` and `irma` dependencies
+- update dependencies
 
 ## [0.1.27](https://github.com/encryption4all/cryptify/compare/v0.1.26...v0.1.27) - 2026-05-16
 

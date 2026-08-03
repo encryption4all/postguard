@@ -1,6 +1,6 @@
 [package]
 name = "cryptify"
-version = "0.1.27"
+version = "0.1.28"
 authors = ["David Venhoek <david@tweedegolf.com>"]
 edition = "2021"
 repository = "https://github.com/encryption4all/cryptify"
