@@ -15,6 +15,12 @@ on:
       - main
   pull_request:
 
+# The cryptify image keeps the name the cryptify repo publishes today, so no
+# deployment has to be repointed. Changing this one line is the whole cost of
+# publishing under a different name instead.
+env:
+  CRYPTIFY_IMAGE: ghcr.io/${{ github.repository_owner }}/cryptify
+
 jobs:
 
   # ---------------------------------------------------------------------------
@@ -34,6 +40,7 @@ jobs:
       pg_pkg_version: ${{ steps.parse.outputs.pg_pkg_version }}
       pg_core_version: ${{ steps.parse.outputs.pg_core_version }}
       pg_ffi_version: ${{ steps.parse.outputs.pg_ffi_version }}
+      cryptify_version: ${{ steps.parse.outputs.cryptify_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -60,6 +67,8 @@ jobs:
           echo "pg_core_version=$PG_CORE_VERSION" >> "$GITHUB_OUTPUT"
           PG_FFI_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "pg-ffi") | .version // empty')
           echo "pg_ffi_version=$PG_FFI_VERSION" >> "$GITHUB_OUTPUT"
+          CRYPTIFY_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "cryptify") | .version // empty')
+          echo "cryptify_version=$CRYPTIFY_VERSION" >> "$GITHUB_OUTPUT"
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:
@@ -232,6 +241,162 @@ jobs:
   # ---------------------------------------------------------------------------
 
   # Build pg-ffi native libraries and upload as GitHub release assets.
+  # ---------------------------------------------------------------------------
+  # Docker: build, scan, and publish multi-arch image for cryptify
+  #
+  # Mirrors the pg-pkg jobs above rather than sharing them: the two images have
+  # different Dockerfiles, different names and independent version outputs, and
+  # a matrix over both would have to carry all three as matrix values, which
+  # buys less than it costs in readability.
+  #
+  # IMAGE NAME: this publishes to the SAME name the cryptify repo publishes to
+  # today, so nothing that pulls the image has to change. That requires granting
+  # this repository push access to the existing `cryptify` GHCR package
+  # (package settings -> Manage Actions access -> add encryption4all/postguard
+  # with the Write role). Until that is done these jobs cannot push, so all
+  # three are gated on the repo variable PUBLISH_CRYPTIFY_IMAGE. The
+  # alternative, publishing under a new name, moves the problem to every
+  # deployment that pulls it.
+  # ---------------------------------------------------------------------------
+
+  build-cryptify:
+    name: Build cryptify (${{ matrix.name }})
+    # Off until the GHCR package grants this repo push access. Set the repo
+    # variable PUBLISH_CRYPTIFY_IMAGE to `true` to turn the three jobs on; with
+    # it unset they skip, so merging this changes nothing that runs today.
+    if: vars.PUBLISH_CRYPTIFY_IMAGE == 'true'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            name: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            name: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          # Repo root, not cryptify/: the crate is a workspace member and cannot
+          # be planned or built without the root manifest and its siblings.
+          context: .
+          file: cryptify/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: CARGO_PROFILE=edge
+          outputs: type=image,name=${{ env.CRYPTIFY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=cryptify-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=cryptify-${{ matrix.name }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: cryptify-digest-${{ matrix.name }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  scan-cryptify:
+    name: Scan cryptify image
+    needs: build-cryptify
+    if: vars.PUBLISH_CRYPTIFY_IMAGE == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - name: Download amd64 digest
+        uses: actions/download-artifact@v8
+        with:
+          name: cryptify-digest-amd64
+          path: /tmp/digests
+      - name: Resolve image reference
+        id: ref
+        run: |
+          DIGEST=$(ls /tmp/digests | head -1)
+          echo "image=${{ env.CRYPTIFY_IMAGE }}@sha256:${DIGEST}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan image
+        uses: anchore/scan-action@v6
+        id: scan
+        with:
+          image: ${{ steps.ref.outputs.image }}
+          only-fixed: true
+          fail-build: true
+          severity-cutoff: critical
+          output-format: sarif
+      - name: Upload Anchore scan SARIF report
+        uses: github/codeql-action/upload-sarif@v4
+        if: ${{ !cancelled() }}
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: cryptify
+
+  finalize-cryptify:
+    name: Finalize cryptify manifest
+    needs: [build-cryptify, scan-cryptify, release-plz-release]
+    if: always() && vars.PUBLISH_CRYPTIFY_IMAGE == 'true' && needs.build-cryptify.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: cryptify-digest-*
+          merge-multiple: true
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.CRYPTIFY_IMAGE }}
+          tags: |
+            type=edge,branch=main
+            type=ref,event=pr
+            type=raw,value=${{ needs.release-plz-release.outputs.cryptify_version }},enable=${{ needs.release-plz-release.outputs.cryptify_version != '' }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and push manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.CRYPTIFY_IMAGE }}@sha256:%s ' *)
+
   build-ffi:
     name: Build pg-ffi (${{ matrix.name }})
     needs: release-plz-release
