@@ -381,6 +381,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [wire-compat-rust, wire-compat-js]
     if: ${{ !cancelled() }}
+    permissions:
+      contents: read
     steps:
       - name: Require both halves to have passed
         shell: bash
