@@ -364,3 +364,29 @@ jobs:
         env:
           PG_COMPAT_ARTIFACTS: ${{ runner.temp }}/wire-compat-artifacts
         run: npm test
+
+  # ---------------------------------------------------------------------------
+  # Single required check consolidating the two halves above (#262). Branch
+  # protection today lists "Wire compat (published pg-core)" and "Wire compat
+  # (published pg-wasm/pg-js)" separately; once this job is green, repointing
+  # branch protection at "Wire compat" instead is an admin action left for a
+  # maintainer.
+  #
+  # `if: !cancelled()` for the same reason as wire-compat-js above: this job
+  # must still run and report when an upstream half failed, or the required
+  # check sits pending forever instead of turning red.
+  # ---------------------------------------------------------------------------
+  wire-compat:
+    name: Wire compat
+    runs-on: ubuntu-latest
+    needs: [wire-compat-rust, wire-compat-js]
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Require both halves to have passed
+        shell: bash
+        run: |
+          echo "wire-compat-rust: ${{ needs.wire-compat-rust.result }}"
+          echo "wire-compat-js: ${{ needs.wire-compat-js.result }}"
+          if [[ "${{ needs.wire-compat-rust.result }}" != "success" || "${{ needs.wire-compat-js.result }}" != "success" ]]; then
+            exit 1
+          fi
