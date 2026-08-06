@@ -16,6 +16,7 @@ publish = false
 # that must keep reading what HEAD seals. Adding a version is this line plus one
 # `reader!` invocation in src/lib.rs.
 pg-core-0-6-1 = { package = "pg-core", version = "=0.6.1", features = ["stream"] }
+pg-core-0-5-10 = { package = "pg-core", version = "=0.5.10", features = ["stream"] }
 
 futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }

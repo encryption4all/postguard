@@ -92,13 +92,13 @@ exact release rather than building against the latest one
 
 The window above resolved to concrete versions: the highest published patch of
 each line in the window. This is the list the compat gates install and run as
-readers, but they do not yet cover it evenly: `wire-compat-js` enforces the npm
-rows (`pg-compat-js/test/manifest.test.mjs` machine-reads the fenced block
-below, so a drifted npm row goes red — keep that block as rows, not prose),
-while `wire-compat-rust` covers only the one crates.io version pinned in
-`pg-compat/Cargo.toml`. Nothing reads the crates.io rows themselves, so a row
-there can drift from that manifest unnoticed; see the coverage note below the
-block.
+readers. `wire-compat-js` enforces the npm rows
+(`pg-compat-js/test/manifest.test.mjs` machine-reads the fenced block below,
+so a drifted npm row goes red), and `wire-compat-rust` now enforces both
+crates.io versions pinned in `pg-compat/Cargo.toml`
+(`pg-compat/tests/support_window.rs` reads the same block and fails when it
+drifts from `pg-compat`'s `readers()`) — keep that block as rows, not prose,
+in either direction.
 
 ```
 # <registry> <package> <versions...>
@@ -134,12 +134,13 @@ npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
 `test/manifest.test.mjs` parses the block above and fails when the two lists
 drift, so keep that block as rows and not as prose.
 
-Known coverage gaps in the rows above, tracked in [#268]: on the `crates.io`
-line only `0.6.1` is pinned in `pg-compat/Cargo.toml`, so `0.5.10` is declared
-here and opened by no gate, and nothing compares the crates.io rows against that
-manifest the way the npm rows are compared against `readers.mjs`. The `nuget`
-row has no gate at all — `E4A.PostGuard` is a producer-only SDK, so a reader
-gate would need a decrypt path it does not have.
+Known coverage gap in the rows above, tracked in [#268]: the `nuget` row has no
+gate. `E4A.PostGuard` is a producer-only SDK (seal via pg-ffi, no unseal path),
+so a reader gate needs a decrypt capability the SDK does not have. Decided:
+leave it declared-but-ungated here rather than build that capability into this
+gate; the .NET seal direction is instead covered by promoting
+[postguard-e2e#21]'s version sweep to CI with decrypt legs, which already owns
+driving published NuGet versions against a target server.
 
 ## Deprecation
 

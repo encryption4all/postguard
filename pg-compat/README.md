@@ -50,6 +50,11 @@ lines:
 Each version is a separate crate with separate types, which is why the check
 body is a macro instantiated per version rather than a generic function.
 
+`tests/support_window.rs` parses the `crates.io` row(s) out of
+`COMPATIBILITY.md`'s `Reader list` block and asserts they match `readers()`, so
+a version added to one and not the other goes red instead of drifting silently
+([#268]). Update the document's fenced block in the same change.
+
 ## Artifact layout
 
 The sealer writes a flat directory. Nothing in it is committed and nothing is
@@ -195,3 +200,4 @@ once per reader rather than once per case.
 [#252]: https://github.com/encryption4all/postguard/issues/252
 [#260]: https://github.com/encryption4all/postguard/issues/260
 [#261]: https://github.com/encryption4all/postguard/issues/261
+[#268]: https://github.com/encryption4all/postguard/issues/268

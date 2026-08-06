@@ -22,6 +22,8 @@ use std::process::{Command, ExitStatus, Output};
 
 use serde::Deserialize;
 
+pub mod support_window;
+
 /// Manifest schema this reader understands. A newer set is an error, not a
 /// skip: silently reading nothing is the one failure mode a gate must not
 /// have.
@@ -371,14 +373,22 @@ macro_rules! reader {
 }
 
 reader!(v0_6_1, pg_core_0_6_1, "0.6.1");
+reader!(v0_5_10, pg_core_0_5_10, "0.5.10");
 
 /// Every published reader in the support window.
 pub fn readers() -> Vec<Reader> {
-    vec![Reader {
-        version: v0_6_1::VERSION,
-        wire_version: v0_6_1::WIRE_VERSION,
-        verify_case: v0_6_1::verify_case,
-    }]
+    vec![
+        Reader {
+            version: v0_6_1::VERSION,
+            wire_version: v0_6_1::WIRE_VERSION,
+            verify_case: v0_6_1::verify_case,
+        },
+        Reader {
+            version: v0_5_10::VERSION,
+            wire_version: v0_5_10::WIRE_VERSION,
+            verify_case: v0_5_10::verify_case,
+        },
+    ]
 }
 
 /// The reader for one published version, by the name it has on crates.io.
