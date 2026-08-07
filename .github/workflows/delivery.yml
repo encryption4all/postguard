@@ -250,21 +250,16 @@ jobs:
   # buys less than it costs in readability.
   #
   # IMAGE NAME: this publishes to the SAME name the cryptify repo publishes to
-  # today, so nothing that pulls the image has to change. That requires granting
+  # today, so nothing that pulls the image has to change. That required granting
   # this repository push access to the existing `cryptify` GHCR package
   # (package settings -> Manage Actions access -> add encryption4all/postguard
-  # with the Write role). Until that is done these jobs cannot push, so all
-  # three are gated on the repo variable PUBLISH_CRYPTIFY_IMAGE. The
-  # alternative, publishing under a new name, moves the problem to every
+  # with the Write role), done 2026-08-07 (postguard#293). The alternative,
+  # publishing under a new name, would have moved the problem to every
   # deployment that pulls it.
   # ---------------------------------------------------------------------------
 
   build-cryptify:
     name: Build cryptify (${{ matrix.name }})
-    # Off until the GHCR package grants this repo push access. Set the repo
-    # variable PUBLISH_CRYPTIFY_IMAGE to `true` to turn the three jobs on; with
-    # it unset they skip, so merging this changes nothing that runs today.
-    if: vars.PUBLISH_CRYPTIFY_IMAGE == 'true'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -319,7 +314,6 @@ jobs:
   scan-cryptify:
     name: Scan cryptify image
     needs: build-cryptify
-    if: vars.PUBLISH_CRYPTIFY_IMAGE == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -361,7 +355,7 @@ jobs:
   finalize-cryptify:
     name: Finalize cryptify manifest
     needs: [build-cryptify, scan-cryptify, release-plz-release]
-    if: always() && vars.PUBLISH_CRYPTIFY_IMAGE == 'true' && needs.build-cryptify.result == 'success'
+    if: always() && needs.build-cryptify.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
