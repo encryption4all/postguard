@@ -383,7 +383,7 @@ mod dashboard_tests {
 
     /// Label matcher every panel must carry, so that every panel is scoped to
     /// the environments selected in the `env` variable. Note that this only
-    /// filters: panels 2, 4 and 6 still aggregate `env` away, so with All
+    /// filters: panels 2 through 6 all aggregate `env` away, so with All
     /// selected they report staging and production as one total.
     const ENV_SELECTOR: &str = "env=~\"$env\"";
 
