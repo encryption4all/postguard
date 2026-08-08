@@ -208,8 +208,8 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "cryptify_storage_bytes{env=~\"$env\"}",
-          "instant": true,
+          "expr": "max by (env) (cryptify_storage_bytes{env=~\"$env\"})",
+          "instant": false,
           "legendFormat": "{{env}}"
         }
       ]
@@ -236,7 +236,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "cryptify_storage_bytes{env=~\"$env\"}",
+          "expr": "max by (env) (cryptify_storage_bytes{env=~\"$env\"})",
           "legendFormat": "{{env}}"
         }
       ]
@@ -263,7 +263,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "cryptify_active_files{env=~\"$env\"}",
+          "expr": "max by (env) (cryptify_active_files{env=~\"$env\"})",
           "legendFormat": "{{env}}"
         }
       ]

@@ -381,8 +381,10 @@ mod dashboard_tests {
 
     const DASHBOARD: &str = include_str!("../docs/grafana/cryptify-usage.json");
 
-    /// Label matcher every panel must carry so staging and production numbers
-    /// never end up summed into one series.
+    /// Label matcher every panel must carry, so that every panel is scoped to
+    /// the environments selected in the `env` variable. Note that this only
+    /// filters: panels 2, 4 and 6 still aggregate `env` away, so with All
+    /// selected they report staging and production as one total.
     const ENV_SELECTOR: &str = "env=~\"$env\"";
 
     fn dashboard() -> Value {
@@ -468,20 +470,33 @@ mod dashboard_tests {
         found
     }
 
-    fn referenced_metrics() -> BTreeSet<String> {
+    /// Metrics named by an actual panel query. The "everything exported is on
+    /// the dashboard" direction must use this rather than `referenced_metrics`:
+    /// a metric mentioned only in a template variable's `query` is on no graph,
+    /// so it must not count as covered.
+    fn panel_metrics() -> BTreeSet<String> {
         all_exprs()
             .iter()
-            .chain(variable_queries().iter())
             .flat_map(|q| cryptify_idents(q))
+            .collect()
+    }
+
+    /// Every `cryptify_*` name the dashboard mentions anywhere, panels and
+    /// template variables alike. Used for the other direction, where a variable
+    /// querying a metric the exporter dropped is just as broken.
+    fn referenced_metrics() -> BTreeSet<String> {
+        panel_metrics()
+            .into_iter()
+            .chain(variable_queries().iter().flat_map(|q| cryptify_idents(q)))
             .collect()
     }
 
     #[test]
     fn every_exported_metric_appears_on_the_dashboard() {
-        let referenced = referenced_metrics();
+        let on_a_panel = panel_metrics();
         for metric in exported_metrics() {
             assert!(
-                referenced.contains(&metric),
+                on_a_panel.contains(&metric),
                 "{metric} is exported but no dashboard panel queries it — \
                  add a panel to cryptify/docs/grafana/cryptify-usage.json"
             );
@@ -505,8 +520,8 @@ mod dashboard_tests {
         for expr in all_exprs() {
             assert!(
                 expr.contains(ENV_SELECTOR),
-                "query is missing the {ENV_SELECTOR} matcher, so it mixes staging \
-                 and production into one number:\n{expr}"
+                "query is missing the {ENV_SELECTOR} matcher, so it ignores the \
+                 environment the dashboard is scoped to:\n{expr}"
             );
         }
     }

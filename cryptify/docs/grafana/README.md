@@ -57,6 +57,13 @@ restricted to the Prometheus segment at the firewall as well.
 Adjust the target hostnames to whatever the two deployments actually resolve to.
 The dashboard does not care about the hostnames, only that `env` is present.
 
+The two gauges carry no labels of their own, so a raw select distinguishes series
+only by `instance` and `job`. The storage and file-count panels therefore go
+through `max by (env)`: with one target per environment it changes nothing, and
+if an environment ever gets a second target sharing the volume it reports the
+volume once instead of twice. Switch those three panels to `sum by (env)` if the
+targets get separate volumes.
+
 ## Importing
 
 Grafana, Dashboards, New, Import, upload `cryptify-usage.json`, pick the
