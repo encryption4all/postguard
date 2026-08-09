@@ -30,6 +30,12 @@
 //!    which is what [`the_required_check_name_still_names_the_aggregator`]
 //!    asserts.
 //!
+//! 3. **The required check stopped being able to fail.** Worse than either, and
+//!    it looks like neither: an aggregator that keeps its name, keeps its
+//!    `needs` and reads neither result reports success however its halves
+//!    ended. `needs` makes results available; only the step that reads them
+//!    turns a red half into a red check.
+//!
 //! This file therefore lives in `pg-core` rather than beside the crate each gate
 //! guards, and specifically not in `pg-compat`: `pg-compat`'s tests run *inside*
 //! `wire-compat-rust`, so a guard living there would be skipped by exactly the
@@ -115,15 +121,32 @@ const PUSH_OVERRIDE: &str = r#""$GITHUB_EVENT_NAME" == "push""#;
 /// so the two halves cannot drift into disagreeing about whether to run.
 const SEALED_OUTPUT: &str = "needs.wire-compat-rust.outputs.sealed == 'success'";
 
+/// The `pull_request` types the gates' verdicts depend on. Only `edited` is not
+/// a default, and it is the load-bearing one: see
+/// [`a_retitled_or_retargeted_pr_still_re_runs_the_gates`].
+const PULL_REQUEST_TYPES: [&str; 4] = ["opened", "synchronize", "reopened", "edited"];
+
 fn workflow_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join(".github/workflows/build.yml")
 }
 
+/// The workflow, with line endings normalised.
+///
+/// `read_to_string` keeps whatever git wrote, and `core.autocrlf=true` is the
+/// Git for Windows default, so on a Windows checkout the `\njobs:\n` anchor
+/// below is looking for bytes the file does not contain. Every reader here is
+/// line-oriented and line endings carry no meaning in YAML, so normalising once
+/// is cheaper and more durable than a `.gitattributes` entry: it holds however
+/// the tree was checked out. (`pg-pkg/api-description.yaml` needs the
+/// `.gitattributes` route because its anchors are multi-line *content*, which
+/// cannot be normalised away without changing what is being matched.)
 fn workflow() -> String {
     let path = workflow_path();
-    fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 /// The body of the top-level job `id`: every line indented past the job's own
@@ -288,6 +311,66 @@ fn the_required_check_name_still_names_the_aggregator() {
         "the job named {REQUIRED_CHECK:?} must run even when an upstream half failed, or a \
          red half leaves the required check pending instead of failing it",
     );
+
+    // `needs` only makes the halves' results *available*. What turns a red half
+    // into a red required check is the step that reads them, and everything
+    // above holds just as well for an aggregator that needs both and reads
+    // neither: same name, same `needs`, same `if:`, green however the halves
+    // ended. That is worse than the #299 rename this test was written for -- a
+    // rename disarms one ruleset, this certifies a failure as a pass.
+    for half in AGGREGATED_HALVES {
+        assert!(
+            aggregator.contains(&format!(r#""${{{{ needs.{half}.result }}}}" != "success""#)),
+            "the job named {REQUIRED_CHECK:?} never reads `{half}`'s result, so it reports \
+             success however that half ended",
+        );
+    }
+    assert!(
+        aggregator.contains("exit 1"),
+        "the job named {REQUIRED_CHECK:?} reads both halves' results and then exits zero \
+         regardless, so the repo's sole required check can never go red",
+    );
+}
+
+/// The `on:` block is wiring too, and every test above reads jobs rather than
+/// triggers.
+///
+/// `edited` is not a default `pull_request` type (the defaults are `opened`,
+/// `synchronize` and `reopened`), and dropping it back to a bare `on:
+/// pull_request:` leaves two verdicts attached to inputs they were not computed
+/// from. Retitling a PR from `feat!:` to `fix(pg-core):` fires only `edited`, so
+/// the semver gate's green -- earned with `release_type=major`, which skips
+/// every lint -- stays on the unchanged head sha, and release-plz then cuts a
+/// patch release of the break. A base retarget fires only `edited` too, so
+/// paths-filter's "nothing relevant changed" survives against a base it never
+/// compared.
+#[test]
+fn a_retitled_or_retargeted_pr_still_re_runs_the_gates() {
+    let workflow = workflow();
+    let triggers = workflow
+        .split_once("\njobs:\n")
+        .expect("no top-level `jobs:`")
+        .0;
+
+    let types: BTreeSet<String> = triggers
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("types:"))
+        .expect("the `pull_request` trigger declares no `types:`")
+        .trim()
+        .trim_matches(['[', ']'].as_slice())
+        .split(',')
+        .map(|kind| kind.trim().to_owned())
+        .collect();
+
+    assert_eq!(
+        types,
+        expected(&PULL_REQUEST_TYPES),
+        "the `pull_request` trigger no longer re-runs on the events these gates' verdicts \
+         depend on. `edited` is the one that is not a default: without it a retitle leaves \
+         the semver gate's verdict attached to the title it was computed from, and a base \
+         retarget leaves paths-filter's attached to the old base",
+    );
 }
 
 /// The seal half: the filter that decides when it runs, the `push` override
@@ -369,6 +452,17 @@ fn the_js_wire_gate_still_opens_the_bytes_the_rust_half_sealed() {
         download.contains(SEALED_OUTPUT),
         "wire-compat-js's download is not gated on `{SEALED_OUTPUT}`, so it no longer keys \
          off the same outcome the seal did and the two halves can drift over whether to run",
+    );
+
+    // `ci`, not `install`: the readers are pinned by pg-compat-js's lockfile, so
+    // a gate that quietly resolved a different reader would still run, still
+    // report, and be measuring a support window COMPATIBILITY.md never declared.
+    // Same silent-narrowing class as a dropped filter path.
+    let install = step_with(&steps, "run: npm ci");
+    assert!(
+        install.contains("working-directory: pg-compat-js"),
+        "wire-compat-js no longer installs the pinned readers with `npm ci` in pg-compat-js, \
+         so the gate measures whatever npm resolves rather than the declared support window",
     );
 
     let open = step_with(&steps, "run: npm test");
