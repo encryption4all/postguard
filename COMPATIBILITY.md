@@ -114,20 +114,23 @@ process below. The npm version of `@e4a/pg-wasm` tracks the released `pg-core`
 version rather than `pg-wasm/Cargo.toml`, so read that pin from npm and not
 from the crate manifest.
 
-Live consumers of this list:
+Live consumers of this list, both in `.github/workflows/build.yml`:
 
-- `wire-compat-rust` in `.github/workflows/build.yml` ([#260]), a required PR
-  check: seals with HEAD and opens with the pinned published `pg-core`
-- `wire-compat-js` in the same file ([#261]): opens the same bytes with the
-  published npm readers
+- `wire-compat-rust` ([#260]): seals with HEAD and opens with the pinned
+  published `pg-core`
+- `wire-compat-js` ([#261]): opens the same bytes with the published npm readers
 
-Planned consumers, each still an open issue:
+Neither is a required check on its own. [#262] replaced the two per-language
+contexts with the single `wire-compat` job, whose display name **`Wire compat`**
+is what both branch protection and the `main: required checks` ruleset pin — so
+that name is load bearing, and `pg-core/tests/ci_wiring.rs` ([#272]) asserts it
+still belongs to the job that aggregates both halves.
 
-- [#251], its remaining tracking work, including making `wire-compat-js`
-  required alongside the Rust half ([#262])
+The envelope tiers have their own gate, [postguard-js#131]. Still planned, each
+an open issue:
+
 - [postguard-e2e#25], the forward-direction fixture job
 - [postguard-e2e#21], the version sweep, to run nightly and pre-deploy
-- [postguard-js#131], the envelope-compat gate
 
 A gate that needs a different set of readers changes this file first. The two
 npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
@@ -158,12 +161,12 @@ driving published NuGet versions against a target server.
 Skipping step 2 is how you break the consumers you cannot see.
 
 [#249]: https://github.com/encryption4all/postguard/issues/249
-[#251]: https://github.com/encryption4all/postguard/issues/251
 [#257]: https://github.com/encryption4all/postguard/issues/257
 [#260]: https://github.com/encryption4all/postguard/issues/260
 [#261]: https://github.com/encryption4all/postguard/issues/261
 [#262]: https://github.com/encryption4all/postguard/issues/262
 [#268]: https://github.com/encryption4all/postguard/issues/268
+[#272]: https://github.com/encryption4all/postguard/issues/272
 [postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
 [postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
 [postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21
