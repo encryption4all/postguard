@@ -115,6 +115,17 @@ jobs:
   # is skipped by a path filter never reports, so a required check would sit
   # pending forever on PRs that do not touch the wire surface. This shape always
   # reports and only does the expensive work when it needs to.
+  #
+  # On `push` the filter is the wrong instrument and is bypassed (#299). It
+  # diffs only the push that triggered it, so a commit that reached `main`
+  # without this gate ever running is never re-checked afterwards -- and the job
+  # still reports green, because "filter said no" and "gate passed" are the same
+  # success. That is not hypothetical: #297 changed seven files under
+  # `pg-compat/**` and merged during the 2026-08-06 Actions outage with no run
+  # at all, and the three `main` runs after it (506144c2, c1682ba7, 1238389b)
+  # each reported `Wire compat: success` with `Seal`/`Open` both skipped. So on
+  # a push the gate always does the real work: whatever is on `main` is what
+  # gets sealed and opened, however it got there.
   # ---------------------------------------------------------------------------
   wire-compat-rust:
     name: Wire compat (published pg-core)
@@ -149,14 +160,28 @@ jobs:
               - 'Cargo.toml'
               - '.github/workflows/build.yml'
 
-      - if: steps.changes.outputs.wire == 'true'
+      # One decision, read by every step below, so the push override cannot be
+      # applied to the seal but forgotten on the open.
+      - name: Decide whether to do the real work
+        id: gate
+        shell: bash
+        env:
+          WIRE_CHANGED: ${{ steps.changes.outputs.wire }}
+        run: |
+          if [[ "$WIRE_CHANGED" == "true" || "$GITHUB_EVENT_NAME" == "push" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.gate.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
       - name: Seal the sample set with HEAD
         id: seal
-        if: steps.changes.outputs.wire == 'true'
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           cargo run --locked -p pg-core --features stream --example seal-samples \
@@ -173,7 +198,7 @@ jobs:
           retention-days: 7
 
       - name: Open it with published pg-core
-        if: steps.changes.outputs.wire == 'true'
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         env:
           PG_COMPAT_ARTIFACTS: ${{ runner.temp }}/wire-compat-artifacts
@@ -366,11 +391,14 @@ jobs:
         run: npm test
 
   # ---------------------------------------------------------------------------
-  # Single required check consolidating the two halves above (#262). Branch
-  # protection today lists "Wire compat (published pg-core)" and "Wire compat
-  # (published pg-wasm/pg-js)" separately; once this job is green, repointing
-  # branch protection at "Wire compat" instead is an admin action left for a
-  # maintainer.
+  # Single required check consolidating the two halves above (#262). The
+  # repoint happened in #296: "Wire compat" is the one required context, and the
+  # two per-language names are no longer required individually. Since #299 it is
+  # also the sole context of the `main: required checks` ruleset, whose
+  # `bypass_actors` is empty -- so unlike classic protection (`enforce_admins`
+  # is still false) this name cannot be merged past with `--admin`. Renaming
+  # this job silently disarms that ruleset; rename the ruleset's context in the
+  # same change.
   #
   # `if: !cancelled()` for the same reason as wire-compat-js above: this job
   # must still run and report when an upstream half failed, or the required
