@@ -69,9 +69,13 @@ envelope tier, tested in both directions.
 The window is the set of published SDK versions kept working against the
 current server and the current wire format.
 
-- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window when the
-  Outlook migration lands ([postguard-outlook-addon#125]) and telemetry shows
-  no `1.x` traffic.
+- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window when
+  telemetry shows no `1.x` traffic. The other half of that condition, the
+  Outlook add-in's v1 → v2 migration, **has landed**: the add-in lives at
+  `apps/outlook-addon` in [postguard-js] on `@e4a/pg-js": "workspace:*"` (2.x)
+  and released as `outlook-addin-v1.0.0`. [postguard-outlook-addon#125] is
+  closed and stayed in that now-archived repo, so treat it as a historical
+  record rather than a tracker.
 - `@e4a/pg-wasm` (npm): every version a supported `pg-js` resolves.
 - `E4A.PostGuard` (NuGet): the last major. `0.x` counts as one line until
   `1.0`.
@@ -167,6 +171,7 @@ Skipping step 2 is how you break the consumers you cannot see.
 [#262]: https://github.com/encryption4all/postguard/issues/262
 [#268]: https://github.com/encryption4all/postguard/issues/268
 [#272]: https://github.com/encryption4all/postguard/issues/272
+[postguard-js]: https://github.com/encryption4all/postguard-js
 [postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
 [postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
 [postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21
