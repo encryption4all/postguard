@@ -27,8 +27,13 @@ use std::path::{Path, PathBuf};
 /// Dockerfiles built with the repo root as their context, so `cargo metadata`
 /// runs against the root manifest and every member has to be present.
 ///
-/// `cryptify/dev.Dockerfile` is deliberately absent: its compose file builds it
-/// with `cryptify/` as the context, and it copies that crate's sources alone.
+/// `cryptify/dev.Dockerfile` is deliberately absent: it copies its own
+/// `Cargo.toml`/`Cargo.lock`/`src` rather than the workspace's members, so its
+/// context is the crate directory. Nothing builds it today either —
+/// `cryptify/docker-compose.dev.yml` still names `backend.dev.Dockerfile`, which
+/// #277 did not carry over, and a workspace member has no `cryptify/Cargo.lock`
+/// for that `COPY` to find. Stale or not, the root-context invariant is not its
+/// invariant.
 const ROOT_CONTEXT_DOCKERFILES: [&str; 3] = ["Dockerfile", "dev.Dockerfile", "cryptify/Dockerfile"];
 
 fn repo_root() -> PathBuf {
@@ -41,11 +46,18 @@ fn repo_root() -> PathBuf {
 /// only, so the `exclude` list (`pg-wasm`, `pg-compat`) stays out: those are not
 /// workspace members and `cargo metadata` does not read their manifests.
 fn workspace_members(manifest: &str) -> Vec<String> {
-    let after_key = manifest
-        .split_once("members")
-        .map(|(_, rest)| rest)
-        .expect("root Cargo.toml has a `members` key");
-    let array = after_key
+    // Match the key at the start of a line. `default-members` also ends in
+    // "members", and it lists a subset, so reading that array instead would
+    // quietly shrink what this test checks rather than fail it.
+    let from_key: String = manifest
+        .split_inclusive('\n')
+        .skip_while(|line| !line.trim_start().starts_with("members"))
+        .collect();
+    assert!(
+        !from_key.is_empty(),
+        "root Cargo.toml has no `members` key at the start of a line"
+    );
+    let array = from_key
         .split_once('[')
         .and_then(|(_, rest)| rest.split_once(']'))
         .map(|(inner, _)| inner)
@@ -105,6 +117,29 @@ fn every_root_context_dockerfile_copies_every_workspace_member() {
     }
 }
 
+/// Every `*Dockerfile` in the tree, relative to the repo root.
+///
+/// The whole tree, not the two directories that hold one today: a Dockerfile
+/// added under any crate has to reach the assertion below, or it goes uncovered
+/// exactly as `dev.Dockerfile` did. `target` and `node_modules` hold build
+/// output and dot-directories hold VCS and tooling state, so none of them are
+/// sources this repo builds an image from.
+fn dockerfiles_in(dir: &Path, prefix: &Path, found: &mut Vec<String>) {
+    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = prefix.join(&name);
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+            dockerfiles_in(&entry.path(), &path, found);
+        } else if name.ends_with("Dockerfile") {
+            found.push(path.to_string_lossy().into_owned());
+        }
+    }
+}
+
 #[test]
 fn the_dockerfile_list_is_the_set_of_root_context_dockerfiles() {
     // A new Dockerfile built from the repo root has to be added to
@@ -115,15 +150,7 @@ fn the_dockerfile_list_is_the_set_of_root_context_dockerfiles() {
 
     let root = repo_root();
     let mut found: Vec<String> = Vec::new();
-    for dir in ["", "cryptify"] {
-        let entries = fs::read_dir(root.join(dir)).expect("read directory");
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.ends_with("Dockerfile") {
-                found.push(Path::new(dir).join(name).to_string_lossy().into_owned());
-            }
-        }
-    }
+    dockerfiles_in(&root, Path::new(""), &mut found);
     found.sort();
 
     let mut known: Vec<String> = ROOT_CONTEXT_DOCKERFILES
@@ -164,6 +191,16 @@ fn members_parses_the_members_key_and_not_exclude() {
                     exclude = [\"pg-wasm\", \"pg-compat\"]\n";
     assert_eq!(
         workspace_members(manifest),
+        ["pg-core", "pg-cli", "cryptify"]
+    );
+
+    // `default-members` ends in "members" and lists a subset, so a substring
+    // match would read it instead and check fewer crates without saying so.
+    let with_default = "[workspace]\n\
+                        default-members = [\"pg-pkg\"]\n\
+                        members = [\"pg-core\", \"pg-cli\", \"cryptify\"]\n";
+    assert_eq!(
+        workspace_members(with_default),
         ["pg-core", "pg-cli", "cryptify"]
     );
 }
