@@ -788,6 +788,12 @@ async fn upload_chunk(
         response_token: shasum.clone(),
     });
 
+    // Write the advanced chain through to SQLite before the response leaves:
+    // the client treats the token it gets back as committed, so the durable
+    // row must not lag behind it. A database failure is logged, not
+    // propagated — the chunk is already on disk and in memory.
+    store.persist_session(uuid, &state);
+
     drop(state);
     store.touch(uuid);
 
@@ -1006,6 +1012,11 @@ async fn upload_finalize(
 
     state.sender = sender.clone();
     state.sender_attributes = sender_attributes;
+
+    // Persist the finalize transition (the sender is only known now) before
+    // the notification email goes out, so the durable row is never behind the
+    // side effects the client's request produced.
+    store.persist_session(uuid, &state);
 
     send_email(config, &state, uuid).await.map_err(|e| {
         log::error!("could not send notification email: {}", e);
@@ -3107,6 +3118,175 @@ mod integration {
             .dispatch()
             .await
             .status()
+    }
+
+    /// Boot Rocket through the same [`build_rocket`] seam as [`test_client`],
+    /// but with `usage_db` pointed at a SQLite file inside the per-test
+    /// `data_dir` — that key names cryptify's whole state database, so setting
+    /// it is what turns upload-session persistence on. Returns the database
+    /// path so a test can read the rows back with plain SQL, independent of
+    /// the code that wrote them.
+    async fn test_client_with_state_db(
+        setup: &TestSetup,
+    ) -> (Client, std::path::PathBuf, std::path::PathBuf) {
+        let (figment, dir) = test_figment();
+        let db_path = dir.join("state.db");
+        let figment = figment.merge(("usage_db", db_path.to_string_lossy().to_string()));
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        let client = Client::tracked(build_rocket(figment, vk))
+            .await
+            .expect("valid rocket");
+        (client, dir, db_path)
+    }
+
+    /// The columns an upload session's durable row must show after a
+    /// transition, read straight out of SQLite.
+    struct SessionRow {
+        uploaded: i64,
+        cryptify_token: String,
+        prev_token: Option<String>,
+        prev_uploaded: Option<i64>,
+        recovery_token_hash: String,
+        api_key_tenant: Option<String>,
+        sender: Option<String>,
+        created_at: i64,
+        last_active_at: i64,
+    }
+
+    fn read_session_row(db_path: &std::path::Path, uuid: &str) -> Option<SessionRow> {
+        let conn = rusqlite::Connection::open(db_path).expect("open state database");
+        conn.query_row(
+            "SELECT uploaded, cryptify_token, prev_token, prev_uploaded,
+                    recovery_token_hash, api_key_tenant, sender, created_at, last_active_at
+             FROM upload_sessions WHERE uuid = ?1",
+            rusqlite::params![uuid],
+            |row| {
+                Ok(SessionRow {
+                    uploaded: row.get(0)?,
+                    cryptify_token: row.get(1)?,
+                    prev_token: row.get(2)?,
+                    prev_uploaded: row.get(3)?,
+                    recovery_token_hash: row.get(4)?,
+                    api_key_tenant: row.get(5)?,
+                    sender: row.get(6)?,
+                    created_at: row.get(7)?,
+                    last_active_at: row.get(8)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    /// The done bar for postguard#302: after real HTTP init and chunk
+    /// requests, the session is on disk in SQLite with the token the client
+    /// was handed. Driven through the router, so it also proves the
+    /// write-through actually runs inside the handlers — not just that
+    /// `Store` can write a row when called directly.
+    #[rocket::async_test]
+    async fn session_rows_are_visible_in_sqlite_after_init_and_chunk() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir, db_path) = test_client_with_state_db(&setup).await;
+
+        let (uuid, init_token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+
+        let row = read_session_row(&db_path, &uuid).expect("init must persist a session row");
+        assert_eq!(row.uploaded, 0);
+        assert_eq!(
+            row.cryptify_token, init_token,
+            "the persisted token must be the one the client was told to use next"
+        );
+        assert_eq!(row.prev_token, None, "no chunk committed yet");
+        assert_eq!(row.prev_uploaded, None);
+        assert_eq!(row.sender, None, "sender is only known at finalize");
+        assert_eq!(
+            row.api_key_tenant, None,
+            "this request presented no API key"
+        );
+        assert_eq!(
+            row.recovery_token_hash.len(),
+            64,
+            "recovery token is stored as a hex SHA-256, never in the clear"
+        );
+        assert_eq!(row.created_at, row.last_active_at);
+
+        let chunk = b"a chunk of sealed-looking bytes";
+        let (chunk_status, next_token) = do_chunk(&client, &uuid, &init_token, chunk, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+
+        let row = read_session_row(&db_path, &uuid).expect("chunk must persist the session row");
+        assert_eq!(row.uploaded, chunk.len() as i64);
+        assert_eq!(
+            row.cryptify_token, next_token,
+            "the row must carry the advanced token the response returned"
+        );
+        assert_eq!(
+            row.prev_token.as_deref(),
+            Some(init_token.as_str()),
+            "the replay record must persist so a restart can still accept a retry"
+        );
+        assert_eq!(row.prev_uploaded, Some(0));
+        assert!(row.last_active_at >= row.created_at);
+
+        // The client-visible surface is unchanged: nothing about persistence
+        // is exposed on the responses, and the flow still completes.
+        assert!(!next_token.is_empty());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Finalize is the third transition, and the only one that learns the
+    /// sender. Runs the whole flow against a real sealed payload.
+    #[rocket::async_test]
+    async fn finalize_persists_the_sender_to_sqlite() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"hello persistence").await;
+        let (client, dir, db_path) = test_client_with_state_db(&setup).await;
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, sealed.len() as u64).await,
+            Status::Ok
+        );
+
+        let row = read_session_row(&db_path, &uuid).expect("row after finalize");
+        assert_eq!(
+            row.sender.as_deref(),
+            Some(SENDER_EMAIL),
+            "finalize must persist the sender it unsealed"
+        );
+        assert_eq!(row.uploaded, sealed.len() as i64);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Persistence must not change any client-visible behaviour, so the same
+    /// happy path has to pass with the state database switched on.
+    #[rocket::async_test]
+    async fn upload_happy_path_is_unchanged_with_persistence_enabled() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"hello persistent integration test").await;
+        let (client, dir, _db_path) = test_client_with_state_db(&setup).await;
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, sealed.len() as u64).await,
+            Status::Ok
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[rocket::async_test]
