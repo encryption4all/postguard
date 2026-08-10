@@ -46,7 +46,11 @@ RUN cargo chef cook --bin cryptify --recipe-path recipe.json
 # stage starts from its parent image's filesystem, so `cargo watch` here loads
 # every member's manifest just as `cargo chef prepare` did. A consumer that
 # edits code live bind-mounts over these copies, under /app/cryptify now rather
-# than /app; without a mount the image still runs on its own.
+# than /app. What that buys is a mount-independent *build*, not a
+# mount-independent run: nothing here sets ROCKET_CONFIG and there is no
+# Rocket.toml at /app, so the conf/*.toml this copies in is never read and an
+# unmounted container panics with
+# `Missing configuration: MissingField("server_url")`.
 COPY pg-core   ./pg-core
 COPY pg-pkg    ./pg-pkg
 COPY pg-cli    ./pg-cli
@@ -54,8 +58,11 @@ COPY pg-ffi    ./pg-ffi
 COPY cryptify  ./cryptify
 COPY Cargo.toml Cargo.lock ./
 
-# Create data directory
-RUN mkdir -p /tmp/data
+# Data directories: /tmp/data is `data_dir`, /app/data holds `usage_db`
+# (conf/config.dev.toml). Nothing else creates the latter, and StateDb::open
+# does not create parents, so without it the store panics with
+# `Failed to open state database at /app/data/usage.db`.
+RUN mkdir -p /tmp/data /app/data
 
 EXPOSE 8000
 
