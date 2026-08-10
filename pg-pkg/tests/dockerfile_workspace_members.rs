@@ -77,19 +77,81 @@ fn workspace_members(manifest: &str) -> Vec<String> {
 }
 
 /// Whether `dockerfile` has a `COPY <member> ...` instruction.
-///
-/// `COPY --from=<stage>` lines are skipped: they move build artifacts between
-/// stages and never carry a member's sources into the planner.
 fn copies_member(dockerfile: &str, member: &str) -> bool {
     dockerfile.lines().any(|line| {
         let mut words = line.split_whitespace();
         if words.next() != Some("COPY") {
             return false;
         }
-        words
-            .next()
-            .is_some_and(|source| !source.starts_with("--") && source == member)
+        // `--from=<stage>` moves build artifacts between stages and never
+        // carries a member's sources, so such a line is not a source copy.
+        // Other leading flags (`--chown=`, `--link`) do precede a real source
+        // and have to be skipped, or a legitimate
+        // `COPY --chown=1000:1000 pg-core ./pg-core` reads as a missing member.
+        let mut source = None;
+        for word in words {
+            if word.starts_with("--from=") {
+                return false;
+            }
+            if !word.starts_with("--") {
+                source = Some(word);
+                break;
+            }
+        }
+        source == Some(member)
     })
+}
+
+/// The stages of a Dockerfile: the `FROM` line that opens each one, and the
+/// lines that follow it up to the next `FROM`.
+///
+/// Lines before the first `FROM` belong to no stage. Only `ARG` and comments
+/// may appear there, so no `COPY` is lost.
+fn stages(dockerfile: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in dockerfile.lines() {
+        if line.trim_start().starts_with("FROM ") {
+            out.push((line.trim().to_string(), String::new()));
+        }
+        if let Some((_, body)) = out.last_mut() {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    out
+}
+
+/// The stages of `dockerfile` that copy some workspace members but not all, as
+/// (`FROM` line, missing members).
+///
+/// The invariant is per stage, not per file: each stage starts from its parent
+/// image's filesystem, so `cargo chef prepare` in the planner and `cargo build`
+/// in the builder each need every member present in their own stage. Matching
+/// the file as one blob lets a `COPY cryptify` in the planner cover for a
+/// missing one in the builder — which is exactly #277's mistake, one stage
+/// along.
+///
+/// A stage that copies *no* member is not a source-copying stage: `Dockerfile`'s
+/// runtime stage copies only the built binary and `entrypoint.sh`. A stage that
+/// copies *some* must copy all.
+fn stages_missing_members<'a>(
+    dockerfile: &str,
+    members: &'a [String],
+) -> Vec<(String, Vec<&'a str>)> {
+    stages(dockerfile)
+        .into_iter()
+        .filter_map(|(from, body)| {
+            let missing: Vec<&str> = members
+                .iter()
+                .map(String::as_str)
+                .filter(|member| !copies_member(&body, member))
+                .collect();
+            if missing.is_empty() || missing.len() == members.len() {
+                return None;
+            }
+            Some((from, missing))
+        })
+        .collect()
 }
 
 #[test]
@@ -102,28 +164,31 @@ fn every_root_context_dockerfile_copies_every_workspace_member() {
         let dockerfile =
             fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
 
-        let missing: Vec<&String> = members
-            .iter()
-            .filter(|member| !copies_member(&dockerfile, member))
-            .collect();
+        let incomplete = stages_missing_members(&dockerfile, &members);
 
         assert!(
-            missing.is_empty(),
-            "{path} does not copy workspace member(s) {missing:?}. \
-             `cargo chef prepare` loads every member's manifest, so this image \
-             fails to build with `failed to load manifest for workspace member`. \
-             Add a `COPY <member> ./<member>` line to each stage that copies sources."
+            incomplete.is_empty(),
+            "{path} has stage(s) that copy some workspace members but not all: \
+             {incomplete:?}. Each stage starts from its parent image's filesystem, \
+             and `cargo chef prepare` and `cargo build` both load every member's \
+             manifest, so such a stage fails with `failed to load manifest for \
+             workspace member`. Add a `COPY <member> ./<member>` line to every \
+             stage that copies sources."
         );
     }
 }
 
-/// Every `*Dockerfile` in the tree, relative to the repo root.
+/// Every Dockerfile in the tree, relative to the repo root.
 ///
 /// The whole tree, not the two directories that hold one today: a Dockerfile
 /// added under any crate has to reach the assertion below, or it goes uncovered
 /// exactly as `dev.Dockerfile` did. `target` and `node_modules` hold build
 /// output and dot-directories hold VCS and tooling state, so none of them are
 /// sources this repo builds an image from.
+///
+/// Both naming conventions count. This repo writes `<prefix>.Dockerfile`, but
+/// `Dockerfile.<suffix>` is just as common, and one added under that spelling
+/// would be invisible here. `.dockerignore` is neither, so it stays ignored.
 fn dockerfiles_in(dir: &Path, prefix: &Path, found: &mut Vec<String>) {
     let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
     for entry in entries.flatten() {
@@ -134,7 +199,7 @@ fn dockerfiles_in(dir: &Path, prefix: &Path, found: &mut Vec<String>) {
                 continue;
             }
             dockerfiles_in(&entry.path(), &path, found);
-        } else if name.ends_with("Dockerfile") {
+        } else if name.ends_with("Dockerfile") || name.starts_with("Dockerfile.") {
             found.push(path.to_string_lossy().into_owned());
         }
     }
@@ -182,6 +247,50 @@ fn a_dockerfile_missing_a_member_is_caught() {
     let cook = "COPY --from=planner /app/recipe.json recipe.json\n";
     assert!(!copies_member(cook, "--from=planner"));
     assert!(!copies_member(cook, "planner"));
+
+    // Other leading flags do precede a real source, so skipping them is what
+    // keeps a legitimate Dockerfile from reading as a missing member.
+    assert!(copies_member(
+        "COPY --chown=1000:1000 pg-core ./pg-core\n",
+        "pg-core"
+    ));
+    assert!(copies_member("COPY --link pg-core ./pg-core\n", "pg-core"));
+}
+
+#[test]
+fn a_stage_missing_a_member_is_caught() {
+    let members = ["pg-core", "pg-pkg", "cryptify"].map(str::to_string);
+
+    // #277's mistake one stage along, and the likeliest way it recurs: the
+    // planner gets the new member and the builder does not. Matching the file
+    // as one blob sees `COPY cryptify` once and calls the image covered, while
+    // `cargo build` in the builder dies on the manifest it cannot read.
+    let planner_only = "FROM chef AS planner\n\
+                        COPY pg-core ./pg-core\n\
+                        COPY pg-pkg ./pg-pkg\n\
+                        COPY cryptify ./cryptify\n\
+                        RUN cargo chef prepare --recipe-path recipe.json\n\
+                        FROM chef AS builder\n\
+                        COPY --from=planner /app/recipe.json recipe.json\n\
+                        COPY pg-core ./pg-core\n\
+                        COPY pg-pkg ./pg-pkg\n\
+                        RUN cargo build --bin pg-pkg\n";
+    assert_eq!(
+        stages_missing_members(planner_only, &members),
+        [("FROM chef AS builder".to_string(), vec!["cryptify"])]
+    );
+
+    // A runtime stage copies files but no member, so it is not a source-copying
+    // stage and must not be reported as missing every member.
+    let with_runtime = "FROM chef AS builder\n\
+                        COPY pg-core ./pg-core\n\
+                        COPY pg-pkg ./pg-pkg\n\
+                        COPY cryptify ./cryptify\n\
+                        RUN cargo build --bin pg-pkg\n\
+                        FROM debian:trixie-slim\n\
+                        COPY --from=builder /app/target/release/pg-pkg /usr/local/bin/pg-pkg\n\
+                        COPY entrypoint.sh /entrypoint.sh\n";
+    assert!(stages_missing_members(with_runtime, &members).is_empty());
 }
 
 #[test]
