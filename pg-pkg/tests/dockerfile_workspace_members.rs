@@ -80,7 +80,15 @@ fn workspace_members(manifest: &str) -> Vec<String> {
 fn copies_member(dockerfile: &str, member: &str) -> bool {
     dockerfile.lines().any(|line| {
         let mut words = line.split_whitespace();
-        if words.next() != Some("COPY") {
+        // Instruction keywords are case-insensitive to Docker: `copy` builds
+        // exactly as `COPY`. Matching only the upper-case spelling would let a
+        // lower-case Dockerfile read as copying no member at all, which
+        // `stages_missing_members` then waves through as "not a source-copying
+        // stage" — the guard goes green on precisely the file it should fail.
+        if !words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("COPY"))
+        {
             return false;
         }
         // `--from=<stage>` moves build artifacts between stages and never
@@ -110,7 +118,10 @@ fn copies_member(dockerfile: &str, member: &str) -> bool {
 fn stages(dockerfile: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for line in dockerfile.lines() {
-        if line.trim_start().starts_with("FROM ") {
+        // Case-insensitive for the same reason as `copies_member`: a lower-case
+        // `from` opens a stage, and missing it collapses the file to zero stages
+        // and every assertion over them to vacuously true.
+        if line.trim_start().to_ascii_uppercase().starts_with("FROM ") {
             out.push((line.trim().to_string(), String::new()));
         }
         if let Some((_, body)) = out.last_mut() {
@@ -255,6 +266,14 @@ fn a_dockerfile_missing_a_member_is_caught() {
         "pg-core"
     ));
     assert!(copies_member("COPY --link pg-core ./pg-core\n", "pg-core"));
+
+    // Docker does not care about the case of an instruction keyword, so neither
+    // may this parser: `copy` is a real member copy.
+    assert!(copies_member("copy pg-core ./pg-core\n", "pg-core"));
+    assert!(!copies_member(
+        "copy --from=planner /app/pg-core ./pg-core\n",
+        "pg-core"
+    ));
 }
 
 #[test]
@@ -291,6 +310,21 @@ fn a_stage_missing_a_member_is_caught() {
                         COPY --from=builder /app/target/release/pg-pkg /usr/local/bin/pg-pkg\n\
                         COPY entrypoint.sh /entrypoint.sh\n";
     assert!(stages_missing_members(with_runtime, &members).is_empty());
+
+    // A lower-case Dockerfile is a valid Dockerfile, and it must not disable the
+    // guard. This one case covers both halves at once, which is the point: with
+    // only `stages` case-insensitive the stage is found but no `copy` counts, so
+    // every member reads as missing and the "not a source-copying stage" escape
+    // skips it; with only `copies_member` case-insensitive there are no stages to
+    // check. Either way the result is an empty vec and this assertion fails.
+    let lowercase = "from chef as planner\n\
+                     copy pg-core ./pg-core\n\
+                     copy pg-pkg ./pg-pkg\n\
+                     run cargo chef prepare --recipe-path recipe.json\n";
+    assert_eq!(
+        stages_missing_members(lowercase, &members),
+        [("from chef as planner".to_string(), vec!["cryptify"])]
+    );
 }
 
 #[test]
