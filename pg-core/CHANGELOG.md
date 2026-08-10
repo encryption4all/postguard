@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.2...pg-core-v0.6.3) - 2026-08-10
+
+### Other
+
+- *(pg-core)* assert build.yml's gate wiring so an unapplied patch fails loudly ([#316](https://github.com/encryption4all/postguard/pull/316))
+
 ## [0.6.2](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.1...pg-core-v0.6.2) - 2026-07-30
 
 ### Added
