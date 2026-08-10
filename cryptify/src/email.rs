@@ -125,6 +125,20 @@ pub enum Language {
     Nl,
 }
 
+impl Language {
+    /// Stable two-letter code, deliberately identical to the serde
+    /// representation the `mailLang` field uses on the wire. Persisting the
+    /// same token means a restored session and a fresh one carry the same
+    /// value, and `language_code_matches_serde_representation` keeps the two
+    /// from drifting apart.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Language::En => "EN",
+            Language::Nl => "NL",
+        }
+    }
+}
+
 struct MailStrings<'a> {
     subject_str: &'a str,
     sender_str: &'a str,
@@ -977,6 +991,19 @@ mod tests {
         state.sender = None;
         let rendered = render_confirmation_email(&state, &config, "uuid-xyz").expect("render");
         assert!(rendered.is_none());
+    }
+
+    /// `Language::code` is what `store.rs` persists in the `mail_lang`
+    /// column, and the wire uses the serde representation. They have to be
+    /// the same token, or a restored session would come back with a
+    /// `mailLang` no client sent — so pin them to each other rather than to
+    /// two hand-written literals.
+    #[test]
+    fn language_code_matches_serde_representation() {
+        for lang in [Language::En, Language::Nl] {
+            let serialized = serde_json::to_string(&lang).expect("serialize language");
+            assert_eq!(serialized, format!("\"{}\"", lang.code()));
+        }
     }
 
     #[test]

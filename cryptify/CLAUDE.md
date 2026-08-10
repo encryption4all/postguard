@@ -78,25 +78,58 @@ Release-plz automation.
   file to extract attributes; `sender` (`pbdf.sidn-pbdf.email.email`) becomes
   known.
 - **Purge timer:** `state.expirations` (a `BTreeMap` populated in `Store::create`
-  at `src/store.rs:292` with `Instant::now() + self.shared.idle_ttl`) is what
+  at `src/store.rs:591` with `Instant::now() + self.shared.idle_ttl`) is what
   `purge_task` walks. `idle_ttl` defaults to `DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS`
   (`60 * 60`, 1 hour); this is a resettable idle timeout, not a hard deadline from
-  creation. `Store::touch` (`src/store.rs:318`) removes the old `expirations` key and
+  creation. `Store::touch` (`src/store.rs:609`) removes the old `expirations` key and
   re-inserts `Instant::now() + idle_ttl` on each chunk PUT and status check, so the
   hour counts from the last activity (see the `touch_extends_eviction_deadline` test
-  at `src/store.rs:545`). `FileState.expires` (current_time + 14d) is NOT what drives
+  at `src/store.rs:879`). `FileState.expires` (current_time + 14d) is NOT what drives
   eviction; it's a different field, never read by the purge loop. When tracing
   eviction, follow `state.expirations`.
 - Purge does not delete the on-disk file. Rejecting at finalize must manually
   `tokio::fs::remove_file` and `store.remove(uuid)`.
-- In-memory only, no persistence. Process restart wipes all upload sessions and
-  orphans on-disk files in `data_dir/` (tracked as cryptify#116).
-- Per-sender usage tracking is a `HashMap` in `StoreState.usage`, optionally backed
-  by SQLite when config `usage_db = "<path>"` is set: `UsageDb` (rusqlite,
-  `bundled`) is the source of truth, the map is a cache loaded on startup and
-  written through on each `record_upload` (which also prunes rows outside the 14d
-  rolling window). `usage_db` unset means in-memory only (old behaviour). A
-  configured-but-unopenable DB panics at startup.
+- The in-memory `HashMap` is still what every request reads. Session state is now
+  *written through* to SQLite (postguard#302) but nothing loads it back, so a
+  process restart still wipes all upload sessions and still orphans on-disk files
+  in `data_dir/`. Restore-on-boot is postguard#303; until it lands the rows are
+  write-only and the user-visible bug (chunk PUT 404 after a deploy) is unchanged.
+- **`usage_db` is not just usage any more: it names cryptify's whole SQLite state
+  database.** One file, one `rusqlite::Connection` behind one `Mutex` (`StateDb`
+  in `src/store.rs`), two tables — `usage` and `upload_sessions`. Both schemas are
+  created with `CREATE TABLE IF NOT EXISTS` at startup, so an existing
+  usage-only database gains the new table in place. `usage_db` unset means both
+  stay in memory only (the old behaviour, and what every unit test uses); a
+  configured-but-unopenable DB panics at startup. The key name was left alone on
+  purpose: renaming it would be an ops-visible change for zero behavioural gain,
+  and prod's `conf/config.toml` does not set it at all (only `config.dev.toml`
+  does), so **session persistence is off in any deployment that never set
+  `usage_db`** — check that before assuming #303 will do anything there.
+- Per-sender usage: the map in `StoreState.usage` is a cache, the table is the
+  source of truth, loaded on startup (`load_all_usage`) and written through on each
+  `record_upload` (`record_usage`, which also prunes rows outside the 14d rolling
+  window).
+- Upload sessions: `Store::persist_session(id, &FileState)` writes one upsert, and
+  it is called at each of the three transitions **before the handler responds** —
+  `Store::create` (init), `upload_chunk` after the rolling token advances, and
+  `upload_finalize` right after `sender` is set and before the email goes out. The
+  reverse edges matter as much: `Store::remove` and the purge task both delete the
+  row, so an unresumable session never leaves one behind (without that the table
+  would grow without bound and a future restore would resurrect sessions the purge
+  already killed). DB errors are logged, never propagated — persistence must not
+  add a way for a healthy upload to fail.
+- Three things about the `upload_sessions` schema that are not guessable:
+  `recovery_token_hash` stores `sha256(recovery_token)` hex, never the plaintext
+  bearer credential, so a restore path must compare hashes rather than tokens;
+  `created_at` is deliberately absent from the upsert's `DO UPDATE SET` list, which
+  is what keeps it recording when the session began; and there is **no
+  expected-size column**, because clients send `Content-Range: bytes <s>-<e>/*` on
+  chunk PUTs and the total is genuinely unknown to the server until finalize
+  declares it (finalize then rejects a declaration that disagrees with `uploaded`).
+- `email::Language::code()` (`"EN"`/`"NL"`) is what the `mail_lang` column stores,
+  and `language_code_matches_serde_representation` in `email.rs` pins it to the
+  serde/wire form so a restored session can't come back with a `mailLang` no client
+  would send.
 
 ## api-description.yaml is tied to the mounted routes by a test
 `api_routes()` in `src/main.rs` is the single mount list; `build_rocket` mounts it
