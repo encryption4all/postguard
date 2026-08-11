@@ -27,14 +27,18 @@ use std::path::{Path, PathBuf};
 /// Dockerfiles built with the repo root as their context, so `cargo metadata`
 /// runs against the root manifest and every member has to be present.
 ///
-/// `cryptify/dev.Dockerfile` is deliberately absent: it copies its own
-/// `Cargo.toml`/`Cargo.lock`/`src` rather than the workspace's members, so its
-/// context is the crate directory. Nothing builds it today either —
-/// `cryptify/docker-compose.dev.yml` still names `backend.dev.Dockerfile`, which
-/// #277 did not carry over, and a workspace member has no `cryptify/Cargo.lock`
-/// for that `COPY` to find. Stale or not, the root-context invariant is not its
-/// invariant.
-const ROOT_CONTEXT_DOCKERFILES: [&str; 3] = ["Dockerfile", "dev.Dockerfile", "cryptify/Dockerfile"];
+/// `cryptify/dev.Dockerfile` joined the list in #325. It had kept the
+/// standalone layout the crate had before #277 — its own `Cargo.toml`,
+/// `Cargo.lock` and `src` — which no longer describes anything: a workspace
+/// member has no `cryptify/Cargo.lock`, and its `pg-core` path dependency
+/// escapes a crate-directory context. So its context is the repo root too, and
+/// the invariant below is now its invariant as well.
+const ROOT_CONTEXT_DOCKERFILES: [&str; 4] = [
+    "Dockerfile",
+    "dev.Dockerfile",
+    "cryptify/Dockerfile",
+    "cryptify/dev.Dockerfile",
+];
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -76,8 +80,12 @@ fn workspace_members(manifest: &str) -> Vec<String> {
     members
 }
 
-/// Whether `dockerfile` has a `COPY <member> ...` instruction.
-fn copies_member(dockerfile: &str, member: &str) -> bool {
+/// The workspace manifest, as it is spelled in a `COPY` line built from the
+/// repo root.
+const WORKSPACE_MANIFEST: &str = "Cargo.toml";
+
+/// Whether `dockerfile` has a `COPY <path> ...` instruction.
+fn copies_path(dockerfile: &str, path: &str) -> bool {
     dockerfile.lines().any(|line| {
         let mut words = line.split_whitespace();
         // Instruction keywords are case-insensitive to Docker: `copy` builds
@@ -106,7 +114,7 @@ fn copies_member(dockerfile: &str, member: &str) -> bool {
                 break;
             }
         }
-        source == Some(member)
+        source == Some(path)
     })
 }
 
@@ -118,7 +126,7 @@ fn copies_member(dockerfile: &str, member: &str) -> bool {
 fn stages(dockerfile: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for line in dockerfile.lines() {
-        // Case-insensitive for the same reason as `copies_member`: a lower-case
+        // Case-insensitive for the same reason as `copies_path`: a lower-case
         // `from` opens a stage, and missing it collapses the file to zero stages
         // and every assertion over them to vacuously true.
         if line.trim_start().to_ascii_uppercase().starts_with("FROM ") {
@@ -145,6 +153,14 @@ fn stages(dockerfile: &str) -> Vec<(String, String)> {
 /// A stage that copies *no* member is not a source-copying stage: `Dockerfile`'s
 /// runtime stage copies only the built binary and `entrypoint.sh`. A stage that
 /// copies *some* must copy all.
+///
+/// Copying the root `Cargo.toml` overrides that escape, and closes the hole
+/// #325 fell through. `cryptify/dev.Dockerfile` copied a `Cargo.toml` and a
+/// `Cargo.lock` and no member at all, having kept the layout the crate had
+/// before it joined the workspace — so "copies no member" waved it through
+/// while `cargo chef prepare` in that same stage died on the first member it
+/// could not read. A stage that copies the workspace manifest is standing up
+/// the workspace, and cargo reads every member that manifest lists.
 fn stages_missing_members<'a>(
     dockerfile: &str,
     members: &'a [String],
@@ -155,9 +171,10 @@ fn stages_missing_members<'a>(
             let missing: Vec<&str> = members
                 .iter()
                 .map(String::as_str)
-                .filter(|member| !copies_member(&body, member))
+                .filter(|member| !copies_path(&body, member))
                 .collect();
-            if missing.is_empty() || missing.len() == members.len() {
+            let copies_no_member = missing.len() == members.len();
+            if missing.is_empty() || (copies_no_member && !copies_path(&body, WORKSPACE_MANIFEST)) {
                 return None;
             }
             Some((from, missing))
@@ -222,7 +239,10 @@ fn the_dockerfile_list_is_the_set_of_root_context_dockerfiles() {
     // ROOT_CONTEXT_DOCKERFILES, or it is simply not covered above. Nothing in
     // the file itself says what context it is built with, so the check is that
     // every Dockerfile in the repo is either listed here or accounted for.
-    const ROOT_CONTEXT_EXEMPT: [&str; 1] = ["cryptify/dev.Dockerfile"];
+    // Empty since #325 moved `cryptify/dev.Dockerfile` to the root context.
+    // Kept rather than deleted: it is the answer for a Dockerfile built from its
+    // own directory, and the assertion below needs somewhere to put one.
+    const ROOT_CONTEXT_EXEMPT: [&str; 0] = [];
 
     let root = repo_root();
     let mut found: Vec<String> = Vec::new();
@@ -251,26 +271,26 @@ fn a_dockerfile_missing_a_member_is_caught() {
                    COPY pg-core ./pg-core\n\
                    COPY pg-pkg ./pg-pkg\n\
                    COPY Cargo.toml Cargo.lock ./\n";
-    assert!(copies_member(planner, "pg-core"));
-    assert!(!copies_member(planner, "cryptify"));
+    assert!(copies_path(planner, "pg-core"));
+    assert!(!copies_path(planner, "cryptify"));
 
     // `COPY --from=<stage>` is not a source copy, so it must not count as one.
     let cook = "COPY --from=planner /app/recipe.json recipe.json\n";
-    assert!(!copies_member(cook, "--from=planner"));
-    assert!(!copies_member(cook, "planner"));
+    assert!(!copies_path(cook, "--from=planner"));
+    assert!(!copies_path(cook, "planner"));
 
     // Other leading flags do precede a real source, so skipping them is what
     // keeps a legitimate Dockerfile from reading as a missing member.
-    assert!(copies_member(
+    assert!(copies_path(
         "COPY --chown=1000:1000 pg-core ./pg-core\n",
         "pg-core"
     ));
-    assert!(copies_member("COPY --link pg-core ./pg-core\n", "pg-core"));
+    assert!(copies_path("COPY --link pg-core ./pg-core\n", "pg-core"));
 
     // Docker does not care about the case of an instruction keyword, so neither
     // may this parser: `copy` is a real member copy.
-    assert!(copies_member("copy pg-core ./pg-core\n", "pg-core"));
-    assert!(!copies_member(
+    assert!(copies_path("copy pg-core ./pg-core\n", "pg-core"));
+    assert!(!copies_path(
         "copy --from=planner /app/pg-core ./pg-core\n",
         "pg-core"
     ));
@@ -299,8 +319,27 @@ fn a_stage_missing_a_member_is_caught() {
         [("FROM chef AS builder".to_string(), vec!["cryptify"])]
     );
 
+    // #325's shape, and the reason "copies no member" cannot be the whole
+    // escape: `cryptify/dev.Dockerfile` copied the manifest and the lockfile and
+    // no member at all, so every member read as missing and the stage was waved
+    // through — while `cargo chef prepare` on the line below died on the first
+    // member it could not read. Copying the workspace manifest is the tell.
+    let manifest_but_no_member = "FROM chef AS planner\n\
+                                  COPY Cargo.toml .\n\
+                                  COPY Cargo.lock .\n\
+                                  COPY src ./src\n\
+                                  RUN cargo chef prepare --recipe-path recipe.json\n";
+    assert_eq!(
+        stages_missing_members(manifest_but_no_member, &members),
+        [(
+            "FROM chef AS planner".to_string(),
+            vec!["pg-core", "pg-pkg", "cryptify"]
+        )]
+    );
+
     // A runtime stage copies files but no member, so it is not a source-copying
-    // stage and must not be reported as missing every member.
+    // stage and must not be reported as missing every member. It copies no
+    // Cargo.toml either, so the override above does not drag it back in.
     let with_runtime = "FROM chef AS builder\n\
                         COPY pg-core ./pg-core\n\
                         COPY pg-pkg ./pg-pkg\n\
@@ -315,7 +354,7 @@ fn a_stage_missing_a_member_is_caught() {
     // guard. This one case covers both halves at once, which is the point: with
     // only `stages` case-insensitive the stage is found but no `copy` counts, so
     // every member reads as missing and the "not a source-copying stage" escape
-    // skips it; with only `copies_member` case-insensitive there are no stages to
+    // skips it; with only `copies_path` case-insensitive there are no stages to
     // check. Either way the result is an empty vec and this assertion fails.
     let lowercase = "from chef as planner\n\
                      copy pg-core ./pg-core\n\
