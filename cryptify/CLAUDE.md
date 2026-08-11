@@ -72,8 +72,10 @@ Release-plz automation.
 ## Upload flow and state lifetime
 - `POST /fileupload/init`: in-memory `FileState` keyed by UUID. Sender unknown at
   this point.
-- `PUT /fileupload/<uuid>`: write a chunk (<= 1 MiB), advance `state.uploaded`. The
-  cryptify token rolls per chunk as `SHA256(prev_token || chunk)`.
+- `PUT /fileupload/<uuid>`: write a chunk (at most `config.chunk_size()`, default
+  5,000,000 bytes, served to clients as `max_chunk_size_bytes` on init), advance
+  `state.uploaded`. The cryptify token rolls per chunk as
+  `SHA256(prev_token || chunk)`.
 - `POST /fileupload/finalize/<uuid>`: run the postguard Unsealer over the whole
   file to extract attributes; `sender` (`pbdf.sidn-pbdf.email.email`) becomes
   known.
@@ -186,13 +188,11 @@ runs fail open just as quietly. So the two cannot drift apart unnoticed.
 
 The settings the gate needs are `fail-on: WARN` plus
 `include-checks: response-non-success-status-removed,response-property-enum-value-removed`.
-**The committed workflow does not have them yet**: it is still `fail-on: ERR`
-with no `include-checks`. The new pair sits in the `api-diff.yml` patch on
-PR #203 and needs a maintainer to apply it, because the App cannot push
-`.github/workflows/`. Until that lands, the gate is passing everything in the
-list below, and `the_workflow_uses_the_settings_this_module_pins` is red saying
-so. Tighten this paragraph back to plain present tense in that same PR once the
-maintainer's commit is on the branch.
+The committed `.github/workflows/api-diff.yml` carries both, so
+`the_workflow_uses_the_settings_this_module_pins` is green. This paragraph used
+to say the pair was still pending a maintainer's hand-apply (the App cannot push
+`.github/workflows/`); that landed with the workflow's move into this
+repository.
 
 Measured on this spec against oasdiff v1.26.1, `fail-on: ERR` on its own passes
 several changes the contract forbids. A `401` that becomes a `403` and a

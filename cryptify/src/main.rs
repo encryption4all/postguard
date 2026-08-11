@@ -80,6 +80,12 @@ struct InitResponse {
     /// the UUID — typically in IndexedDB — and sends it back in an
     /// `X-Recovery-Token` header on resume. Hex-encoded 32-byte random.
     recovery_token: String,
+    /// Ceiling on a single chunk PUT, in bytes: the server rejects any
+    /// `PUT /fileupload/{uuid}` whose `Content-Range` spans more than this.
+    /// A client may send smaller chunks. Always `config.chunk_size()`, the
+    /// same accessor the enforcement path reads, so a client that sizes its
+    /// chunks from this field cannot be out of step with the deployment.
+    max_chunk_size_bytes: u64,
 }
 
 struct CryptifyToken(String);
@@ -478,6 +484,7 @@ async fn upload_init(
         inner: Json(InitResponse {
             uuid,
             recovery_token,
+            max_chunk_size_bytes: config.chunk_size(),
         }),
         cryptify_token: CryptifyToken(init_cryptify_token),
     })
@@ -2974,6 +2981,22 @@ mod integration {
         (client, dir)
     }
 
+    /// Boot Rocket like [`test_client`] but with a caller-supplied
+    /// `chunk_size`, so both the value `/fileupload/init` serves and the
+    /// ceiling the chunk PUT enforces can be checked against something other
+    /// than the 5 MB default.
+    async fn chunk_size_client(setup: &TestSetup, chunk_size: u64) -> (Client, std::path::PathBuf) {
+        let (figment, dir) = test_figment();
+        let figment = figment.merge(("chunk_size", chunk_size));
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        let rocket = build_rocket(figment, vk);
+        let client = Client::tracked(rocket).await.expect("valid rocket");
+        (client, dir)
+    }
+
     // A copy of the production CORS regex from `conf/config.toml`, used to
     // assert the preflight shape (allowed origins, methods, headers) of the
     // regex we actually ship for the Office add-in (encryption4all/postguard#154).
@@ -3560,6 +3583,66 @@ mod integration {
         assert_eq!(status, Status::NotFound);
         let (chunk_status, _) = do_chunk(&client, &uuid, &token, b"more bytes", 14).await;
         assert_eq!(chunk_status, Status::NotFound);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `max_chunk_size_bytes` on the init response and the ceiling the chunk
+    /// PUT enforces are the same configured value, so a client that sizes its
+    /// chunks from the served field is never rejected for being too large.
+    ///
+    /// The configured size is deliberately not the 5 MB default: against the
+    /// default, a handler that served a hardcoded `5_000_000` would pass every
+    /// assertion below and this test would guard nothing.
+    #[rocket::async_test]
+    async fn init_serves_the_configured_chunk_size_and_enforces_it() {
+        const CONFIGURED_CHUNK_SIZE: u64 = 1_048_576;
+
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir) = chunk_size_client(&setup, CONFIGURED_CHUNK_SIZE).await;
+
+        // Init advertises the configured ceiling.
+        let res = client
+            .post("/fileupload/init")
+            .header(ContentType::JSON)
+            .body(init_body_json(SENDER_EMAIL))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::Ok);
+        let token = res
+            .headers()
+            .get_one("cryptifytoken")
+            .expect("cryptifytoken on init")
+            .to_string();
+        let body = res.into_string().await.expect("init body");
+        let body: serde_json::Value = serde_json::from_str(&body).expect("init body is JSON");
+        assert_eq!(
+            body["max_chunk_size_bytes"].as_u64(),
+            Some(CONFIGURED_CHUNK_SIZE),
+            "init should serve the configured chunk size, got body {body}"
+        );
+        let uuid = body["uuid"]
+            .as_str()
+            .expect("uuid in init body")
+            .to_string();
+
+        // A chunk of exactly the advertised size is accepted.
+        let at_limit = vec![0u8; CONFIGURED_CHUNK_SIZE as usize];
+        let (status, _next) = do_chunk(&client, &uuid, &token, &at_limit, 0).await;
+        assert_eq!(status, Status::Ok, "a chunk of exactly the advertised size");
+
+        // One byte over is rejected. On a fresh session, so the offset and the
+        // initial token are the ones this chunk is presented with.
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let over_limit = vec![0u8; CONFIGURED_CHUNK_SIZE as usize + 1];
+        let (status, _) = do_chunk(&client, &uuid, &token, &over_limit, 0).await;
+        assert_eq!(
+            status,
+            Status::BadRequest,
+            "a chunk one byte over the advertised size"
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
