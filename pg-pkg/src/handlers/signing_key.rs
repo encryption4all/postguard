@@ -77,10 +77,20 @@ pub async fn signing_key(
             (pub_con, priv_con)
         };
 
-    let policy = Policy {
+    // Canonicalize the policy we hand back, not just the one we derive from.
+    // `derive_ibs` canonicalizes internally, so returning a raw policy would
+    // ship a key for `derive(canon(pol))` alongside bytes that say `pol`. A
+    // client stores those bytes in the header and every verifier derives the
+    // signer's identity from them, so an un-upgraded pair on either side of the
+    // rollout would stop verifying signatures it verifies today. Canonical here
+    // makes the returned policy a fixed point, which every client and verifier
+    // version agrees on regardless of deploy order.
+    let mut policy = Policy {
         timestamp: iat,
         con: pub_con,
     };
+    policy.canonicalize();
+
     let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
     let key = keygen(sk, &id, &mut rng);
 
@@ -91,10 +101,13 @@ pub async fn signing_key(
 
     let priv_sign_key = priv_con
         .map(|priv_attrs| {
-            let policy = Policy {
+            // Same reasoning as the public branch above: the returned policy
+            // has to be the one the key was derived from.
+            let mut policy = Policy {
                 timestamp: iat,
                 con: priv_attrs,
             };
+            policy.canonicalize();
 
             let id = policy.derive_ibs().map_err(|_e| crate::Error::Unexpected)?;
             let key = keygen(sk, &id, &mut rng);

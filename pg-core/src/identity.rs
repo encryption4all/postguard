@@ -53,10 +53,15 @@ const RULES: &[(&str, Rule)] = &[
     ("sidn-pbdf.mobilenumber.mobilenumber", Rule::Phone),
 ];
 
-/// Characters used to group the digits of a written phone number.
-const PHONE_SEPARATORS: &[char] = &[
-    ' ', '\u{00a0}', '\u{202f}', '-', '\u{2011}', '\u{2013}', '(', ')', '.', '/',
-];
+/// Non-whitespace characters used to group the digits of a written phone
+/// number.
+///
+/// Whitespace is deliberately **not** listed here: it is removed beforehand by
+/// `char::is_whitespace`, which covers every space, tab and newline rather than
+/// the handful anyone thinks to enumerate. Listing a space here as well would
+/// invite the next reader to add `\t` to this list instead, which is how the
+/// gap arose in the first place.
+const PHONE_SEPARATORS: &[char] = &['-', '\u{2011}', '\u{2013}', '(', ')', '.', '/'];
 
 /// The rule for an attribute type, if it has one.
 fn rule_for(atype: &str) -> Option<Rule> {
@@ -96,13 +101,19 @@ pub fn canonicalize(atype: &str, value: &str) -> String {
     match rule_for(atype) {
         Some(Rule::Email) => value.trim().to_lowercase(),
         Some(Rule::Phone) => {
+            // Whitespace goes first, for two reasons. A pasted value routinely
+            // carries a tab or a trailing newline, and `Rule::Email` trims
+            // where this rule otherwise would not. And it makes the trunk group
+            // below recognisable when it is written spaced out, `( 0 )`.
+            let compact: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+
             // "+31 (0)6 ..." writes the national trunk prefix in parentheses,
             // and E.164 drops it. Remove the whole group before separators are
             // stripped: strip the parentheses first and the 0 survives into a
             // number that looks valid but dials nowhere.
-            let value = value.replace("(0)", "");
+            let compact = compact.replace("(0)", "");
 
-            let compact: String = value
+            let compact: String = compact
                 .chars()
                 .filter(|c| !PHONE_SEPARATORS.contains(c))
                 .collect();
@@ -125,8 +136,9 @@ pub fn canonicalize(atype: &str, value: &str) -> String {
 ///
 /// Types without a rule are always canonical. For a phone number this is
 /// stricter than "[`canonicalize`] would not change it": the result must also
-/// be valid E.164, which is what lets a client reject the bare national number
-/// that [`canonicalize`] cannot repair.
+/// be valid E.164 — including long enough to carry a subscriber number, not
+/// just a country code — which is what lets a client reject the bare national
+/// number that [`canonicalize`] cannot repair.
 ///
 /// ```
 /// use pg_core::identity::is_canonical;
@@ -137,14 +149,31 @@ pub fn canonicalize(atype: &str, value: &str) -> String {
 /// ```
 pub fn is_canonical(atype: &str, value: &str) -> bool {
     match rule_for(atype) {
+        // The second conjunct is currently implied by the first — an E.164
+        // value carries nothing for the rule to strip — and is kept so this
+        // predicate states the whole invariant rather than resting on a proof
+        // about the rule as it stands today.
         Some(Rule::Phone) => is_e164(value) && canonicalize(atype, value) == value,
         Some(_) => canonicalize(atype, value) == value,
         None => true,
     }
 }
 
+/// The shortest assigned E.164 number: a three-digit country code and a
+/// four-digit subscriber number, as used by Saint Helena (`+290`) and Niue
+/// (`+683`).
+///
+/// The floor exists because `is_canonical` is what a policy editor asks before
+/// letting a value through. Accepting `1` would make a bare country code a
+/// green light, and `canonicalize` reaches one from ordinary input: `0031`
+/// becomes `+31`.
+const E164_MIN_DIGITS: usize = 7;
+
+/// The E.164 ceiling: fifteen digits including the country code.
+const E164_MAX_DIGITS: usize = 15;
+
 /// Whether a string is a valid E.164 number: `+`, a non-zero leading digit, and
-/// 1 to 15 digits in total.
+/// [`E164_MIN_DIGITS`] to [`E164_MAX_DIGITS`] digits in total.
 fn is_e164(value: &str) -> bool {
     let Some(digits) = value.strip_prefix('+') else {
         return false;
@@ -152,7 +181,7 @@ fn is_e164(value: &str) -> bool {
 
     let len = digits.len();
 
-    (1..=15).contains(&len)
+    (E164_MIN_DIGITS..=E164_MAX_DIGITS).contains(&len)
         && !digits.starts_with('0')
         && digits.bytes().all(|b| b.is_ascii_digit())
 }
@@ -388,6 +417,18 @@ mod tests {
         (PHONE, "+31 (0)6 12345678", "+31612345678"),
         (PHONE, "0031612345678", "+31612345678"),
         (PHONE, "+31612345678", "+31612345678"),
+        // Whitespace is stripped wholesale, not from an enumerated list. A
+        // pasted number carries a tab or a trailing newline, and the digit
+        // groups of a written one are as often U+2007 FIGURE SPACE or U+2009
+        // THIN SPACE as they are a plain space.
+        (PHONE, "\t+31612345678\n", "+31612345678"),
+        (PHONE, "+31\u{2007}6\u{2009}1234 5678", "+31612345678"),
+        (PHONE, "  +31 6 1234 5678  ", "+31612345678"),
+        // The trunk group is recognised spaced out, which is why whitespace
+        // has to go before the group is removed rather than with the other
+        // separators. Left in place it yields "+310612345678", which passes an
+        // E.164 shape check and dials nowhere.
+        (PHONE, "+31 ( 0 ) 6 12345678", "+31612345678"),
         // Phone: a bare national number needs a country to resolve, which this
         // crate does not have. It passes through untouched rather than being
         // rejected — `is_canonical` is what reports it.
@@ -447,12 +488,21 @@ mod tests {
         assert!(!is_canonical(PHONE, "0612345678"));
         assert_eq!(canonicalize(PHONE, "0612345678"), "0612345678");
 
-        // E.164 bounds: at most 15 digits, no leading zero after the +.
+        // E.164 bounds: 7 to 15 digits, no leading zero after the +.
         assert!(is_canonical(PHONE, "+123456789012345"));
         assert!(!is_canonical(PHONE, "+1234567890123456"));
         assert!(!is_canonical(PHONE, "+0612345678"));
         assert!(!is_canonical(PHONE, "+"));
         assert!(!is_canonical(PHONE, "31612345678"));
+
+        // A bare country code is not a green light, and it is reachable from
+        // ordinary input rather than hypothetical: "0031" canonicalizes to it.
+        assert_eq!(canonicalize(PHONE, "0031"), "+31");
+        assert!(!is_canonical(PHONE, "+31"));
+
+        // The floor is the shortest assigned number, not a round guess.
+        assert!(is_canonical(PHONE, "+2904256")); // Saint Helena, 7 digits
+        assert!(!is_canonical(PHONE, "+290425")); // one short
     }
 
     #[test]
