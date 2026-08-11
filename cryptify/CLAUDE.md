@@ -77,23 +77,41 @@ Release-plz automation.
 - `POST /fileupload/finalize/<uuid>`: run the postguard Unsealer over the whole
   file to extract attributes; `sender` (`pbdf.sidn-pbdf.email.email`) becomes
   known.
-- **Purge timer:** `state.expirations` (a `BTreeMap` populated in `Store::create`
-  at `src/store.rs:591` with `Instant::now() + self.shared.idle_ttl`) is what
-  `purge_task` walks. `idle_ttl` defaults to `DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS`
+- **Purge timer:** `state.expirations` (a `BTreeMap` populated by the shared
+  `insert_session` helper, which `Store::create` calls with
+  `Instant::now() + self.shared.idle_ttl` and `Store::restore_sessions` with
+  whatever is left of a persisted session's window) is what `purge_task` walks.
+  `idle_ttl` defaults to `DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS`
   (`60 * 60`, 1 hour); this is a resettable idle timeout, not a hard deadline from
-  creation. `Store::touch` (`src/store.rs:609`) removes the old `expirations` key and
+  creation. `Store::touch` removes the old `expirations` key and
   re-inserts `Instant::now() + idle_ttl` on each chunk PUT and status check, so the
   hour counts from the last activity (see the `touch_extends_eviction_deadline` test
-  at `src/store.rs:879`). `FileState.expires` (current_time + 14d) is NOT what drives
+  in `src/store.rs`). `FileState.expires` (current_time + 14d) is NOT what drives
   eviction; it's a different field, never read by the purge loop. When tracing
   eviction, follow `state.expirations`.
-- Purge does not delete the on-disk file. Rejecting at finalize must manually
-  `tokio::fs::remove_file` and `store.remove(uuid)`.
-- The in-memory `HashMap` is still what every request reads. Session state is now
-  *written through* to SQLite (postguard#302) but nothing loads it back, so a
-  process restart still wipes all upload sessions and still orphans on-disk files
-  in `data_dir/`. Restore-on-boot is postguard#303; until it lands the rows are
-  write-only and the user-visible bug (chunk PUT 404 after a deploy) is unchanged.
+- Purge does not delete the on-disk file while the process runs. Rejecting at
+  finalize must manually `tokio::fs::remove_file` and `store.remove(uuid)`. The
+  one place the server does delete an upload file on its own is the boot-time
+  sweep below, and only for sessions that expired while it was down.
+- The in-memory `HashMap` is still what every request reads, but it is no longer
+  empty at boot: `Store::restore_sessions` (postguard#303) rebuilds it from the
+  `upload_sessions` rows postguard#302 writes through, so a chunk PUT that
+  arrives after a redeploy resumes instead of 404-ing (postguard-website#117).
+- **The two clocks a restored session is judged against.** `Instant` cannot
+  outlive a process, so the durable stand-in for the idle deadline is
+  `last_active_at + idle_ttl`, computed against wall-clock time at boot. A row
+  is restored only when that *and* `expires` (the 14-day on-disk deadline) are
+  both still in the future, and the idle window is **not** restarted. Downtime
+  counts against a session exactly as an idle client would, so a restart cannot
+  be used to keep a dead session alive. Everything else loses its row, and loses
+  its file in `data_dir/` too, but only when `sender` is still unset. A
+  finalized session's file is a completed upload waiting to be downloaded, and
+  deleting it would take a live download with it. The sweep only ever names
+  files it holds a row for, so a stray file, or the state database itself when a
+  deployment keeps it under `data_dir`, is never a candidate.
+- A row this binary cannot read back (an unparsable `recipients`, an unknown
+  `mail_lang`) is skipped, and its file left alone. Guessing at a value is worse
+  than waiting: once its deadlines pass, the expiry branch collects both.
 - **`usage_db` is not just usage any more: it names cryptify's whole SQLite state
   database.** One file, one `rusqlite::Connection` behind one `Mutex` (`StateDb`
   in `src/store.rs`), two tables — `usage` and `upload_sessions`. Both schemas are
@@ -101,10 +119,16 @@ Release-plz automation.
   usage-only database gains the new table in place. `usage_db` unset means both
   stay in memory only (the old behaviour, and what every unit test uses); a
   configured-but-unopenable DB panics at startup. The key name was left alone on
-  purpose: renaming it would be an ops-visible change for zero behavioural gain,
-  and prod's `conf/config.toml` does not set it at all (only `config.dev.toml`
-  does), so **session persistence is off in any deployment that never set
-  `usage_db`** — check that before assuming #303 will do anything there.
+  purpose: renaming it would be an ops-visible change for zero behavioural gain.
+- **Do not read the checked-in `conf/config.toml` as prod's config.** It does
+  not set `usage_db`, which reads as "persistence is dark in production". That
+  is wrong. Per @rubenhensen (postguard#303), prod's config is templated by
+  `privacybydesign/postguard-ops`: `procolix/main.tf` sets
+  `usage_db = /app/data/usage.db`, bind-mounted to `/opt/cryptify/data`. So both
+  usage and session persistence are live in prod, and a claim about what a
+  deployment does has to be checked against that repo, not this one. That repo
+  404s for the dobby App token, so this line is the maintainers' correction
+  rather than something verified here.
 - Per-sender usage: the map in `StoreState.usage` is a cache, the table is the
   source of truth, loaded on startup (`load_all_usage`) and written through on each
   `record_upload` (`record_usage`, which also prunes rows outside the 14d rolling
@@ -120,16 +144,21 @@ Release-plz automation.
   add a way for a healthy upload to fail.
 - Three things about the `upload_sessions` schema that are not guessable:
   `recovery_token_hash` stores `sha256(recovery_token)` hex, never the plaintext
-  bearer credential, so a restore path must compare hashes rather than tokens;
+  bearer credential, and since #303 that is true of the *live* `FileState` too,
+  so `upload_status` hashes the presented `X-Recovery-Token` and compares
+  digests. A restored session and a fresh one hold exactly the same thing;
   `created_at` is deliberately absent from the upsert's `DO UPDATE SET` list, which
   is what keeps it recording when the session began; and there is **no
   expected-size column**, because clients send `Content-Range: bytes <s>-<e>/*` on
   chunk PUTs and the total is genuinely unknown to the server until finalize
   declares it (finalize then rejects a declaration that disagrees with `uploaded`).
 - `email::Language::code()` (`"EN"`/`"NL"`) is what the `mail_lang` column stores,
-  and `language_code_matches_serde_representation` in `email.rs` pins it to the
-  serde/wire form so a restored session can't come back with a `mailLang` no client
-  would send.
+  `Language::from_code` reads it back at restore, and two tests in `email.rs` hold
+  the three forms together: `language_code_matches_serde_representation` pins
+  `code()` to the serde/wire form, and `language_code_round_trips_through_from_code`
+  pins the inverse and its rejection of anything else. A restored session can't
+  come back with a `mailLang` no client would send, or in a language the sender
+  never chose.
 
 ## api-description.yaml is tied to the mounted routes by a test
 `api_routes()` in `src/main.rs` is the single mount list; `build_rocket` mounts it
@@ -327,7 +356,10 @@ audit, unauthenticated `/usage` enumeration, was fixed and merged in PR #183):
 - **Upload/finalize auth**: chunk PUT and finalize are gated by the rolling
   `cryptify_token` (`SHA256(prev||chunk)`); finalize checks it too. The status
   endpoint is gated by a constant-time `X-Recovery-Token` comparison, with
-  401-vs-404 collapsed to avoid leaking session existence.
+  401-vs-404 collapsed to avoid leaking session existence. Since #303 the
+  comparison is digest-versus-digest: the server keeps only
+  `sha256(recovery_token)`, so both comparands are fixed-length hex and there is
+  no length to leak either.
 - **Secrets in git history**: none; `conf/config.toml` and `config.dev.toml` only
   ever had commented-out placeholders.
 - **`/metrics` unauthenticated**: known and by design, locked down at the

@@ -117,7 +117,7 @@ const CHECK_PNG: &[u8] = include_bytes!("../templates/email/check.png");
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum Language {
     #[serde(rename = "EN")]
     En,
@@ -135,6 +135,18 @@ impl Language {
         match self {
             Language::En => "EN",
             Language::Nl => "NL",
+        }
+    }
+
+    /// Inverse of [`Language::code`], used when a session is restored from
+    /// SQLite. `None` for anything else: a row this binary cannot read must
+    /// leave the session unrestored rather than quietly resume it in the
+    /// wrong language.
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "EN" => Some(Language::En),
+            "NL" => Some(Language::Nl),
+            _ => None,
         }
     }
 }
@@ -900,7 +912,7 @@ mod tests {
             api_key_tenant: None,
             api_key_validation_failed: false,
             last_chunk: None,
-            recovery_token: String::new(),
+            recovery_token_hash: String::new(),
         }
     }
 
@@ -1003,6 +1015,24 @@ mod tests {
         for lang in [Language::En, Language::Nl] {
             let serialized = serde_json::to_string(&lang).expect("serialize language");
             assert_eq!(serialized, format!("\"{}\"", lang.code()));
+        }
+    }
+
+    /// Restoring a session reads `mail_lang` back through `from_code`, so
+    /// every code `code()` can write has to come back as the same variant —
+    /// and nothing else may be accepted, or a corrupt row would resume in a
+    /// language the sender never chose.
+    #[test]
+    fn language_code_round_trips_through_from_code() {
+        for lang in [Language::En, Language::Nl] {
+            assert_eq!(Language::from_code(lang.code()), Some(lang.clone()));
+        }
+        for unknown in ["", "en", "nl", "DE", "EN "] {
+            assert_eq!(
+                Language::from_code(unknown),
+                None,
+                "{unknown:?} is not a language this binary writes"
+            );
         }
     }
 
