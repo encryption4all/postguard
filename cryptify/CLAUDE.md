@@ -72,8 +72,10 @@ Release-plz automation.
 ## Upload flow and state lifetime
 - `POST /fileupload/init`: in-memory `FileState` keyed by UUID. Sender unknown at
   this point.
-- `PUT /fileupload/<uuid>`: write a chunk (<= 1 MiB), advance `state.uploaded`. The
-  cryptify token rolls per chunk as `SHA256(prev_token || chunk)`.
+- `PUT /fileupload/<uuid>`: write a chunk (at most `config.chunk_size()`, default
+  5,000,000 bytes, served to clients as `max_chunk_size_bytes` on init), advance
+  `state.uploaded`. The cryptify token rolls per chunk as
+  `SHA256(prev_token || chunk)`.
 - `POST /fileupload/finalize/<uuid>`: run the postguard Unsealer over the whole
   file to extract attributes; `sender` (`pbdf.sidn-pbdf.email.email`) becomes
   known.

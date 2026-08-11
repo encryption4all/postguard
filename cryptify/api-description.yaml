@@ -194,7 +194,10 @@ paths:
                         client sends, rejecting a chunk whose `Content-Range`
                         spans more than this with a 400. It is read from the
                         deployment's configuration, so it can differ per
-                        deployment."
+                        deployment. Served here only. A client that resumes
+                        with `X-Recovery-Token` after a refresh should persist
+                        it alongside the UUID, because
+                        `GET /fileupload/{uuid}/status` does not repeat it."
           "400":
             description:
               "The `recipient` address could not be parsed. A body that is not
