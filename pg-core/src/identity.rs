@@ -26,6 +26,137 @@ const HINT_TYPES: &[&str] = &[
 /// The complete encryption policy for all recipients.
 pub type EncryptionPolicy = BTreeMap<String, Policy>;
 
+/// A canonicalization rule for an attribute value.
+///
+/// The canonical form is not ours to choose: the PKG derives a user secret key
+/// from the value Yivi discloses, so a sender's policy only decrypts when its
+/// bytes match that disclosure exactly. These rules mirror the form Yivi
+/// stores; they do not define it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rule {
+    /// Trim surrounding whitespace and lowercase. Yivi stores email addresses
+    /// in lower case, which is why a capitalized address fails to decrypt.
+    Email,
+
+    /// Remove grouping separators and map an international `00` prefix to `+`.
+    /// Yivi stores mobile numbers in canonical E.164.
+    Phone,
+}
+
+/// Attribute types carrying a canonicalization rule, keyed by the
+/// credential-and-attribute *tail* of the type rather than the whole string, so
+/// that every scheme — `pbdf.`, `irma-demo.` and any future one — matches the
+/// same entry. Keying on full literals is how [`HINT_TYPES`] above ended up
+/// covering `irma-demo` for mobile numbers but not for email.
+const RULES: &[(&str, Rule)] = &[
+    ("sidn-pbdf.email.email", Rule::Email),
+    ("sidn-pbdf.mobilenumber.mobilenumber", Rule::Phone),
+];
+
+/// Characters used to group the digits of a written phone number.
+const PHONE_SEPARATORS: &[char] = &[
+    ' ', '\u{00a0}', '\u{202f}', '-', '\u{2011}', '\u{2013}', '(', ')', '.', '/',
+];
+
+/// The rule for an attribute type, if it has one.
+fn rule_for(atype: &str) -> Option<Rule> {
+    RULES.iter().find_map(|(tail, rule)| {
+        let is_match = atype == *tail
+            || (atype.len() > tail.len()
+                && atype.ends_with(tail)
+                && atype.as_bytes()[atype.len() - tail.len() - 1] == b'.');
+
+        is_match.then_some(*rule)
+    })
+}
+
+/// Canonicalizes an attribute value for the given attribute type.
+///
+/// Values of a type that carries no rule are returned unchanged. This function
+/// is **total**: a value it cannot bring into canonical form is passed through
+/// untouched rather than rejected, because the same rule runs on the PKG's side
+/// over a Yivi disclosure, where a rejection would lock a recipient out of
+/// their own message. A bare national phone number is the case that stays
+/// unfixed — resolving it needs a country, which this crate does not have. Use
+/// [`is_canonical`] to detect it and report it to the user.
+///
+/// The rule is idempotent: `canonicalize(t, canonicalize(t, v))` equals
+/// `canonicalize(t, v)`.
+///
+/// ```
+/// use pg_core::identity::canonicalize;
+///
+/// let t = "pbdf.sidn-pbdf.email.email";
+/// assert_eq!(canonicalize(t, " Alice@Example.COM "), "alice@example.com");
+///
+/// let t = "pbdf.sidn-pbdf.mobilenumber.mobilenumber";
+/// assert_eq!(canonicalize(t, "+31 6 1234 5678"), "+31612345678");
+/// ```
+pub fn canonicalize(atype: &str, value: &str) -> String {
+    match rule_for(atype) {
+        Some(Rule::Email) => value.trim().to_lowercase(),
+        Some(Rule::Phone) => {
+            // "+31 (0)6 ..." writes the national trunk prefix in parentheses,
+            // and E.164 drops it. Remove the whole group before separators are
+            // stripped: strip the parentheses first and the 0 survives into a
+            // number that looks valid but dials nowhere.
+            let value = value.replace("(0)", "");
+
+            let compact: String = value
+                .chars()
+                .filter(|c| !PHONE_SEPARATORS.contains(c))
+                .collect();
+
+            match compact.strip_prefix("00") {
+                Some(rest) => {
+                    let mut e164 = String::with_capacity(rest.len() + 1);
+                    e164.push('+');
+                    e164.push_str(rest);
+                    e164
+                }
+                None => compact,
+            }
+        }
+        None => value.to_string(),
+    }
+}
+
+/// Whether a value is already in the canonical form its attribute type expects.
+///
+/// Types without a rule are always canonical. For a phone number this is
+/// stricter than "[`canonicalize`] would not change it": the result must also
+/// be valid E.164, which is what lets a client reject the bare national number
+/// that [`canonicalize`] cannot repair.
+///
+/// ```
+/// use pg_core::identity::is_canonical;
+///
+/// let t = "pbdf.sidn-pbdf.mobilenumber.mobilenumber";
+/// assert!(is_canonical(t, "+31612345678"));
+/// assert!(!is_canonical(t, "0612345678")); // needs a country to resolve
+/// ```
+pub fn is_canonical(atype: &str, value: &str) -> bool {
+    match rule_for(atype) {
+        Some(Rule::Phone) => is_e164(value) && canonicalize(atype, value) == value,
+        Some(_) => canonicalize(atype, value) == value,
+        None => true,
+    }
+}
+
+/// Whether a string is a valid E.164 number: `+`, a non-zero leading digit, and
+/// 1 to 15 digits in total.
+fn is_e164(value: &str) -> bool {
+    let Some(digits) = value.strip_prefix('+') else {
+        return false;
+    };
+
+    let len = digits.len();
+
+    (1..=15).contains(&len)
+        && !digits.starts_with('0')
+        && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// A PostGuard IRMA attribute, which is a simple case of an IRMA ConDisCon.
 #[derive(Serialize, Deserialize, Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Default)]
 pub struct Attribute {
@@ -79,9 +210,39 @@ impl Attribute {
             value: hidden_value,
         }
     }
+
+    /// Rewrites this attribute's value into the canonical form for its type.
+    ///
+    /// See [`canonicalize`] for what each type's rule does.
+    pub fn canonicalize(&mut self) {
+        if let Some(value) = &self.value {
+            let canonical = canonicalize(&self.atype, value);
+
+            if canonical != *value {
+                self.value = Some(canonical);
+            }
+        }
+    }
 }
 
 impl Policy {
+    /// Rewrites every attribute value in this policy into its canonical form.
+    ///
+    /// See [`canonicalize`] for what each type's rule does.
+    pub fn canonicalize(&mut self) {
+        for attribute in &mut self.con {
+            attribute.canonicalize();
+        }
+    }
+
+    /// Returns a copy of this policy with every attribute value canonicalized.
+    pub fn canonical(&self) -> Policy {
+        let mut policy = self.clone();
+        policy.canonicalize();
+
+        policy
+    }
+
     /// Completely hides the attribute value, or provides a hint for certain attribute types
     pub fn to_hidden(&self) -> HiddenPolicy {
         HiddenPolicy {
@@ -91,6 +252,12 @@ impl Policy {
     }
 
     /// Derives an 64-byte identity from a [`Policy`].
+    ///
+    /// Attribute values are canonicalized first (see [`canonicalize`]), so a
+    /// sender who typed `Alice@Example.com` and a PKG holding Yivi's
+    /// `alice@example.com` arrive at the same identity. Because both sides
+    /// apply the same function, this only ever merges identities that used to
+    /// differ — it cannot split one that already matched.
     pub fn derive(&self) -> Result<[u8; 64], Error> {
         // This method implements domain separation as follows:
         // Suppose we have the following policy:
@@ -114,7 +281,15 @@ impl Policy {
         // 0 indicates the IRMA authentication method.
         pre_h.update(&[0x00]);
 
+        // Canonicalize before sorting: a rule can change a value, and therefore
+        // the ordering. Doing this here rather than only at construction means
+        // a policy assembled by hand, deserialized, or built by the PKG from a
+        // Yivi disclosure derives the same identity as one the sealer wrote —
+        // there is no construction site left to forget.
         let mut copy = self.con.clone();
+        for ar in &mut copy {
+            ar.canonicalize();
+        }
         copy.sort();
 
         for (i, ar) in copy.iter().enumerate() {
@@ -175,11 +350,172 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::identity::{Attribute, Policy};
+    use crate::identity::{canonicalize, is_canonical, Attribute, Policy};
     use crate::test::TestSetup;
     use alloc::string::ToString;
     use alloc::vec::Vec;
     use ibe::kem::cgw_kv::CGWKV;
+
+    const EMAIL: &str = "pbdf.sidn-pbdf.email.email";
+    const PHONE: &str = "pbdf.sidn-pbdf.mobilenumber.mobilenumber";
+
+    /// The canonicalization contract: `(attribute type, input, canonical form)`.
+    ///
+    /// Every row is also asserted to be idempotent. That property is
+    /// load-bearing rather than incidental: the rule runs once when the sealer
+    /// stores a policy and again when `derive` hashes it, so a rule that moved
+    /// a value on the second application would break the very identities it
+    /// exists to align.
+    const VECTORS: &[(&str, &str, &str)] = &[
+        // Email: trim, then lowercase. Yivi stores addresses in lower case.
+        (EMAIL, "Alice@Example.COM", "alice@example.com"),
+        (EMAIL, "  alice@example.com  ", "alice@example.com"),
+        (EMAIL, "\u{00a0}Alice@Example.com\n", "alice@example.com"),
+        (EMAIL, "alice@example.com", "alice@example.com"),
+        // Email: the local part is lowercased too. RFC 5321 calls it
+        // case-sensitive, but Yivi does not, and Yivi is what the PKG sees.
+        (
+            EMAIL,
+            "AliceCarroll@example.com",
+            "alicecarroll@example.com",
+        ),
+        // Phone: strip grouping separators, map an international 00 prefix.
+        (PHONE, "+31 6 1234 5678", "+31612345678"),
+        (PHONE, "+31-6-1234-5678", "+31612345678"),
+        // The trunk-prefix group goes, rather than just its parentheses: a
+        // surviving 0 yields "+310612345678", which passes an E.164 shape
+        // check and dials nowhere.
+        (PHONE, "+31 (0)6 12345678", "+31612345678"),
+        (PHONE, "0031612345678", "+31612345678"),
+        (PHONE, "+31612345678", "+31612345678"),
+        // Phone: a bare national number needs a country to resolve, which this
+        // crate does not have. It passes through untouched rather than being
+        // rejected — `is_canonical` is what reports it.
+        (PHONE, "0612345678", "0612345678"),
+        (PHONE, "06 1234 5678", "0612345678"),
+        // A type with no rule is never touched, whatever its value looks like.
+        ("pbdf.gemeente.personalData.name", "Bob", "Bob"),
+        ("pbdf.gemeente.personalData.name", "  Bob  ", "  Bob  "),
+        ("test.test.email", "Alice@Example.COM", "Alice@Example.COM"),
+    ];
+
+    #[test]
+    fn test_canonicalization_vectors() {
+        for (atype, input, expected) in VECTORS {
+            let once = canonicalize(atype, input);
+            assert_eq!(&once, expected, "canonicalize({atype}, {input:?})");
+
+            // Idempotence, asserted for every row rather than a chosen few.
+            let twice = canonicalize(atype, &once);
+            assert_eq!(twice, once, "canonicalize is not idempotent on {input:?}");
+        }
+    }
+
+    #[test]
+    fn test_canonicalization_matches_every_scheme() {
+        // Keying on the type's tail is what makes the rule apply in irma-demo
+        // and any future scheme, rather than only in the one someone remembered
+        // to list. `HINT_TYPES` above is keyed on full literals and is missing
+        // its irma-demo email row for exactly that reason.
+        for scheme in ["pbdf", "irma-demo", "some-future-scheme"] {
+            let atype = alloc::format!("{scheme}.sidn-pbdf.email.email");
+            assert_eq!(
+                canonicalize(&atype, "Alice@Example.COM"),
+                "alice@example.com"
+            );
+        }
+
+        // A tail match is not a substring match: the boundary must be a dot.
+        assert_eq!(
+            canonicalize("pbdf.notsidn-pbdf.email.email", "Alice@Example.COM"),
+            "Alice@Example.COM"
+        );
+    }
+
+    #[test]
+    fn test_is_canonical() {
+        // Types without a rule are canonical by definition.
+        assert!(is_canonical("pbdf.gemeente.personalData.name", "  Bob  "));
+
+        assert!(is_canonical(EMAIL, "alice@example.com"));
+        assert!(!is_canonical(EMAIL, "Alice@Example.com"));
+
+        // Phone is stricter than "canonicalize would not change it": a bare
+        // national number is a fixed point of the rule but not valid E.164,
+        // which is the case a client has to be able to report.
+        assert!(is_canonical(PHONE, "+31612345678"));
+        assert!(!is_canonical(PHONE, "0612345678"));
+        assert_eq!(canonicalize(PHONE, "0612345678"), "0612345678");
+
+        // E.164 bounds: at most 15 digits, no leading zero after the +.
+        assert!(is_canonical(PHONE, "+123456789012345"));
+        assert!(!is_canonical(PHONE, "+1234567890123456"));
+        assert!(!is_canonical(PHONE, "+0612345678"));
+        assert!(!is_canonical(PHONE, "+"));
+        assert!(!is_canonical(PHONE, "31612345678"));
+    }
+
+    #[test]
+    fn test_canonicalization_merges_identities_never_splits_them() {
+        // The property the whole design rests on: because the sender and the
+        // PKG apply the same function, canonicalization is a coarsening of
+        // equality. Values that used to derive differently can now agree; two
+        // values that already agreed cannot be pulled apart.
+        let raw = Policy {
+            timestamp: 1_700_000_000,
+            con: alloc::vec![Attribute::new(EMAIL, Some("Alice@Example.COM"))],
+        };
+        let canonical = Policy {
+            timestamp: 1_700_000_000,
+            con: alloc::vec![Attribute::new(EMAIL, Some("alice@example.com"))],
+        };
+
+        assert_eq!(raw.derive().unwrap(), canonical.derive().unwrap());
+
+        // An untouched type still separates what it always separated.
+        let bob = Policy {
+            timestamp: 1_700_000_000,
+            con: alloc::vec![Attribute::new(
+                "pbdf.gemeente.personalData.name",
+                Some("Bob")
+            )],
+        };
+        let bob_upper = Policy {
+            timestamp: 1_700_000_000,
+            con: alloc::vec![Attribute::new(
+                "pbdf.gemeente.personalData.name",
+                Some("BOB")
+            )],
+        };
+
+        assert_ne!(bob.derive().unwrap(), bob_upper.derive().unwrap());
+    }
+
+    #[test]
+    fn test_policy_canonicalization_reaches_the_wire() {
+        // `derive` canonicalizing is not enough on its own: the policy the
+        // sealer stores is what an older verifier reads, so the stored value
+        // has to move too.
+        let mut policy = Policy {
+            timestamp: 1_700_000_000,
+            con: alloc::vec![
+                Attribute::new(EMAIL, Some(" Alice@Example.COM ")),
+                Attribute::new(PHONE, Some("+31 6 1234 5678")),
+            ],
+        };
+        policy.canonicalize();
+
+        assert_eq!(policy.con[0].value.as_deref(), Some("alice@example.com"));
+        assert_eq!(policy.con[1].value.as_deref(), Some("+31612345678"));
+
+        // An attribute with no value is left alone rather than gaining one.
+        let mut valueless = Policy {
+            timestamp: 0,
+            con: alloc::vec![Attribute::new(EMAIL, None)],
+        };
+        valueless.canonicalize();
+        assert_eq!(valueless.con[0].value, None);
+    }
 
     #[test]
     fn test_ordering() {

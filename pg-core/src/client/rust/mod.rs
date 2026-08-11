@@ -77,7 +77,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         Ok(Self {
             rng,
             header,
-            pub_sign_key: pub_sign_key.clone(),
+            pub_sign_key: crate::client::canonical_signing_key(pub_sign_key),
             priv_sign_key: None,
             config: SealerMemoryConfig { key, nonce },
         })

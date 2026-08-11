@@ -139,6 +139,16 @@ impl Header {
         policies: &EncryptionPolicy,
         rng: &mut R,
     ) -> Result<(Self, SharedSecret), Error> {
+        // Canonicalize before deriving *and* before storing, so the hidden
+        // policies that go on the wire carry the same values the identities
+        // were derived from. A reader that predates the canonicalization rule
+        // then derives the same identity from this header as we did, which is
+        // what makes the fix reach consumers who never upgrade.
+        let policies: EncryptionPolicy = policies
+            .iter()
+            .map(|(rid, policy)| (rid.clone(), policy.canonical()))
+            .collect();
+
         // Map each RecipientPolicy to an IBE identity.
         let ids = policies
             .values()
