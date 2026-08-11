@@ -22,6 +22,19 @@ use header::SignatureExt;
 use ibs::gg::Verifier;
 use serde::{Deserialize, Serialize};
 
+/// Returns a copy of a signing key whose policy is canonicalized.
+///
+/// The policy travels into the container, where a verifier derives the signer's
+/// identity from it. Canonicalizing it here means that identity matches the one
+/// the PKG derived when it issued this key — including for a verifier that
+/// predates the rule and derives the header bytes as they stand.
+pub(crate) fn canonical_signing_key(key: &SigningKeyExt) -> SigningKeyExt {
+    let mut key = key.clone();
+    key.policy.canonicalize();
+
+    key
+}
+
 /// A Sealer is used to encrypt and sign data using PostGuard.
 #[derive(Debug)]
 pub struct Sealer<'r, R, C> {
@@ -47,7 +60,10 @@ impl<'r, R, C> Sealer<'r, R, C> {
     /// Add a private signing key and policy.
     ///
     /// This policy is safe to include private data as it is encrypted after signing.
-    pub fn with_priv_signing_key(mut self, priv_sign_key: SigningKeyExt) -> Self {
+    pub fn with_priv_signing_key(mut self, mut priv_sign_key: SigningKeyExt) -> Self {
+        // See `canonical_signing_key`; this policy reaches the wire too.
+        priv_sign_key.policy.canonicalize();
+
         self.priv_sign_key = Some(priv_sign_key);
         self
     }
