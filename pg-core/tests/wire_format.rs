@@ -1,6 +1,6 @@
 //! Wire-format tripwire (EPIC issue #211).
 //!
-//! Pins the VERSION_V3 byte format against golden fixtures committed in
+//! Pins the VERSION_2 byte format against golden fixtures committed in
 //! `testdata/wire-format-v3/` (sealed once by the published `@e4a/pg-wasm`,
 //! with the key material to unseal them). If a change to `consts.rs`, the
 //! bincode framing, or the header layout breaks these tests, every ciphertext
@@ -20,7 +20,9 @@ use pg_core::api::Parameters;
 use pg_core::artifacts::{UserSecretKey, VerifyingKey};
 use pg_core::client::rust::UnsealerMemoryConfig;
 use pg_core::client::Unsealer;
-use pg_core::consts::{PREAMBLE_SIZE, PRELUDE, PRELUDE_SIZE, VERSION_SIZE, VERSION_V3};
+use pg_core::consts::{
+    PREAMBLE_SIZE, PRELUDE, PRELUDE_SIZE, VERSION_0, VERSION_1, VERSION_2, VERSION_SIZE,
+};
 use pg_core::kem::cgw_kv::CGWKV;
 
 use serde::Deserialize;
@@ -73,12 +75,29 @@ fn fixture() -> Fixture {
 #[test]
 fn wire_constants_are_pinned() {
     assert_eq!(PRELUDE, [0x14, 0x8A, 0x8E, 0xA7], "PRELUDE bytes changed");
-    assert_eq!(VERSION_V3, 2, "VERSION_V3 changed");
+    assert_eq!(VERSION_0, 0, "VERSION_0 changed");
+    assert_eq!(VERSION_1, 1, "VERSION_1 changed");
+    assert_eq!(VERSION_2, 2, "VERSION_2 changed");
     assert_eq!(PREAMBLE_SIZE, 10, "preamble layout changed");
 }
 
+/// Each version constant is named after the wire value it holds, and the
+/// deprecated `VERSION_V*` aliases still point at the same values they did
+/// before the rename. An alias that drifted from its replacement would make
+/// an out-of-tree consumer write or accept the wrong version identifier, and
+/// no other test would notice.
+#[test]
+#[allow(deprecated)]
+fn deprecated_aliases_match_their_replacements() {
+    use pg_core::consts::{VERSION_V1, VERSION_V2, VERSION_V3};
+
+    assert_eq!(VERSION_V1, VERSION_0, "VERSION_V1 is no longer version 0");
+    assert_eq!(VERSION_V2, VERSION_1, "VERSION_V2 is no longer version 1");
+    assert_eq!(VERSION_V3, VERSION_2, "VERSION_V3 is no longer version 2");
+}
+
 /// Both golden containers begin with the documented 10-byte preamble:
-/// PRELUDE (4) || VERSION_V3 big-endian (2) || header length (4).
+/// PRELUDE (4) || VERSION_2 big-endian (2) || header length (4).
 #[test]
 fn golden_fixtures_carry_the_pinned_preamble() {
     for name in ["stream.bin", "mem.bin"] {
@@ -90,7 +109,7 @@ fn golden_fixtures_carry_the_pinned_preamble() {
                 .try_into()
                 .unwrap(),
         );
-        assert_eq!(version, VERSION_V3, "{name}: version mismatch");
+        assert_eq!(version, VERSION_2, "{name}: version mismatch");
     }
 }
 

@@ -21,7 +21,7 @@ use pg_core::artifacts::{UserSecretKey, VerifyingKey};
 use pg_core::client::rust::stream::UnsealerStreamConfig;
 use pg_core::client::rust::UnsealerMemoryConfig;
 use pg_core::client::Unsealer;
-use pg_core::consts::VERSION_V3;
+use pg_core::consts::VERSION_2;
 use pg_core::kem::cgw_kv::CGWKV;
 
 use serde::Deserialize;
@@ -89,7 +89,7 @@ fn manifest_names_every_file() {
     let m = manifest(&set);
 
     assert_eq!(m.schema_version, sample_set::SCHEMA_VERSION);
-    assert_eq!(m.wire_version, VERSION_V3);
+    assert_eq!(m.wire_version, VERSION_2);
     assert!(!m.cases.is_empty(), "manifest lists no cases");
 
     let mut named: Vec<String> = vec![sample_set::MANIFEST.to_string(), m.verifying_key.clone()];
@@ -137,7 +137,7 @@ fn head_reads_back_every_case() {
                 "memory" => {
                     let unsealer = Unsealer::<Vec<u8>, UnsealerMemoryConfig>::new(ct.clone(), &vk)
                         .unwrap_or_else(|e| panic!("{}: parse: {e}", case.name));
-                    assert_eq!(unsealer.version, VERSION_V3, "{}: version", case.name);
+                    assert_eq!(unsealer.version, VERSION_2, "{}: version", case.name);
                     unsealer
                         .unseal(&recipient.id, &usk.key)
                         .unwrap_or_else(|e| panic!("{}/{}: unseal: {e}", case.name, recipient.id))
@@ -149,7 +149,7 @@ fn head_reads_back_every_case() {
                         let unsealer = Unsealer::<_, UnsealerStreamConfig>::new(&mut reader, &vk)
                             .await
                             .unwrap_or_else(|e| panic!("{}: parse: {e}", case.name));
-                        assert_eq!(unsealer.version, VERSION_V3, "{}: version", case.name);
+                        assert_eq!(unsealer.version, VERSION_2, "{}: version", case.name);
                         unsealer
                             .unseal(&recipient.id, &usk.key, &mut plain)
                             .await

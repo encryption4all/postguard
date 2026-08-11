@@ -88,7 +88,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         let mut out = Vec::with_capacity(message.as_ref().len() + 1024);
 
         out.extend_from_slice(&PRELUDE);
-        out.extend_from_slice(&VERSION_V3.to_be_bytes());
+        out.extend_from_slice(&VERSION_2.to_be_bytes());
 
         self.header = self.header.with_mode(Mode::InMemory {
             size: message.as_ref().len().try_into()?,

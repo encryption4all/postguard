@@ -45,11 +45,14 @@ Containers and envelopes stay readable. Once a release can open a format, no
 later release drops that ability, and there is no expiry on it. A container
 that cannot be opened fails with a typed error, never silently.
 
-The guarantee starts at container format `VERSION_V3` (wire value `2`, bincode
-header, [`pg-core/src/consts.rs`](pg-core/src/consts.rs)), which is the only
-format current readers accept. `VERSION_V1` (Kiltz-Vahlis-1) and `VERSION_V2`
+The guarantee starts at container format `VERSION_2` (bincode header,
+[`pg-core/src/consts.rs`](pg-core/src/consts.rs)), which is the only format
+current readers accept. `VERSION_0` (Kiltz-Vahlis-1) and `VERSION_1`
 (MessagePack header) predate this document and were dropped before it;
-`preamble_checked` rejects both with `Error::IncorrectVersion`.
+`preamble_checked` rejects both with `Error::IncorrectVersion`. Each constant
+is named after the wire value it holds; the older `VERSION_V1`/`VERSION_V2`/
+`VERSION_V3` names, which counted from one, are deprecated aliases and go at
+the next major.
 
 Format changes roll out readers first. Read support ships in one release and
 the write default flips a major later, so nothing gets written that the

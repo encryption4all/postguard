@@ -1,8 +1,8 @@
-Golden VERSION_V3 wire-format fixtures (EPIC issue #211): tiny ciphertexts in
+Golden VERSION_2 wire-format fixtures (EPIC issue #211): tiny ciphertexts in
 both containers (streaming + in-memory), sealed by the published
 `@e4a/pg-wasm@0.6.1`, committed with the verifying key and user secret key
 needed to unseal them forever. `pg-core/tests/wire_format.rs` asserts they
-still parse and decrypt — so a change to `consts.rs` (PRELUDE/VERSION_V3),
+still parse and decrypt — so a change to `consts.rs` (PRELUDE/VERSION_2),
 `bincode_compat`, or the header layout fails `cargo test -p pg-core`
 immediately, in this repo, before it can reach clients.
 
