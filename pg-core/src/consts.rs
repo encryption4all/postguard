@@ -1,10 +1,15 @@
 //! Constants used in the PostGuard protocol.
 
+// Container format versions. The name of each constant is the wire value it
+// holds, so `VERSION_2` is the version identifier `2` that appears in the
+// preamble. The older `VERSION_V1`/`VERSION_V2`/`VERSION_V3` spelling counted
+// from one and is kept below as deprecated aliases.
+
 /// Version 0 (legacy).
 ///
 /// This version used the Kiltz-Vahlis-1 scheme.
 /// The header format was defined by Postcard, but is no longer supported.
-pub const VERSION_V1: u16 = 0;
+pub const VERSION_0: u16 = 0;
 
 /// Version 1 (legacy).
 ///
@@ -12,14 +17,26 @@ pub const VERSION_V1: u16 = 0;
 /// encapsulate the same shared secret for multiple recipients. This version also supports
 /// conjunctions. For this version we required the header to be dynamic.
 /// The header format is defined by MessagePack.
-pub const VERSION_V2: u16 = 1;
+pub const VERSION_1: u16 = 1;
 
 /// Version 2.
 ///
 /// This version uses the CGW anonymous IBE scheme to construct a KEM variant.
 /// The scheme supports a Sign-then-Encrypt composition using the GG-IBS scheme.
 /// The binary header format is defined by Bincode.
-pub const VERSION_V3: u16 = 2;
+pub const VERSION_2: u16 = 2;
+
+/// Deprecated alias for [`VERSION_0`].
+#[deprecated(note = "the name is one higher than the wire value it holds; use VERSION_0")]
+pub const VERSION_V1: u16 = VERSION_0;
+
+/// Deprecated alias for [`VERSION_1`].
+#[deprecated(note = "the name is one higher than the wire value it holds; use VERSION_1")]
+pub const VERSION_V2: u16 = VERSION_1;
+
+/// Deprecated alias for [`VERSION_2`].
+#[deprecated(note = "the name is one higher than the wire value it holds; use VERSION_2")]
+pub const VERSION_V3: u16 = VERSION_2;
 
 /// The size of the tag with which all PostGuard bytestreams begin.
 pub const PRELUDE_SIZE: usize = 4;

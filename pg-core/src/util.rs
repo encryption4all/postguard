@@ -44,9 +44,9 @@ pub(crate) fn preamble_checked(preamble: &[u8]) -> Result<(u16, usize), Error> {
             .map_err(|_e| Error::FormatViolation(String::from("version")))?,
     );
 
-    if version != VERSION_V3 {
+    if version != VERSION_2 {
         return Err(Error::IncorrectVersion {
-            expected: VERSION_V3,
+            expected: VERSION_2,
             found: version,
         });
     }
