@@ -517,6 +517,44 @@ fn the_semver_gate_still_calls_the_script_this_repo_pins() {
     );
 }
 
+/// The registry gate (#318): the job that reads the live ruleset back and
+/// compares it against [`REQUIRED_CHECK`].
+///
+/// This file pins the name a job in `build.yml` produces; the ruleset pins the
+/// name it requires; and until #318 nothing compared the two, because both
+/// #272 and postguard-js#222 assumed an API read needed a credential CI could
+/// not have. It does not, on a public repo. So the link is now closed from both
+/// ends, and what can drift has moved: the workflow can stop calling the script.
+///
+/// The script's own behaviour -- drift is 1, undetermined is 2, and they are
+/// never conflated -- is pinned by `scripts/ruleset-drift-test.sh`, which the
+/// same job runs. This asserts only that the job still calls both.
+#[test]
+fn the_registry_gate_still_reads_the_ruleset_back() {
+    let job = job(&workflow(), "ruleset-drift");
+    let steps = steps(&job);
+
+    step_with(&steps, "scripts/ruleset-drift.sh");
+    step_with(&steps, "scripts/ruleset-drift-test.sh");
+
+    // Without a checkout there is no script to run, and the job fails in a way
+    // that reads like drift rather than like a broken job.
+    assert!(
+        job.contains("actions/checkout"),
+        "the registry gate no longer checks the repo out, so the script it runs is not there",
+    );
+
+    // The gate reads a live third-party API. If it were ever aggregated into
+    // `Wire compat` -- the one context the ruleset requires and `--admin`
+    // cannot bypass -- a GitHub API outage would become an unmergeable repo.
+    let aggregator = self::job(&workflow(), "wire-compat");
+    assert!(
+        !aggregator.contains("ruleset-drift"),
+        "the registry gate has been wired into the sole required check. It reads a live API, \
+         so an outage there would block every merge; keep it a separate, non-required context",
+    );
+}
+
 /// The reader above is line-oriented, so a reformat of `build.yml` could leave
 /// it matching nothing while every assertion still passed. This is the check
 /// that the instrument itself still works: the jobs the other tests read must
@@ -531,6 +569,7 @@ fn every_job_this_test_reads_is_still_found() {
         "wire-compat-js",
         "semver-checks",
         "wire-compat",
+        "ruleset-drift",
     ] {
         assert!(
             ids.contains(&id.to_owned()),
