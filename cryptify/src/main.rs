@@ -80,6 +80,12 @@ struct InitResponse {
     /// the UUID — typically in IndexedDB — and sends it back in an
     /// `X-Recovery-Token` header on resume. Hex-encoded 32-byte random.
     recovery_token: String,
+    /// Ceiling on a single chunk PUT, in bytes: the server rejects any
+    /// `PUT /fileupload/{uuid}` whose `Content-Range` spans more than this.
+    /// A client may send smaller chunks. Always `config.chunk_size()`, the
+    /// same accessor the enforcement path reads, so a client that sizes its
+    /// chunks from this field cannot be out of step with the deployment.
+    max_chunk_size_bytes: u64,
 }
 
 struct CryptifyToken(String);
@@ -468,7 +474,9 @@ async fn upload_init(
             api_key_tenant: api_key.tenant,
             api_key_validation_failed: api_key.validation_failed,
             last_chunk: None,
-            recovery_token: recovery_token.clone(),
+            // Only the digest is kept: the plaintext below is the client's
+            // copy, and `upload_status` re-hashes whatever it is presented.
+            recovery_token_hash: store::hash_recovery_token(&recovery_token),
         },
     );
 
@@ -476,6 +484,7 @@ async fn upload_init(
         inner: Json(InitResponse {
             uuid,
             recovery_token,
+            max_chunk_size_bytes: config.chunk_size(),
         }),
         cryptify_token: CryptifyToken(init_cryptify_token),
     })
@@ -788,6 +797,12 @@ async fn upload_chunk(
         response_token: shasum.clone(),
     });
 
+    // Write the advanced chain through to SQLite before the response leaves:
+    // the client treats the token it gets back as committed, so the durable
+    // row must not lag behind it. A database failure is logged, not
+    // propagated — the chunk is already on disk and in memory.
+    store.persist_session(uuid, &state);
+
     drop(state);
     store.touch(uuid);
 
@@ -1007,6 +1022,11 @@ async fn upload_finalize(
     state.sender = sender.clone();
     state.sender_attributes = sender_attributes;
 
+    // Persist the finalize transition (the sender is only known now) before
+    // the notification email goes out, so the durable row is never behind the
+    // side effects the client's request produced.
+    store.persist_session(uuid, &state);
+
     send_email(config, &state, uuid).await.map_err(|e| {
         log::error!("could not send notification email: {}", e);
         Error::InternalServerError(Some(GENERIC_INTERNAL_ERROR_MSG.to_owned()))
@@ -1078,7 +1098,15 @@ async fn upload_status(
         .ok_or_else(|| Error::upload_session_not_found(uuid, "expired_or_unknown"))?;
     let state = state.lock().await;
 
-    if !constant_time_eq(&recovery_token.0, &state.recovery_token) {
+    // Hash-versus-hash, never plaintext-versus-plaintext: the server does not
+    // keep the token it issued, only `sha256` of it, which is the same thing a
+    // session restored from SQLite after a restart holds. Both comparands are
+    // fixed-length hex digests, so the constant-time compare has no length to
+    // leak either.
+    if !constant_time_eq(
+        &store::hash_recovery_token(&recovery_token.0),
+        &state.recovery_token_hash,
+    ) {
         // Same body shape as evicted/unknown so the response doesn't leak
         // session existence to a token-guessing attacker.
         return Err(Error::upload_session_not_found(uuid, "expired_or_unknown"));
@@ -1537,6 +1565,7 @@ pub fn build_rocket(figment: Figment, vk: Parameters<VerifyingKey>) -> Rocket<Bu
             std::time::Duration::from_secs(config.session_ttl_secs()),
             metrics.clone(),
             config.usage_db(),
+            Path::new(config.data_dir()),
         ))
         .manage(vk)
         .manage(pkg_client)
@@ -2296,7 +2325,7 @@ mod tests {
             api_key_tenant: None,
             api_key_validation_failed: false,
             last_chunk: None,
-            recovery_token: String::new(),
+            recovery_token_hash: String::new(),
         }
     }
 
@@ -2789,7 +2818,7 @@ mod tests {
                 api_key_tenant: None,
                 api_key_validation_failed: false,
                 last_chunk: None,
-                recovery_token: String::new(),
+                recovery_token_hash: String::new(),
             };
             store.create(uuid.to_owned(), state);
         }
@@ -2888,7 +2917,13 @@ mod integration {
     fn test_figment() -> (rocket::figment::Figment, std::path::PathBuf) {
         let dir =
             std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
-        std::fs::create_dir_all(&dir).expect("create temp data_dir");
+        (test_figment_in(&dir), dir)
+    }
+
+    /// [`test_figment`] against a caller-supplied directory, so a test can
+    /// build a second Rocket on the state the first one left behind.
+    fn test_figment_in(dir: &std::path::Path) -> rocket::figment::Figment {
+        std::fs::create_dir_all(dir).expect("create temp data_dir");
 
         let figment = default_figment()
             .merge(("server_url", "http://localhost:8000"))
@@ -2901,7 +2936,7 @@ mod integration {
             .merge(("allowed_origins", ".*"))
             .merge(("pkg_url", "http://localhost:8080"));
 
-        (figment, dir)
+        figment
     }
 
     /// Seal `payload` for the encryption policy from `TestSetup`, producing a
@@ -2937,6 +2972,22 @@ mod integration {
     async fn cors_client(setup: &TestSetup, allowed_origins: &str) -> (Client, std::path::PathBuf) {
         let (figment, dir) = test_figment();
         let figment = figment.merge(("allowed_origins", allowed_origins.to_string()));
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        let rocket = build_rocket(figment, vk);
+        let client = Client::tracked(rocket).await.expect("valid rocket");
+        (client, dir)
+    }
+
+    /// Boot Rocket like [`test_client`] but with a caller-supplied
+    /// `chunk_size`, so both the value `/fileupload/init` serves and the
+    /// ceiling the chunk PUT enforces can be checked against something other
+    /// than the 5 MB default.
+    async fn chunk_size_client(setup: &TestSetup, chunk_size: u64) -> (Client, std::path::PathBuf) {
+        let (figment, dir) = test_figment();
+        let figment = figment.merge(("chunk_size", chunk_size));
         let vk = Parameters {
             format_version: 0,
             public_key: VerifyingKey(setup.ibs_pk.0.clone()),
@@ -3107,6 +3158,493 @@ mod integration {
             .dispatch()
             .await
             .status()
+    }
+
+    /// Boot Rocket through the same [`build_rocket`] seam as [`test_client`],
+    /// but with `usage_db` pointed at a SQLite file inside the per-test
+    /// `data_dir` — that key names cryptify's whole state database, so setting
+    /// it is what turns upload-session persistence on. Returns the database
+    /// path so a test can read the rows back with plain SQL, independent of
+    /// the code that wrote them.
+    async fn test_client_with_state_db(
+        setup: &TestSetup,
+    ) -> (Client, std::path::PathBuf, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
+        let client = boot_with_state_db(setup, &dir).await;
+        let db_path = dir.join("state.db");
+        (client, dir, db_path)
+    }
+
+    /// Boot Rocket on `dir` with the state database inside it — the same
+    /// layout production uses (`usage_db` under the bind-mounted data
+    /// directory). Calling it twice on one `dir` is what a restart looks like
+    /// from the outside: the first instance is dropped, taking its `Store`
+    /// and its SQLite connection with it, and the second finds only what
+    /// reached disk.
+    async fn boot_with_state_db(setup: &TestSetup, dir: &std::path::Path) -> Client {
+        let db_path = dir.join("state.db");
+        let figment =
+            test_figment_in(dir).merge(("usage_db", db_path.to_string_lossy().to_string()));
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        Client::tracked(build_rocket(figment, vk))
+            .await
+            .expect("valid rocket")
+    }
+
+    /// The columns an upload session's durable row must show after a
+    /// transition, read straight out of SQLite.
+    struct SessionRow {
+        uploaded: i64,
+        cryptify_token: String,
+        prev_token: Option<String>,
+        prev_uploaded: Option<i64>,
+        recovery_token_hash: String,
+        api_key_tenant: Option<String>,
+        sender: Option<String>,
+        created_at: i64,
+        last_active_at: i64,
+    }
+
+    fn read_session_row(db_path: &std::path::Path, uuid: &str) -> Option<SessionRow> {
+        let conn = rusqlite::Connection::open(db_path).expect("open state database");
+        conn.query_row(
+            "SELECT uploaded, cryptify_token, prev_token, prev_uploaded,
+                    recovery_token_hash, api_key_tenant, sender, created_at, last_active_at
+             FROM upload_sessions WHERE uuid = ?1",
+            rusqlite::params![uuid],
+            |row| {
+                Ok(SessionRow {
+                    uploaded: row.get(0)?,
+                    cryptify_token: row.get(1)?,
+                    prev_token: row.get(2)?,
+                    prev_uploaded: row.get(3)?,
+                    recovery_token_hash: row.get(4)?,
+                    api_key_tenant: row.get(5)?,
+                    sender: row.get(6)?,
+                    created_at: row.get(7)?,
+                    last_active_at: row.get(8)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    /// The done bar for postguard#302: after real HTTP init and chunk
+    /// requests, the session is on disk in SQLite with the token the client
+    /// was handed. Driven through the router, so it also proves the
+    /// write-through actually runs inside the handlers — not just that
+    /// `Store` can write a row when called directly.
+    #[rocket::async_test]
+    async fn session_rows_are_visible_in_sqlite_after_init_and_chunk() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir, db_path) = test_client_with_state_db(&setup).await;
+
+        let (uuid, init_token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+
+        let row = read_session_row(&db_path, &uuid).expect("init must persist a session row");
+        assert_eq!(row.uploaded, 0);
+        assert_eq!(
+            row.cryptify_token, init_token,
+            "the persisted token must be the one the client was told to use next"
+        );
+        assert_eq!(row.prev_token, None, "no chunk committed yet");
+        assert_eq!(row.prev_uploaded, None);
+        assert_eq!(row.sender, None, "sender is only known at finalize");
+        assert_eq!(
+            row.api_key_tenant, None,
+            "this request presented no API key"
+        );
+        assert_eq!(
+            row.recovery_token_hash.len(),
+            64,
+            "recovery token is stored as a hex SHA-256, never in the clear"
+        );
+        assert_eq!(row.created_at, row.last_active_at);
+
+        let chunk = b"a chunk of sealed-looking bytes";
+        let (chunk_status, next_token) = do_chunk(&client, &uuid, &init_token, chunk, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+
+        let row = read_session_row(&db_path, &uuid).expect("chunk must persist the session row");
+        assert_eq!(row.uploaded, chunk.len() as i64);
+        assert_eq!(
+            row.cryptify_token, next_token,
+            "the row must carry the advanced token the response returned"
+        );
+        assert_eq!(
+            row.prev_token.as_deref(),
+            Some(init_token.as_str()),
+            "the replay record must persist so a restart can still accept a retry"
+        );
+        assert_eq!(row.prev_uploaded, Some(0));
+        assert!(row.last_active_at >= row.created_at);
+
+        // The client-visible surface is unchanged: nothing about persistence
+        // is exposed on the responses, and the flow still completes.
+        assert!(!next_token.is_empty());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Finalize is the third transition, and the only one that learns the
+    /// sender. Runs the whole flow against a real sealed payload.
+    #[rocket::async_test]
+    async fn finalize_persists_the_sender_to_sqlite() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"hello persistence").await;
+        let (client, dir, db_path) = test_client_with_state_db(&setup).await;
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, sealed.len() as u64).await,
+            Status::Ok
+        );
+
+        let row = read_session_row(&db_path, &uuid).expect("row after finalize");
+        assert_eq!(
+            row.sender.as_deref(),
+            Some(SENDER_EMAIL),
+            "finalize must persist the sender it unsealed"
+        );
+        assert_eq!(row.uploaded, sealed.len() as i64);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Persistence must not change any client-visible behaviour, so the same
+    /// happy path has to pass with the state database switched on.
+    #[rocket::async_test]
+    async fn upload_happy_path_is_unchanged_with_persistence_enabled() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"hello persistent integration test").await;
+        let (client, dir, _db_path) = test_client_with_state_db(&setup).await;
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, sealed.len() as u64).await,
+            Status::Ok
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // ---------------------------------------------------------------------
+    // Restart recovery (postguard#303).
+    //
+    // Each of these drops the Rocket instance mid-upload and boots a second
+    // one on the same `data_dir` and state database — the redeploy that used
+    // to answer the next chunk PUT with a 404 (postguard-website#117).
+    // ---------------------------------------------------------------------
+
+    /// Like [`do_init`] but also returns the `recovery_token` from the body,
+    /// which `GET /fileupload/{uuid}/status` requires.
+    async fn do_init_with_recovery(client: &Client, recipient: &str) -> (String, String, String) {
+        let res = client
+            .post("/fileupload/init")
+            .header(ContentType::JSON)
+            .body(init_body_json(recipient))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::Ok);
+        let token = res
+            .headers()
+            .get_one("cryptifytoken")
+            .expect("cryptifytoken header")
+            .to_owned();
+        let body: serde_json::Value = res.into_json().await.expect("init body");
+        (
+            body["uuid"].as_str().expect("uuid").to_owned(),
+            token,
+            body["recovery_token"]
+                .as_str()
+                .expect("recovery_token")
+                .to_owned(),
+        )
+    }
+
+    async fn do_status(
+        client: &Client,
+        uuid: &str,
+        recovery_token: &str,
+    ) -> (Status, serde_json::Value) {
+        let res = client
+            .get(format!("/fileupload/{}/status", uuid))
+            .header(Header::new("X-Recovery-Token", recovery_token.to_owned()))
+            .dispatch()
+            .await;
+        let status = res.status();
+        let body = res
+            .into_json::<serde_json::Value>()
+            .await
+            .unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    /// The done bar for postguard#303: an upload survives the process that
+    /// was serving it. Init and the first chunk go to one Rocket instance,
+    /// the rest to a second one built on the same `data_dir` and database,
+    /// and the file still unseals at finalize — so the restored session
+    /// carried both the rolling token and the bytes already on disk.
+    #[rocket::async_test]
+    async fn an_upload_resumes_across_a_restart() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a payload that outlives the process").await;
+        let split = sealed.len() / 2;
+        let dir =
+            std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
+
+        let (uuid, token) = {
+            let client = boot_with_state_db(&setup, &dir).await;
+            let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+            assert_eq!(status, Status::Ok);
+            let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed[..split], 0).await;
+            assert_eq!(chunk_status, Status::Ok);
+            (uuid, token)
+            // The client — and with it the Store, its in-memory map and its
+            // SQLite connection — is dropped here. Everything the second
+            // instance knows has to come off disk.
+        };
+
+        let client = boot_with_state_db(&setup, &dir).await;
+
+        let (chunk_status, token) =
+            do_chunk(&client, &uuid, &token, &sealed[split..], split as u64).await;
+        assert_eq!(
+            chunk_status,
+            Status::Ok,
+            "the chunk after a restart must be accepted, not 404'd"
+        );
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, sealed.len() as u64).await,
+            Status::Ok,
+            "finalize must unseal a file written by two different processes"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A restored session holds only `sha256(recovery_token)`, so the status
+    /// endpoint has to authenticate against the digest — and still refuse a
+    /// wrong token the same way it refuses an unknown UUID.
+    #[rocket::async_test]
+    async fn the_status_endpoint_authenticates_a_restored_session() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let chunk = b"the first chunk, sent before the restart";
+        let dir =
+            std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
+
+        let (uuid, token, recovery_token) = {
+            let client = boot_with_state_db(&setup, &dir).await;
+            let (uuid, token, recovery_token) = do_init_with_recovery(&client, SENDER_EMAIL).await;
+            let (chunk_status, next) = do_chunk(&client, &uuid, &token, chunk, 0).await;
+            assert_eq!(chunk_status, Status::Ok);
+            (uuid, next, recovery_token)
+        };
+
+        let client = boot_with_state_db(&setup, &dir).await;
+
+        let (status, body) = do_status(&client, &uuid, &recovery_token).await;
+        assert_eq!(
+            status,
+            Status::Ok,
+            "the token issued before the restart must still work"
+        );
+        assert_eq!(body["uploaded"].as_u64(), Some(chunk.len() as u64));
+        assert_eq!(body["cryptify_token"].as_str(), Some(token.as_str()));
+        assert_eq!(
+            body["prev_offset"].as_u64(),
+            Some(0),
+            "the replay record has to come back too, or a rehydrating client cannot retry"
+        );
+
+        let (status, _) = do_status(&client, &uuid, &"0".repeat(64)).await;
+        assert_eq!(
+            status,
+            Status::NotFound,
+            "a wrong token stays indistinguishable from an unknown session"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The case the restart actually creates: the client never saw the
+    /// response to its last chunk because the process went away, so it
+    /// retries that chunk against the new one. It must be recognised as a
+    /// replay — same token back, nothing written twice.
+    #[rocket::async_test]
+    async fn replaying_the_last_chunk_after_a_restart_is_idempotent() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a chunk the client retries").await;
+        let split = sealed.len() / 2;
+        let dir =
+            std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
+
+        let (uuid, init_token, response_token, recovery_token) = {
+            let client = boot_with_state_db(&setup, &dir).await;
+            let (uuid, init_token, recovery_token) =
+                do_init_with_recovery(&client, SENDER_EMAIL).await;
+            let (chunk_status, response_token) =
+                do_chunk(&client, &uuid, &init_token, &sealed[..split], 0).await;
+            assert_eq!(chunk_status, Status::Ok);
+            (uuid, init_token, response_token, recovery_token)
+        };
+
+        let client = boot_with_state_db(&setup, &dir).await;
+
+        // Retry the first chunk with the token the client last held.
+        let (replay_status, replayed) =
+            do_chunk(&client, &uuid, &init_token, &sealed[..split], 0).await;
+        assert_eq!(replay_status, Status::Ok, "a replay must not 400");
+        assert_eq!(
+            replayed, response_token,
+            "the replay must return the original response token, not advance the chain"
+        );
+
+        let (_, body) = do_status(&client, &uuid, &recovery_token).await;
+        assert_eq!(
+            body["uploaded"].as_u64(),
+            Some(split as u64),
+            "a replayed chunk must not be counted twice"
+        );
+
+        // And the upload still completes from where it left off.
+        let (chunk_status, token) =
+            do_chunk(&client, &uuid, &replayed, &sealed[split..], split as u64).await;
+        assert_eq!(chunk_status, Status::Ok);
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, sealed.len() as u64).await,
+            Status::Ok
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The other half of the ticket: a session that idled out while the
+    /// process was down leaves neither a row nor the bytes it had written.
+    #[rocket::async_test]
+    async fn a_session_that_expired_while_down_is_cleaned_up() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let dir =
+            std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
+        let db_path = dir.join("state.db");
+
+        let (uuid, token, recovery_token) = {
+            let client = boot_with_state_db(&setup, &dir).await;
+            let (uuid, token, recovery_token) = do_init_with_recovery(&client, SENDER_EMAIL).await;
+            let (chunk_status, _) = do_chunk(&client, &uuid, &token, b"half an upload", 0).await;
+            assert_eq!(chunk_status, Status::Ok);
+            (uuid, token, recovery_token)
+        };
+        assert!(
+            dir.join(&uuid).exists(),
+            "the chunk was written to data_dir"
+        );
+
+        // Backdate the session past the idle window over a second connection,
+        // the way a process that was down for an hour would leave it.
+        let conn = rusqlite::Connection::open(&db_path).expect("open state database");
+        let stale = chrono::offset::Utc::now().timestamp() - 7_200;
+        conn.execute(
+            "UPDATE upload_sessions SET last_active_at = ?2 WHERE uuid = ?1",
+            rusqlite::params![uuid, stale],
+        )
+        .expect("backdate the session");
+        drop(conn);
+
+        let client = boot_with_state_db(&setup, &dir).await;
+
+        assert!(
+            !dir.join(&uuid).exists(),
+            "the partial upload of an expired session must be swept from data_dir"
+        );
+        assert!(
+            read_session_row(&db_path, &uuid).is_none(),
+            "its row must go with it"
+        );
+        let (status, _) = do_status(&client, &uuid, &recovery_token).await;
+        assert_eq!(status, Status::NotFound);
+        let (chunk_status, _) = do_chunk(&client, &uuid, &token, b"more bytes", 14).await;
+        assert_eq!(chunk_status, Status::NotFound);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `max_chunk_size_bytes` on the init response and the ceiling the chunk
+    /// PUT enforces are the same configured value, so a client that sizes its
+    /// chunks from the served field is never rejected for being too large.
+    ///
+    /// The configured size is deliberately not the 5 MB default: against the
+    /// default, a handler that served a hardcoded `5_000_000` would pass every
+    /// assertion below and this test would guard nothing.
+    #[rocket::async_test]
+    async fn init_serves_the_configured_chunk_size_and_enforces_it() {
+        const CONFIGURED_CHUNK_SIZE: u64 = 1_048_576;
+
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir) = chunk_size_client(&setup, CONFIGURED_CHUNK_SIZE).await;
+
+        // Init advertises the configured ceiling.
+        let res = client
+            .post("/fileupload/init")
+            .header(ContentType::JSON)
+            .body(init_body_json(SENDER_EMAIL))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::Ok);
+        let token = res
+            .headers()
+            .get_one("cryptifytoken")
+            .expect("cryptifytoken on init")
+            .to_string();
+        let body = res.into_string().await.expect("init body");
+        let body: serde_json::Value = serde_json::from_str(&body).expect("init body is JSON");
+        assert_eq!(
+            body["max_chunk_size_bytes"].as_u64(),
+            Some(CONFIGURED_CHUNK_SIZE),
+            "init should serve the configured chunk size, got body {body}"
+        );
+        let uuid = body["uuid"]
+            .as_str()
+            .expect("uuid in init body")
+            .to_string();
+
+        // A chunk of exactly the advertised size is accepted.
+        let at_limit = vec![0u8; CONFIGURED_CHUNK_SIZE as usize];
+        let (status, _next) = do_chunk(&client, &uuid, &token, &at_limit, 0).await;
+        assert_eq!(status, Status::Ok, "a chunk of exactly the advertised size");
+
+        // One byte over is rejected. On a fresh session, so the offset and the
+        // initial token are the ones this chunk is presented with.
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let over_limit = vec![0u8; CONFIGURED_CHUNK_SIZE as usize + 1];
+        let (status, _) = do_chunk(&client, &uuid, &token, &over_limit, 0).await;
+        assert_eq!(
+            status,
+            Status::BadRequest,
+            "a chunk one byte over the advertised size"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[rocket::async_test]

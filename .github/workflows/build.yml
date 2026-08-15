@@ -115,6 +115,17 @@ jobs:
   # is skipped by a path filter never reports, so a required check would sit
   # pending forever on PRs that do not touch the wire surface. This shape always
   # reports and only does the expensive work when it needs to.
+  #
+  # On `push` the filter is the wrong instrument and is bypassed (#299). It
+  # diffs only the push that triggered it, so a commit that reached `main`
+  # without this gate ever running is never re-checked afterwards -- and the job
+  # still reports green, because "filter said no" and "gate passed" are the same
+  # success. That is not hypothetical: #297 changed seven files under
+  # `pg-compat/**` and merged during the 2026-08-06 Actions outage with no run
+  # at all, and the three `main` runs after it (506144c2, c1682ba7, 1238389b)
+  # each reported `Wire compat: success` with `Seal`/`Open` both skipped. So on
+  # a push the gate always does the real work: whatever is on `main` is what
+  # gets sealed and opened, however it got there.
   # ---------------------------------------------------------------------------
   wire-compat-rust:
     name: Wire compat (published pg-core)
@@ -149,14 +160,28 @@ jobs:
               - 'Cargo.toml'
               - '.github/workflows/build.yml'
 
-      - if: steps.changes.outputs.wire == 'true'
+      # One decision, read by every step below, so the push override cannot be
+      # applied to the seal but forgotten on the open.
+      - name: Decide whether to do the real work
+        id: gate
+        shell: bash
+        env:
+          WIRE_CHANGED: ${{ steps.changes.outputs.wire }}
+        run: |
+          if [[ "$WIRE_CHANGED" == "true" || "$GITHUB_EVENT_NAME" == "push" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.gate.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
       - name: Seal the sample set with HEAD
         id: seal
-        if: steps.changes.outputs.wire == 'true'
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           cargo run --locked -p pg-core --features stream --example seal-samples \
@@ -173,7 +198,7 @@ jobs:
           retention-days: 7
 
       - name: Open it with published pg-core
-        if: steps.changes.outputs.wire == 'true'
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         env:
           PG_COMPAT_ARTIFACTS: ${{ runner.temp }}/wire-compat-artifacts
@@ -366,11 +391,14 @@ jobs:
         run: npm test
 
   # ---------------------------------------------------------------------------
-  # Single required check consolidating the two halves above (#262). Branch
-  # protection today lists "Wire compat (published pg-core)" and "Wire compat
-  # (published pg-wasm/pg-js)" separately; once this job is green, repointing
-  # branch protection at "Wire compat" instead is an admin action left for a
-  # maintainer.
+  # Single required check consolidating the two halves above (#262). The
+  # repoint happened in #296: "Wire compat" is the one required context, and the
+  # two per-language names are no longer required individually. Since #299 it is
+  # also the sole context of the `main: required checks` ruleset, whose
+  # `bypass_actors` is empty -- so unlike classic protection (`enforce_admins`
+  # is still false) this name cannot be merged past with `--admin`. Renaming
+  # this job silently disarms that ruleset; rename the ruleset's context in the
+  # same change.
   #
   # `if: !cancelled()` for the same reason as wire-compat-js above: this job
   # must still run and report when an upstream half failed, or the required
@@ -392,3 +420,52 @@ jobs:
           if [[ "${{ needs.wire-compat-rust.result }}" != "success" || "${{ needs.wire-compat-js.result }}" != "success" ]]; then
             exit 1
           fi
+
+  # ---------------------------------------------------------------------------
+  # The registry half of the wiring guards (#318).
+  #
+  # `pg-core/tests/ci_wiring.rs` asserts that the job above is still *named*
+  # `Wire compat`. This asserts the other end of that link: that the `main`
+  # ruleset still *requires* that context. Neither end is sufficient. A context
+  # required but not produced blocks nothing (#299 measured that an absent check
+  # is as dangerous as a red one); a context produced but not required enforces
+  # nothing while every test stays green.
+  #
+  # Both #272 and postguard-js#222 declared this end unreachable from CI, on the
+  # assumption it needs an admin credential. Measured in #318: it does not. On a
+  # public repo the effective-rules endpoint answers 200 to the built-in token
+  # at any permission level, so `contents: read` below is already more than this
+  # needs, and no secret is involved.
+  #
+  # Deliberately NOT part of the `Wire compat` aggregator and deliberately not a
+  # required context: this reads a live third-party API, and a GitHub API outage
+  # must not become an unmergeable repo. Exit 2 (undetermined) is therefore a
+  # distinct outcome from exit 1 (drift) -- see scripts/ruleset-drift.sh.
+  #
+  # And deliberately no `schedule:`. A nightly would detect drift during quiet
+  # periods, but a disarmed gate can only do harm when something merges, and
+  # every merge here passes through a `pull_request` and a `push` run of this
+  # workflow. Running at exactly the moment the gate is relied upon also makes
+  # the result unmissable, which a scheduled run is not -- the ticket's own
+  # warning was that a drift detector nobody reads is itself a silent gate.
+  # ---------------------------------------------------------------------------
+  ruleset-drift:
+    name: Ruleset still requires the gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare the live ruleset against the guard's constant
+        shell: bash
+        env:
+          # Not required for the read -- unauthenticated works on a public repo.
+          # It is passed because the runner's anonymous budget is 60/hour per
+          # shared IP, and exhausting it would show up as exit 2 noise.
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ruleset-drift.sh
+
+      - name: Exit codes still mean what the gate reports
+        shell: bash
+        run: scripts/ruleset-drift-test.sh

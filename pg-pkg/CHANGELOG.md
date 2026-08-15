@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.6.0...pg-pkg-v0.6.1) - 2026-08-10
+
+### Added
+
+- *(cryptify)* merge cryptify into the workspace ([#277](https://github.com/encryption4all/postguard/pull/277))
+
 ## [0.6.0](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.5.11...pg-pkg-v0.6.0) - 2026-07-30
 
 ### Added

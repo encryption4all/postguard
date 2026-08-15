@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.29](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.28...cryptify-v0.1.29) - 2026-08-10
+
+### Added
+
+- *(cryptify)* persist upload-session state to SQLite (write-through) ([#319](https://github.com/encryption4all/postguard/pull/319))
+
 ## [0.1.28] - 2026-07-31
 
 First release since the crate moved into the postguard workspace

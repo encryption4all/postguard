@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.7...pg-cli-v0.3.8) - 2026-08-10
+
+### Other
+
+- update Cargo.lock dependencies
+
 ## [0.3.7](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.6...pg-cli-v0.3.7) - 2026-07-30
 
 ### Added

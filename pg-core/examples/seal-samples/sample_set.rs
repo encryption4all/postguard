@@ -19,7 +19,7 @@ use pg_core::artifacts::{PublicKey, SigningKey, SigningKeyExt, UserSecretKey, Ve
 use pg_core::client::rust::stream::SealerStreamConfig;
 use pg_core::client::rust::SealerMemoryConfig;
 use pg_core::client::Sealer;
-use pg_core::consts::{SYMMETRIC_CRYPTO_DEFAULT_CHUNK, VERSION_V3};
+use pg_core::consts::{SYMMETRIC_CRYPTO_DEFAULT_CHUNK, VERSION_2};
 use pg_core::identity::{Attribute, EncryptionPolicy, Policy};
 use pg_core::kem::cgw_kv::CGWKV;
 use pg_core::kem::IBKEM;
@@ -332,7 +332,7 @@ fn manifest(cases: &[Case], recipients: &[Recipient]) -> Vec<u8> {
             "crate": "pg-core",
             "version": env!("CARGO_PKG_VERSION"),
         },
-        "wireVersion": VERSION_V3,
+        "wireVersion": VERSION_2,
         "verifyingKey": "vk.json",
         "sender": {
             "public": public_sender_policy(),

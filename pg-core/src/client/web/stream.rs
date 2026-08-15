@@ -60,7 +60,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         Ok(Sealer {
             rng,
             header,
-            pub_sign_key: pub_sign_key.clone(),
+            pub_sign_key: crate::client::canonical_signing_key(pub_sign_key),
             priv_sign_key: None,
             config: StreamSealerConfig {
                 segment_size,
@@ -90,7 +90,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         });
 
         w.feed(Uint8Array::from(&PRELUDE[..]).into()).await?;
-        w.feed(Uint8Array::from(&VERSION_V3.to_be_bytes()[..]).into())
+        w.feed(Uint8Array::from(&VERSION_2.to_be_bytes()[..]).into())
             .await?;
 
         let header_vec = crate::bincode_compat::serialize(&self.header)?;

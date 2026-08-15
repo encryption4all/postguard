@@ -62,7 +62,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         Ok(Sealer {
             rng,
             header,
-            pub_sign_key: pub_sign_key.clone(),
+            pub_sign_key: crate::client::canonical_signing_key(pub_sign_key),
             priv_sign_key: None,
             config: SealerStreamConfig {
                 segment_size,
@@ -91,7 +91,7 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         W: AsyncWrite + Unpin,
     {
         w.write_all(&PRELUDE).await?;
-        w.write_all(&VERSION_V3.to_be_bytes()).await?;
+        w.write_all(&VERSION_2.to_be_bytes()).await?;
 
         let header_vec = crate::bincode_compat::serialize(&self.header)?;
         w.write_all(&u32::try_from(header_vec.len())?.to_be_bytes())

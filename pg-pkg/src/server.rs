@@ -642,6 +642,59 @@ pub(crate) mod tests {
     }
 
     #[actix_web::test]
+    async fn test_signing_key_returns_a_canonical_policy() {
+        // A signing key ships two things every verifier has to agree on: the
+        // key, derived through the canonicalizing `derive_ibs`, and the policy,
+        // which the client stores in the header and which every verifier — this
+        // version and published ones — derives the signer's identity from.
+        //
+        // Returning a raw policy would pair a key for `derive(canon(pol))` with
+        // bytes that read `pol`. A verifier that predates canonicalization then
+        // derives `derive(pol)` and rejects signatures it accepts today, for
+        // any value the rule moves. Yivi's disclosures are canonical by
+        // premise, but the API-key path builds its conjunction from
+        // hand-entered business-portal fields, where they are not.
+        let mut rng = thread_rng();
+        let (app, _, _, pks, _) = default_setup().await;
+
+        let skr = SigningKeyRequest {
+            pub_sign_id: vec![Attribute::new(
+                "pbdf.sidn-pbdf.email.email",
+                Some("  Alice@Example.COM "),
+            )],
+            priv_sign_id: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/v2/sign/key")
+            .set_json(skr)
+            .to_request();
+
+        let key_response: SigningKeyResponse = test::call_and_read_body_json(&app, req).await;
+        let pub_sign_key = key_response.pub_sign_key.unwrap();
+
+        assert_eq!(
+            pub_sign_key.policy.con[0].value.as_deref(),
+            Some("alice@example.com"),
+            "the PKG must hand back the policy it derived the key from"
+        );
+
+        // The property that makes the deploy order irrelevant: the returned
+        // policy is a fixed point, so canonicalizing verifiers and raw ones
+        // read the same bytes and reach the same identity.
+        assert_eq!(pub_sign_key.policy.canonical(), pub_sign_key.policy);
+
+        // And the key really does belong to that identity.
+        let id = pub_sign_key.policy.derive_ibs().unwrap();
+        let message = b"signed under a non-canonical request";
+        let sig = gg::Signer::new()
+            .chain(message)
+            .sign(&pub_sign_key.key.0, &mut rng);
+
+        assert!(gg::Verifier::new().chain(message).verify(&pks, &sig, &id));
+    }
+
+    #[actix_web::test]
     async fn test_round_kem() {
         let mut rng = thread_rng();
         let (app, _, sk, _, _) = default_setup().await;

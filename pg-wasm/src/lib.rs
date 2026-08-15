@@ -95,6 +95,43 @@ fn get_recipients(header: &Header) -> Result<JsValue, JsValue> {
     Ok(pol)
 }
 
+/// Rewrites an attribute value into the canonical form its type expects.
+///
+/// Sealing applies this automatically, so a policy does not have to be
+/// canonicalized before it is passed to [`js_seal`]. Call this to show a user
+/// the value that will actually be encrypted to, or to normalize an input field
+/// as it is typed.
+///
+/// The function is total: a value it cannot bring into canonical form — a bare
+/// national phone number, which needs a country to resolve — is returned
+/// unchanged. Use [`js_is_canonical`] to detect that.
+///
+/// # Arguments
+///
+/// * `atype` - The attribute type, e.g. `pbdf.sidn-pbdf.email.email`.
+/// * `value` - The attribute value.
+#[wasm_bindgen(js_name = canonicalize)]
+pub fn js_canonicalize(atype: &str, value: &str) -> String {
+    pg_core::identity::canonicalize(atype, value)
+}
+
+/// Whether an attribute value is already in the canonical form its type
+/// expects.
+///
+/// Types that carry no canonicalization rule are always canonical. For a mobile
+/// number this is stricter than "[`js_canonicalize`] would not change it": the
+/// value must also be valid E.164, which is what lets a policy editor reject a
+/// bare national number before it produces a container nobody can decrypt.
+///
+/// # Arguments
+///
+/// * `atype` - The attribute type, e.g. `pbdf.sidn-pbdf.email.email`.
+/// * `value` - The attribute value.
+#[wasm_bindgen(js_name = isCanonical)]
+pub fn js_is_canonical(atype: &str, value: &str) -> bool {
+    pg_core::identity::is_canonical(atype, value)
+}
+
 /// Seals the contents of a `Uint8Array` into a `Uint8Array` using
 /// the given master public key and policies.
 ///

@@ -45,11 +45,14 @@ Containers and envelopes stay readable. Once a release can open a format, no
 later release drops that ability, and there is no expiry on it. A container
 that cannot be opened fails with a typed error, never silently.
 
-The guarantee starts at container format `VERSION_V3` (wire value `2`, bincode
-header, [`pg-core/src/consts.rs`](pg-core/src/consts.rs)), which is the only
-format current readers accept. `VERSION_V1` (Kiltz-Vahlis-1) and `VERSION_V2`
+The guarantee starts at container format `VERSION_2` (bincode header,
+[`pg-core/src/consts.rs`](pg-core/src/consts.rs)), which is the only format
+current readers accept. `VERSION_0` (Kiltz-Vahlis-1) and `VERSION_1`
 (MessagePack header) predate this document and were dropped before it;
-`preamble_checked` rejects both with `Error::IncorrectVersion`.
+`preamble_checked` rejects both with `Error::IncorrectVersion`. Each constant
+is named after the wire value it holds; the older `VERSION_V1`/`VERSION_V2`/
+`VERSION_V3` names, which counted from one, are deprecated aliases and go at
+the next major.
 
 Format changes roll out readers first. Read support ships in one release and
 the write default flips a major later, so nothing gets written that the
@@ -69,9 +72,13 @@ envelope tier, tested in both directions.
 The window is the set of published SDK versions kept working against the
 current server and the current wire format.
 
-- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window when the
-  Outlook migration lands ([postguard-outlook-addon#125]) and telemetry shows
-  no `1.x` traffic.
+- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window when
+  telemetry shows no `1.x` traffic. The other half of that condition, the
+  Outlook add-in's v1 → v2 migration, **has landed**: the add-in lives at
+  `apps/outlook-addon` in [postguard-js] on `@e4a/pg-js": "workspace:*"` (2.x)
+  and released as `outlook-addin-v1.0.0`. [postguard-outlook-addon#125] is
+  closed and stayed in that now-archived repo, so treat it as a historical
+  record rather than a tracker.
 - `@e4a/pg-wasm` (npm): every version a supported `pg-js` resolves.
 - `E4A.PostGuard` (NuGet): the last major. `0.x` counts as one line until
   `1.0`.
@@ -114,20 +121,23 @@ process below. The npm version of `@e4a/pg-wasm` tracks the released `pg-core`
 version rather than `pg-wasm/Cargo.toml`, so read that pin from npm and not
 from the crate manifest.
 
-Live consumers of this list:
+Live consumers of this list, both in `.github/workflows/build.yml`:
 
-- `wire-compat-rust` in `.github/workflows/build.yml` ([#260]), a required PR
-  check: seals with HEAD and opens with the pinned published `pg-core`
-- `wire-compat-js` in the same file ([#261]): opens the same bytes with the
-  published npm readers
+- `wire-compat-rust` ([#260]): seals with HEAD and opens with the pinned
+  published `pg-core`
+- `wire-compat-js` ([#261]): opens the same bytes with the published npm readers
 
-Planned consumers, each still an open issue:
+Neither is a required check on its own. [#262] replaced the two per-language
+contexts with the single `wire-compat` job, whose display name **`Wire compat`**
+is what both branch protection and the `main: required checks` ruleset pin — so
+that name is load bearing, and `pg-core/tests/ci_wiring.rs` ([#272]) asserts it
+still belongs to the job that aggregates both halves.
 
-- [#251], its remaining tracking work, including making `wire-compat-js`
-  required alongside the Rust half ([#262])
+The envelope tiers have their own gate, [postguard-js#131]. Still planned, each
+an open issue:
+
 - [postguard-e2e#25], the forward-direction fixture job
 - [postguard-e2e#21], the version sweep, to run nightly and pre-deploy
-- [postguard-js#131], the envelope-compat gate
 
 A gate that needs a different set of readers changes this file first. The two
 npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
@@ -158,12 +168,13 @@ driving published NuGet versions against a target server.
 Skipping step 2 is how you break the consumers you cannot see.
 
 [#249]: https://github.com/encryption4all/postguard/issues/249
-[#251]: https://github.com/encryption4all/postguard/issues/251
 [#257]: https://github.com/encryption4all/postguard/issues/257
 [#260]: https://github.com/encryption4all/postguard/issues/260
 [#261]: https://github.com/encryption4all/postguard/issues/261
 [#262]: https://github.com/encryption4all/postguard/issues/262
 [#268]: https://github.com/encryption4all/postguard/issues/268
+[#272]: https://github.com/encryption4all/postguard/issues/272
+[postguard-js]: https://github.com/encryption4all/postguard-js
 [postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
 [postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
 [postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21

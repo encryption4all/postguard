@@ -167,6 +167,7 @@ paths:
                   required:
                     - uuid
                     - recovery_token
+                    - max_chunk_size_bytes
                   properties:
                     uuid:
                       type: "string"
@@ -182,6 +183,21 @@ paths:
                         `X-Recovery-Token` header to recover from a
                         page refresh, tab crash, or navigate-away-and-back.
                         Hex-encoded 32-byte random."
+                    max_chunk_size_bytes:
+                      type: "integer"
+                      format: "int64"
+                      description:
+                        "Maximum size of a single chunk in bytes on
+                        `PUT /fileupload/{uuid}`. This is a ceiling, not a
+                        required chunk size: a client may send smaller
+                        chunks. The server enforces it regardless of what the
+                        client sends, rejecting a chunk whose `Content-Range`
+                        spans more than this with a 400. It is read from the
+                        deployment's configuration, so it can differ per
+                        deployment. Served here only. A client that resumes
+                        with `X-Recovery-Token` after a refresh should persist
+                        it alongside the UUID, because
+                        `GET /fileupload/{uuid}/status` does not repeat it."
           "400":
             description:
               "The `recipient` address could not be parsed. A body that is not

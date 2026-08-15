@@ -4,18 +4,27 @@ RUN cargo install cargo-chef cargo-watch
 WORKDIR /app
 
 FROM chef AS planner
+# A workspace member cargo cannot read is a hard error even for a build that
+# never compiles it: `cargo chef prepare` loads every member's manifest.
+# cryptify became a member in #277 and was missed here, which broke this image
+# and, through it, postguard-e2e's stack.
 COPY pg-core ./pg-core
 COPY pg-pkg ./pg-pkg
 COPY pg-cli ./pg-cli
 COPY pg-ffi ./pg-ffi
 COPY pg-wasm ./pg-wasm
+COPY cryptify ./cryptify
 COPY Cargo.toml Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
 RUN cargo run --bin pg-pkg -- gen
 
 FROM chef AS dev
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --recipe-path recipe.json
+# --bin pg-pkg for the same reason as Dockerfile:31: the recipe covers every
+# member, so an unscoped cook builds cryptify's tree (rocket, lettre, rusqlite
+# with `bundled`, i.e. the SQLite amalgamation) into an image whose only command
+# is `cargo run --bin pg-pkg`. Scoping it drops 106 crates from the cook.
+RUN cargo chef cook --bin pg-pkg --recipe-path recipe.json
 
 # Copy generated keys to /keys, outside the bind-mounted /app directory
 RUN mkdir /keys
