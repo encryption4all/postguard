@@ -40,9 +40,9 @@ fn no_two_pinned_readers_share_a_minor_line() {
 
         if let Some((_, other)) = seen.iter().find(|(l, _)| *l == line) {
             panic!(
-                "pg-compat pins both {other} and {} on the {line} line; two same-minor `=` pins \
-                 do not resolve, because cargo unifies semver-compatible requirements to one \
-                 version. Replace the {line} pin instead of adding to it.",
+                "pg-compat pins both {other} and {} on the {line} line; two `=` pins in one \
+                 compatibility bucket do not resolve, because cargo unifies semver-compatible \
+                 requirements to one version. Replace the {line} pin instead of adding to it.",
                 reader.version,
             );
         }
@@ -51,8 +51,10 @@ fn no_two_pinned_readers_share_a_minor_line() {
     }
 }
 
-/// `major.minor` of a crates.io version, which is what decides whether two
-/// pins are semver-compatible.
+/// The semver compatibility bucket of a crates.io version, which is what
+/// decides whether two `=` pins can coexist. Cargo keys that on `major.minor`
+/// only while the major is `0`; from `1.0.0` on it is the major alone, so
+/// `=1.0.0` and `=1.1.0` would conflict too.
 fn minor_line(version: &str) -> String {
     let mut parts = version.split('.');
     let major = parts
@@ -62,5 +64,9 @@ fn minor_line(version: &str) -> String {
         .next()
         .unwrap_or_else(|| panic!("version {version} has no minor component"));
 
-    format!("{major}.{minor}")
+    if major == "0" {
+        format!("{major}.{minor}")
+    } else {
+        major.to_string()
+    }
 }

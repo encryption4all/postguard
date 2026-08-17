@@ -55,7 +55,8 @@ semver-compatible, so cargo unifies them to a single version and the `=`
 requirements conflict. Moving a line to a newer patch is therefore a
 replacement, not an addition — the window is "the highest published patch of
 each line". `tests/support_window.rs` fails, naming both versions, if two pins
-ever share a `major.minor`.
+ever land in one compatibility bucket — `major.minor` while the major is `0`, the
+major alone from `1.0.0` on.
 
 `tests/support_window.rs` parses the `crates.io` row(s) out of
 `COMPATIBILITY.md`'s `Reader list` block and asserts they match `readers()`, so
@@ -87,7 +88,7 @@ stream-multi-segment.bin/.plain
 ```json
 {
   "schemaVersion": 1,
-  "sealedBy": { "crate": "pg-core", "version": "0.6.1" },
+  "sealedBy": { "crate": "pg-core", "version": "..." },
   "wireVersion": 2,
   "verifyingKey": "vk.json",
   "sender": {
@@ -115,7 +116,10 @@ stream-multi-segment.bin/.plain
   no gate.
 - `sealedBy`: which crate at which version produced the set. Informational: it
   is the *writer*, so it is never the version a reader should check itself
-  against. Use `wireVersion` for that.
+  against. Use `wireVersion` for that. The value is HEAD's own `pg-core`
+  version, not one of the pins above, so it moves with every release — which is
+  why the example leaves it a placeholder rather than naming a version that
+  would drift.
 - `wireVersion`: the container version the bytes claim (`VERSION_V3`, `2`).
 - `sender.public`: the policy the sender signed the *header* with, visible to
   anyone who has the bytes. This is what a reader checks the header signature

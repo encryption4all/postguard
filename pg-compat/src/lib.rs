@@ -255,10 +255,13 @@ macro_rules! reader {
             use pg_core::client::rust::stream::UnsealerStreamConfig;
             use pg_core::client::rust::UnsealerMemoryConfig;
             use pg_core::client::{Unsealer, VerificationResult};
-            // `VERSION_V3` is a deprecated alias for `VERSION_2` from #339
-            // onwards, and the published releases pinned here only ever have
-            // the old name. `pg-compat-lint` runs clippy with `-D warnings`,
-            // so both the import and the use below carry the allow.
+            // `VERSION_V3` is a deprecated alias for `VERSION_2` in this tree
+            // from #339 onwards. Neither pinned release carries that
+            // deprecation yet — 0.6.3 and 0.5.10 contain no `#[deprecated]` at
+            // all — so these two allows are inert today and are here for the
+            // pin that first ships it, where `pg-compat-lint`'s clippy
+            // `-D warnings` would make the lint a hard error on both the
+            // import and the use below.
             #[allow(deprecated)]
             use pg_core::consts::VERSION_V3;
             use pg_core::kem::cgw_kv::CGWKV;
