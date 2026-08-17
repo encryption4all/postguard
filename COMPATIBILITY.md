@@ -109,7 +109,7 @@ in either direction.
 
 ```
 # <registry> <package> <versions...>
-crates.io pg-core 0.6.1 0.5.10
+crates.io pg-core 0.6.3 0.5.10
 npm @e4a/pg-wasm 0.6.1
 npm @e4a/pg-js 2.3.3 1.11.0
 nuget E4A.PostGuard 0.6.0
