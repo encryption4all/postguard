@@ -114,10 +114,11 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         let mut enc = EncryptorBE32::from_aead(aead, &self.config.nonce.into());
 
         // Check for a private signing key, otherwise fall back to the public one.
+        let pub_pol_bytes = crate::bincode_compat::serialize(&self.pub_sign_key.policy)?;
         let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
         let pol_bytes = crate::bincode_compat::serialize(&signing_key.policy)?;
-        let pol_len = pol_bytes.len();
+        let pol_len = pol_bytes.len() + pub_pol_bytes.len();
 
         if pol_len + POL_SIZE_SIZE > self.config.segment_size as usize {
             return Err(Error::ConstraintViolation);
@@ -126,13 +127,24 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, SealerStreamConfig> {
         let mut buf = vec![0; self.config.segment_size as usize + TAG_SIZE];
 
         buf[..POL_SIZE_SIZE].copy_from_slice(&u32::try_from(pol_len)?.to_be_bytes());
-        buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len].copy_from_slice(&pol_bytes);
+        buf[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_bytes.len()].copy_from_slice(&pol_bytes);
+        buf[POL_SIZE_SIZE + pol_bytes.len()..POL_SIZE_SIZE + pol_len]
+            .copy_from_slice(&pub_pol_bytes);
 
         let mut buf_tail = POL_SIZE_SIZE + pol_len;
         let mut start = buf_tail;
 
-        // First segment: DEM.K (pol_len || pol || m_0 || sig_0 )
+        // First segment: DEM.K (pol_len || pol || pub_pol || m_0 || sig_0 )
         // Other segments: DEM.K (m_i || sig_0)
+        //
+        // `pub_pol` is the sender's public signing policy, the same value that
+        // goes into the header signature outside the AEAD. It sits inside the
+        // length-delimited policy region because that is the one place a reader
+        // skips wholesale: `pol_len` covers both policies and the reader drains
+        // the region before splitting the segment at `len - SIG_BYTES`. Anything
+        // appended after `sig_0` would be read as message or signature bytes.
+        // The message signature covers the message only — the region is excluded
+        // from it here and stays excluded.
 
         let mut counter: u32 = 0;
 
@@ -279,7 +291,10 @@ where
         let mut counter: u32 = 0;
         let mut pol_id: Option<(Policy, Identity)> = None;
 
-        fn extract_policy(buf: &mut Vec<u8>) -> Result<Option<(Policy, Identity)>, Error> {
+        fn extract_policy(
+            buf: &mut Vec<u8>,
+            pub_id: &Policy,
+        ) -> Result<Option<(Policy, Identity)>, Error> {
             if buf.len() < POL_SIZE_SIZE {
                 return Err(Error::FormatViolation(alloc::string::String::from(
                     "policy length",
@@ -295,7 +310,25 @@ where
                 )));
             }
             let pol_bytes = &buf[POL_SIZE_SIZE..pol_end];
-            let pol: Policy = crate::bincode_compat::deserialize(pol_bytes)?;
+            let (pol, read): (Policy, usize) =
+                crate::bincode_compat::deserialize_with_len(pol_bytes)?;
+
+            // The rest of the region, if the sealer wrote one, is a copy of the
+            // sender's public signing policy. The header signature outside the
+            // AEAD claims a policy too; if they disagree, that block was
+            // swapped. An exhausted region means the sealer predates the copy.
+            // Both readings are authenticated against the DEM key and reach no
+            // further, so the exhausted case is not the safe half of the two —
+            // see the note on `MessageAndSignature` in `client/rust/mod.rs`.
+            if read < pol_bytes.len() {
+                let sealed_pub_pol: Policy =
+                    crate::bincode_compat::deserialize(&pol_bytes[read..])?;
+
+                if &sealed_pub_pol != pub_id {
+                    return Err(Error::IncorrectSignature);
+                }
+            }
+
             let id = pol.derive_ibs()?;
 
             buf.drain(..pol_end);
@@ -341,7 +374,7 @@ where
                 dec.decrypt_next_in_place(b"", &mut buf)?;
 
                 if counter == 0 {
-                    pol_id = extract_policy(&mut buf)?;
+                    pol_id = extract_policy(&mut buf, &self.pub_id)?;
                 }
 
                 let m = verify_segment(
@@ -363,7 +396,7 @@ where
                 dec.decrypt_last_in_place(b"", &mut buf)?;
 
                 if counter == 0 {
-                    pol_id = extract_policy(&mut buf)?;
+                    pol_id = extract_policy(&mut buf, &self.pub_id)?;
                 }
 
                 let m = verify_segment(
@@ -404,9 +437,13 @@ mod tests {
     use crate::error::Error;
     use crate::test::TestSetup;
     use crate::{PREAMBLE_SIZE, SYMMETRIC_CRYPTO_DEFAULT_CHUNK, TAG_SIZE};
+    use aead::stream::{DecryptorBE32, EncryptorBE32};
+    use aead::KeyInit;
+    use aes_gcm::Aes128Gcm;
     use alloc::string::String;
     use alloc::vec::Vec;
     use futures::{executor::block_on, io::AllowStdIo};
+    use ibe::kem::cgw_kv::CGWKV;
     use rand::{thread_rng, Rng, RngCore};
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
@@ -701,6 +738,174 @@ mod tests {
         let mut input = Cursor::new(ct);
         let res = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk).await;
         assert!(matches!(res, Err(Error::NotPostGuard)));
+    }
+
+    /// Splits a sealed streaming container into the header bytes, the header
+    /// signature block and the payload.
+    fn split_container(ct: &[u8]) -> (&[u8], &[u8], &[u8]) {
+        use crate::util::preamble_checked;
+        use crate::SIG_SIZE_SIZE;
+
+        let (_, header_len) =
+            preamble_checked(&ct[..PREAMBLE_SIZE]).expect("preamble should parse");
+        let sig_len_at = PREAMBLE_SIZE + header_len;
+        let sig_len = u32::from_be_bytes(
+            ct[sig_len_at..sig_len_at + SIG_SIZE_SIZE]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let sig_at = sig_len_at + SIG_SIZE_SIZE;
+
+        (
+            &ct[PREAMBLE_SIZE..sig_len_at],
+            &ct[sig_at..sig_at + sig_len],
+            &ct[sig_at + sig_len..],
+        )
+    }
+
+    /// The attack: keep the preamble, header and payload byte for byte, and
+    /// replace only the header signature block with one made over the same
+    /// header bytes by another signing key, carrying that key's policy.
+    fn swap_header_signature(
+        ct: &[u8],
+        attacker: &crate::artifacts::SigningKeyExt,
+        rng: &mut (impl rand::RngCore + rand::CryptoRng),
+    ) -> Vec<u8> {
+        use crate::client::header::SignatureExt;
+        use ibs::gg::Signer;
+
+        let (header_bytes, _, payload) = split_container(ct);
+
+        let h_sig_ext = SignatureExt {
+            sig: Signer::default()
+                .chain(header_bytes)
+                .sign(&attacker.key.0, rng),
+            pol: attacker.policy.clone(),
+        };
+        let h_sig_ext_bytes = crate::bincode_compat::serialize(&h_sig_ext).unwrap();
+
+        let mut out = ct[..PREAMBLE_SIZE + header_bytes.len()].to_vec();
+        out.extend_from_slice(&(h_sig_ext_bytes.len() as u32).to_be_bytes());
+        out.extend_from_slice(&h_sig_ext_bytes);
+        out.extend_from_slice(payload);
+
+        out
+    }
+
+    /// A container sealed before the policy region carried the public signing
+    /// policy: same bytes, but with the region narrowed back to the signing
+    /// policy alone and the single segment re-encrypted.
+    fn strip_pub_pol(
+        ct: &[u8],
+        ident: &str,
+        usk: &crate::artifacts::UserSecretKey<CGWKV>,
+    ) -> Vec<u8> {
+        use crate::client::{Algorithm, Header};
+        use crate::identity::Policy;
+        use crate::{KEY_SIZE, POL_SIZE_SIZE, STREAM_NONCE_SIZE};
+
+        let (header_bytes, _, payload) = split_container(ct);
+        let header: Header = crate::bincode_compat::deserialize(header_bytes).unwrap();
+        let ss = header.recipients.get(ident).unwrap().decaps(usk).unwrap();
+
+        let Algorithm::Aes128Gcm(iv) = header.algo;
+        let aead = Aes128Gcm::new_from_slice(&ss.0[..KEY_SIZE]).unwrap();
+        let nonce = &iv.0[..STREAM_NONCE_SIZE];
+
+        // The helper seals a message that fits in one segment, so the payload
+        // is a single final segment.
+        let mut plain = payload.to_vec();
+        DecryptorBE32::from_aead(aead.clone(), nonce.into())
+            .decrypt_last_in_place(b"", &mut plain)
+            .unwrap();
+
+        let pol_len = u32::from_be_bytes(plain[..POL_SIZE_SIZE].try_into().unwrap()) as usize;
+        let region = &plain[POL_SIZE_SIZE..POL_SIZE_SIZE + pol_len];
+        let (_, read): (Policy, usize) =
+            crate::bincode_compat::deserialize_with_len(region).unwrap();
+        assert!(
+            read < pol_len,
+            "the sealer wrote no public policy into the region — nothing to strip"
+        );
+
+        let mut legacy = (read as u32).to_be_bytes().to_vec();
+        legacy.extend_from_slice(&region[..read]);
+        legacy.extend_from_slice(&plain[POL_SIZE_SIZE + pol_len..]);
+
+        EncryptorBE32::from_aead(aead, nonce.into())
+            .encrypt_last_in_place(b"", &mut legacy)
+            .unwrap();
+
+        let mut out = ct[..ct.len() - payload.len()].to_vec();
+        out.extend_from_slice(&legacy);
+
+        out
+    }
+
+    fn try_unseal(setup: &TestSetup, ct: &[u8]) -> Result<(Vec<u8>, VerificationResult), Error> {
+        let mut input = AllowStdIo::new(Cursor::new(ct));
+        let mut output = AllowStdIo::new(Vec::new());
+
+        let vr = block_on(async {
+            Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk)
+                .await?
+                .unseal("Bob", &setup.usks[2], &mut output)
+                .await
+        })?;
+
+        Ok((output.into_inner(), vr))
+    }
+
+    /// Replacing the header signature with one made by another signing key over
+    /// the same header bytes must be rejected: the copy of the public signing
+    /// policy inside the AEAD-protected policy region no longer matches the one
+    /// the block claims.
+    #[test]
+    fn test_stream_unseal_rejects_swapped_header_signature() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let ct = seal_helper(&setup, b"SECRET DATA");
+
+        // Charlie's name-only key — a key the PKG hands to whoever authenticates
+        // as Charlie, which is exactly what makes the swap cheap.
+        let swapped = swap_header_signature(&ct, &setup.signing_keys[4], &mut rng);
+
+        block_on(async {
+            let mut input = AllowStdIo::new(Cursor::new(&swapped));
+            let unsealer = Unsealer::<_, UnsealerStreamConfig>::new(&mut input, &setup.ibs_pk)
+                .await
+                .expect("the swapped header signature still verifies — that is the attack");
+            assert_eq!(
+                unsealer.pub_id, setup.policies[4],
+                "the container now claims the attacker as public sender"
+            );
+        });
+
+        match try_unseal(&setup, &swapped) {
+            Err(Error::IncorrectSignature) => {}
+            other => panic!(
+                "expected IncorrectSignature, got {:?}",
+                other.map(|(m, vr)| (m.len(), vr))
+            ),
+        }
+    }
+
+    /// A container sealed by a pg-core that predates the copy has a policy
+    /// region holding the signing policy and nothing else. It must still
+    /// unseal, and report the same sender it always did.
+    #[test]
+    fn test_stream_unseal_accepts_container_without_public_policy() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let ct = seal_helper(&setup, b"SECRET DATA");
+        let legacy = strip_pub_pol(&ct, "Bob", &setup.usks[2]);
+
+        let (plain, vr) = try_unseal(&setup, &legacy)
+            .expect("a container without the public policy must still open");
+
+        assert_eq!(&plain, b"SECRET DATA");
+        assert_eq!(&vr.public, &setup.signing_keys[0].policy);
+        assert_eq!(vr.private, None);
     }
 
     #[tokio::test]
