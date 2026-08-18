@@ -29,7 +29,7 @@ use super::web::aesgcm::{decrypt, get_key};
 use crate::artifacts::{PublicKey, UserSecretKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::EncryptionPolicy;
+use crate::identity::{EncryptionPolicy, Policy};
 
 use ibe::kem::cgw_kv::CGWKV;
 use ibs::gg::Signer;
@@ -61,8 +61,33 @@ impl super::sealed::SealerConfig for SealerMemoryConfig {}
 impl UnsealerConfig for UnsealerMemoryConfig {}
 impl super::sealed::UnsealerConfig for UnsealerMemoryConfig {}
 
+/// The AEAD plaintext as this version writes it.
+///
+/// `pub_pol` is a copy of the sender's public signing policy, the same value
+/// that goes into `h_sig_ext` outside the AEAD. Only the copy in here is
+/// covered by the AEAD, so a reader can tell that a party on the wire replaced
+/// the header signature block with one made by another signing key.
+///
+/// The copy is authenticated against the DEM key, not against the sender's
+/// signing key, so it covers a party on the wire and nobody who holds the DEM
+/// key themselves. Read it as a check against the wire, not as sender
+/// authentication. Binding the policy under something only the sender controls
+/// is a design change, not this check.
 #[derive(Debug, Serialize, Deserialize)]
 struct MessageAndSignature {
+    message: Vec<u8>,
+    sig: SignatureExt,
+    pub_pol: Policy,
+}
+
+/// The part of that plaintext every version writes.
+///
+/// bincode encodes fields positionally and ignores trailing bytes, so this
+/// decodes both a container sealed by this version and one sealed before
+/// `pub_pol` existed. The reader decodes this and inspects what follows
+/// itself, rather than decoding a shape an older sealer never wrote.
+#[derive(Debug, Serialize, Deserialize)]
+struct MessageAndSignaturePrefix {
     message: Vec<u8>,
     sig: SignatureExt,
 }
@@ -119,6 +144,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         out.extend_from_slice(&h_sig_ext_bytes);
 
         let m = message.to_vec();
+        let pub_pol = self.pub_sign_key.policy.clone();
         let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
         let m_sig = signer.chain(&m).sign(&m_sig_key.key.0, self.rng);
 
@@ -128,6 +154,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
                 sig: m_sig,
                 pol: m_sig_key.policy.clone(),
             },
+            pub_pol,
         })?;
 
         let key = get_key(&self.config.key).await?;
@@ -204,8 +231,25 @@ impl Unsealer<Uint8Array, UnsealerMemoryConfig> {
             .await?
             .to_vec();
 
-        let msg: MessageAndSignature =
-            crate::bincode_compat::deserialize(&plain).map_err(Into::<Error>::into)?;
+        let (msg, read): (MessageAndSignaturePrefix, usize) =
+            crate::bincode_compat::deserialize_with_len(&plain).map_err(Into::<Error>::into)?;
+
+        // A container sealed by this version carries the sender's public
+        // signing policy behind the message signature, under the AEAD. The
+        // header signature outside the AEAD claims a policy too; if they
+        // disagree, that block was swapped. Nothing following means the sealer
+        // predates the copy. Both readings are authenticated against the DEM
+        // key and reach no further, so the absence branch is not the safe half
+        // of the two — see the note on `MessageAndSignature`.
+        if let Some(trailing) = plain.get(read..).filter(|t| !t.is_empty()) {
+            let sealed_pub_pol: Policy =
+                crate::bincode_compat::deserialize(trailing).map_err(Into::<Error>::into)?;
+
+            if sealed_pub_pol != self.pub_id {
+                return Err(Error::IncorrectSignature);
+            }
+        }
+
         let id = msg.sig.pol.derive_ibs()?;
         let verified = self
             .verifier
