@@ -134,3 +134,44 @@ test('a manifest promising the raw sender value is reported, not opened cleanly'
     },
   );
 });
+
+test('a manifest promising the wrong private sender value is reported', async () => {
+  // The sealer canonicalizes the two sender policies in separate statements
+  // (`canonical_signing_key` and `with_priv_signing_key`), so a tooth on the
+  // public one leaves the private one as unguarded as no tooth at all. This is
+  // also the only path that reaches the `privateSignatureVisible` branch in
+  // `verify.mjs`, which the wasm reader is alone in taking.
+  const RAW_MOBILE = '+31 (0)6 1234 5678';
+  const MOBILE_TYPE = 'pbdf.sidn-pbdf.mobilenumber.mobilenumber';
+
+  await withDamagedSet(
+    async (dir) => {
+      const path = join(dir, 'manifest.json');
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      const attribute = manifest.sender.private.con.find((a) => a.t === MOBILE_TYPE);
+      assert.ok(attribute, 'sender.private carries no mobile number to rewrite');
+      attribute.v = RAW_MOBILE;
+      await writeFile(path, JSON.stringify(manifest));
+    },
+    (dir) => {
+      const failures = runCase(dir, WASM_READER, 'mem-privsig');
+      assert.ok(
+        failures.length > 0,
+        'a mismatched private sender policy was reported as opening cleanly',
+      );
+      assert.ok(
+        failures.every((f) => f.includes('private signing policy is')),
+        JSON.stringify(failures),
+      );
+      // One per recipient, each naming which one it was.
+      assert.ok(
+        failures.some((f) => f.includes('mem-privsig/alice')),
+        JSON.stringify(failures),
+      );
+      assert.ok(
+        failures.some((f) => f.includes('mem-privsig/bob')),
+        JSON.stringify(failures),
+      );
+    },
+  );
+});

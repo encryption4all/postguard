@@ -180,10 +180,13 @@ pub fn describe_plaintext_mismatch(got: &[u8], want: &[u8]) -> String {
 /// A policy as a comparable string: attributes in a fixed order, and a missing
 /// value distinguished from an empty one.
 ///
-/// Mirrors `describePolicy` in `pg-compat-js/src/failures.mjs`, so a mismatch
-/// reads the same in either half of the gate. `con` is sorted here because the
-/// order a reader hands the conjunction back in is not part of the wire
-/// contract, and a reordering must not read as a break.
+/// `con` is sorted because the order a reader hands the conjunction back in is
+/// not part of the wire contract, and a reordering must not read as a break.
+/// `describePolicy` in `pg-compat-js/src/failures.mjs` sorts it on the same
+/// grounds, so both halves of the gate rule the same recovered policy a match
+/// and name the same fields when they don't. The two texts are not identical:
+/// `serde_json` here has no `preserve_order`, so object keys come out
+/// alphabetically, while the JS half emits `ts` before `con`.
 pub fn describe_policy(policy: &Value) -> String {
     let mut con: Vec<Value> = policy
         .get("con")

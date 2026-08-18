@@ -86,6 +86,18 @@ test('an attribute with no value is not the same as one with an empty value', ()
   assert.ok(describePolicyMismatch('public', withValue, withoutValue));
 });
 
+test('a conjunction handed back in another order is not a mismatch', () => {
+  // The order a reader returns the conjunction in is not part of the wire
+  // contract. `sender.private` carries two attributes, so this is reachable.
+  const con = [
+    { t: 'pbdf.gemeente.personalData.fullname', v: 'Sample Sender' },
+    { t: 'pbdf.sidn-pbdf.mobilenumber.mobilenumber', v: '+31612345678' },
+  ];
+  const got = { ts: 1704067200, con: [con[1], con[0]] };
+  const want = { ts: 1704067200, con };
+  assert.equal(describePolicyMismatch('private', got, want), null);
+});
+
 test('a policy that matches reports nothing', () => {
   const policy = { ts: 1704067200, con: [{ t: 'pbdf.sidn-pbdf.email.email', v: 'a@b.test' }] };
   assert.equal(describePolicyMismatch('public', policy, structuredClone(policy)), null);
