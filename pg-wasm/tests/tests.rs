@@ -732,3 +732,80 @@ mod legacy_containers {
         assert_eq!(&plain, PLAIN);
     }
 }
+
+/// The challenge exports are what lets a relay that holds only the verifying
+/// key check that whoever is uploading holds the signing key for the identity
+/// it reads out of a container. `pg-core` covers the crypto; these tests cover
+/// the boundary the JS caller actually sees — the signature crossing as a
+/// `Uint8Array` and coming back.
+mod challenge {
+    use super::*;
+
+    use pg_wasm::{js_sign_challenge, js_verify_challenge};
+
+    const CONTEXT: &str = "cryptify/upload";
+    const CHALLENGE: &[u8] = b"a verifier-chosen challenge";
+
+    #[wasm_bindgen_test]
+    fn test_sign_verify_roundtrip() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let key = serde_wasm_bindgen::to_value(&setup.signing_keys[0]).unwrap();
+        let pol = serde_wasm_bindgen::to_value(&setup.signing_keys[0].policy).unwrap();
+        let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
+
+        let sig = js_sign_challenge(key.into(), CONTEXT, Uint8Array::from(CHALLENGE))
+            .expect("sign the challenge");
+
+        assert_eq!(sig.length() as usize, pg_core::ibs::gg::SIG_BYTES);
+
+        assert!(
+            js_verify_challenge(vk, pol.into(), CONTEXT, Uint8Array::from(CHALLENGE), sig)
+                .expect("verify the challenge")
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn test_verify_rejects_another_identity() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let key = serde_wasm_bindgen::to_value(&setup.signing_keys[0]).unwrap();
+        let other = serde_wasm_bindgen::to_value(&setup.signing_keys[1].policy).unwrap();
+        let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
+
+        let sig = js_sign_challenge(key.into(), CONTEXT, Uint8Array::from(CHALLENGE))
+            .expect("sign the challenge");
+
+        assert!(
+            !js_verify_challenge(vk, other.into(), CONTEXT, Uint8Array::from(CHALLENGE), sig)
+                .expect("verify the challenge")
+        );
+    }
+
+    /// A signature the caller mangled is a failed proof, not a thrown error: JS
+    /// callers get `false` rather than an exception they have to catch.
+    #[wasm_bindgen_test]
+    fn test_verify_returns_false_for_a_malformed_signature() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+
+        let pol = serde_wasm_bindgen::to_value(&setup.signing_keys[0].policy).unwrap();
+        let vk = serde_wasm_bindgen::to_value(&setup.ibs_pk).unwrap();
+
+        for len in [0u32, 1, (pg_core::ibs::gg::SIG_BYTES as u32) - 1] {
+            let vk = vk.clone();
+            let pol = pol.clone();
+
+            assert!(!js_verify_challenge(
+                vk,
+                pol.into(),
+                CONTEXT,
+                Uint8Array::from(CHALLENGE),
+                Uint8Array::new_with_length(len),
+            )
+            .expect("verify a signature of the wrong length"));
+        }
+    }
+}

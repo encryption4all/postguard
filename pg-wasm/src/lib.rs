@@ -7,6 +7,7 @@
 //! PostGuard wasm API.
 
 use pg_core::artifacts::{PublicKey, SigningKeyExt, UserSecretKey, VerifyingKey};
+use pg_core::challenge::{sign_challenge, verify_challenge};
 use pg_core::client::web::stream::{StreamSealerConfig, StreamUnsealerConfig};
 use pg_core::client::web::{SealerMemoryConfig, UnsealerMemoryConfig};
 use pg_core::client::{Header, Sealer, Unsealer};
@@ -52,6 +53,14 @@ extern "C" {
     /// Seal options type from TypeScript.
     #[wasm_bindgen(typescript_type = "ISealOptions")]
     pub type ISealOptions;
+
+    /// Signing key type from TypeScript.
+    #[wasm_bindgen(typescript_type = "ISigningKey")]
+    pub type ISigningKey;
+
+    /// Policy type from TypeScript.
+    #[wasm_bindgen(typescript_type = "IPolicy")]
+    pub type IPolicy;
 }
 
 /// Seal options.
@@ -130,6 +139,85 @@ pub fn js_canonicalize(atype: &str, value: &str) -> String {
 #[wasm_bindgen(js_name = isCanonical)]
 pub fn js_is_canonical(atype: &str, value: &str) -> bool {
     pg_core::identity::is_canonical(atype, value)
+}
+
+/// Signs a challenge chosen by a verifier, proving possession of a signing key
+/// without revealing it.
+///
+/// The signed message carries a domain separator that this function applies
+/// itself, so the result can never double as a signature over a container
+/// header. That is the point of the call: a verifier that could pick the whole
+/// signed message would be able to have a header signed for a container it
+/// wrote.
+///
+/// # Arguments
+///
+/// * `key`       - The signing key to prove possession of, as `fetchKey("sign/key", ...)` returns it (see the README).
+/// * `context`   - What the proof is for, e.g. an endpoint or an upload id.
+/// * `challenge` - The `Uint8Array` the verifier chose.
+#[wasm_bindgen(js_name = signChallenge)]
+pub fn js_sign_challenge(
+    key: ISigningKey,
+    context: &str,
+    challenge: Uint8Array,
+) -> Result<Uint8Array, JsValue> {
+    let mut rng = rand::thread_rng();
+
+    let key: SigningKeyExt = serde_wasm_bindgen::from_value(key.into())?;
+    let sig = sign_challenge(&key, context, &challenge.to_vec(), &mut rng);
+    let bytes = pg_core::bincode_compat::serialize(&sig).map_err(pg_core::error::Error::from)?;
+
+    Ok(Uint8Array::from(bytes.as_slice()))
+}
+
+/// Verifies a challenge signature against the identity the policy derives to.
+///
+/// The identity is derived from the policy, which canonicalizes attribute
+/// values, so this answers whether the signer holds the key for that identity
+/// rather than whether its policy is spelled the same way. Use
+/// [`js_canonicalize`] before keying anything on a raw attribute value.
+///
+/// # Arguments
+///
+/// * `vk`        - The verifying key, can be obtained using, e.g. fetch(`{PKGURL}/v2/sign/parameters`).
+/// * `pol`       - The policy whose identity the signer should hold a key for.
+/// * `context`   - The same context the signature was requested under.
+/// * `challenge` - The `Uint8Array` this verifier chose.
+/// * `sig`       - The signature as returned by [`js_sign_challenge`].
+///
+/// # Errors
+///
+/// Errors when `vk` or `pol` cannot be read; those are the verifier's own
+/// inputs. A `sig` that is not a well-formed signature is a failed proof, not
+/// an error, and returns `false`.
+#[wasm_bindgen(js_name = verifyChallenge)]
+pub fn js_verify_challenge(
+    vk: JsValue,
+    pol: IPolicy,
+    context: &str,
+    challenge: Uint8Array,
+    sig: Uint8Array,
+) -> Result<bool, JsValue> {
+    let vk: VerifyingKey = serde_wasm_bindgen::from_value(vk)?;
+    let pol: Policy = serde_wasm_bindgen::from_value(pol.into())?;
+
+    // Decoding stops at the end of the signature, so require the exact length
+    // as well: a caller must not be able to hang extra bytes off a valid proof.
+    if sig.length() as usize != pg_core::ibs::gg::SIG_BYTES {
+        return Ok(false);
+    }
+
+    let Ok(sig) = pg_core::bincode_compat::deserialize(&sig.to_vec()) else {
+        return Ok(false);
+    };
+
+    Ok(verify_challenge(
+        &vk,
+        &pol,
+        context,
+        &challenge.to_vec(),
+        &sig,
+    ))
 }
 
 /// Seals the contents of a `Uint8Array` into a `Uint8Array` using
