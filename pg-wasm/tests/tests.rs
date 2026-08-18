@@ -807,5 +807,19 @@ mod challenge {
             )
             .expect("verify a signature of the wrong length"));
         }
+
+        // The right length but not a decodable signature, which reaches the
+        // decode branch instead of stopping at the length check. All-zero
+        // bytes would not do: those decode fine and merely fail to verify.
+        let undecodable = vec![0xffu8; pg_core::ibs::gg::SIG_BYTES];
+
+        assert!(!js_verify_challenge(
+            vk,
+            pol.into(),
+            CONTEXT,
+            Uint8Array::from(CHALLENGE),
+            Uint8Array::from(undecodable.as_slice()),
+        )
+        .expect("verify an undecodable signature"));
     }
 }
