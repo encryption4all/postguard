@@ -910,6 +910,32 @@ impl<'r> FromRequest<'r> for FinalizeHeaders {
     }
 }
 
+/// The key the rolling limit accounts against.
+///
+/// A validated API key accounts per tenant. `api-key:<tenant>` is not an
+/// identity attribute, carries no canonicalization rule, and is used exactly
+/// as the key named it; it also wins over the sender, so one tenant cannot
+/// evade quota by varying sender attributes.
+///
+/// Everything else accounts per sender email, and that value is read verbatim
+/// out of the uploaded container's public signing policy, so it is
+/// caller-chosen even when the sender is entirely genuine. `Policy::derive`
+/// canonicalizes before it derives the signer's identity (postguard#250), so
+/// one signing key for `bob@example.com` also verifies a container storing
+/// `Bob@Example.COM`, and the raw spelling is what reaches us as `pub_id`.
+/// Canonicalizing here is what keeps those spellings in one bucket instead of
+/// minting a fresh 30-day quota per capitalization.
+fn accounting_key(
+    api_key_tenant: Option<&str>,
+    email_attribute: &str,
+    sender: Option<&str>,
+) -> Option<String> {
+    match api_key_tenant {
+        Some(tenant) => Some(format!("api-key:{}", tenant)),
+        None => sender.map(|s| pg_core::identity::canonicalize(email_attribute, s)),
+    }
+}
+
 #[post("/fileupload/finalize/<uuid>")]
 async fn upload_finalize(
     config: &State<CryptifyConfig>,
@@ -979,14 +1005,11 @@ async fn upload_finalize(
         ROLLING_LIMIT
     };
     let now_secs = chrono::offset::Utc::now().timestamp();
-    // Account per-tenant when an API key was validated, otherwise per
-    // sender email. The tenant key (`api-key:<tenant>`) prevents a single
-    // tenant from evading quota by varying sender attributes.
-    let accounting_key = state
-        .api_key_tenant
-        .as_deref()
-        .map(|t| format!("api-key:{}", t))
-        .or_else(|| sender.clone());
+    let accounting_key = accounting_key(
+        state.api_key_tenant.as_deref(),
+        email_attribute,
+        sender.as_deref(),
+    );
     if let Some(key) = accounting_key.as_deref() {
         let usage = store.get_usage(key, now_secs);
         log::info!(
@@ -3669,6 +3692,172 @@ mod integration {
         assert_eq!(final_status, Status::Ok);
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Rewrite the sender spelling stored in a sealed container's public
+    /// signing policy.
+    ///
+    /// pg-core's `Sealer` canonicalizes the signing policy before writing it,
+    /// but that is a courtesy of the honest client, not a gate: `Unsealer::new`
+    /// verifies the header signature against the identity *derived* from that
+    /// policy, and `Policy::derive` canonicalizes, so a container storing any
+    /// other spelling of the same address verifies just the same and hands
+    /// cryptify the raw spelling as `pub_id`. This produces what a client that
+    /// skips the courtesy uploads.
+    ///
+    /// The rewrite is a byte substitution confined to the header-signature
+    /// block, so `replacement` must be as long as `original`: every length
+    /// prefix in the stream then stays valid, and the header bytes the
+    /// signature covers are left untouched.
+    fn respell_stored_sender(sealed: &[u8], original: &str, replacement: &str) -> Vec<u8> {
+        use pg_core::consts::{HEADER_SIZE_SIZE, PRELUDE_SIZE, SIG_SIZE_SIZE, VERSION_SIZE};
+
+        assert_eq!(
+            original.len(),
+            replacement.len(),
+            "the rewrite must not move any length prefix"
+        );
+
+        // PRELUDE | version | header len | header | signature len | signature | ...
+        let header_len_at = PRELUDE_SIZE + VERSION_SIZE;
+        let header_at = header_len_at + HEADER_SIZE_SIZE;
+        let header_len = u32::from_be_bytes(
+            sealed[header_len_at..header_at]
+                .try_into()
+                .expect("header length"),
+        ) as usize;
+        let sig_len_at = header_at + header_len;
+        let sig_at = sig_len_at + SIG_SIZE_SIZE;
+        let sig_len = u32::from_be_bytes(
+            sealed[sig_len_at..sig_at]
+                .try_into()
+                .expect("signature length"),
+        ) as usize;
+
+        let block = &sealed[sig_at..sig_at + sig_len];
+        let needle = original.as_bytes();
+        let at = block
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .expect("the stored policy carries the sender address");
+        assert!(
+            block[at + needle.len()..]
+                .windows(needle.len())
+                .all(|w| w != needle),
+            "the sender address must occur once in the signature block"
+        );
+
+        let mut out = sealed.to_vec();
+        out[sig_at + at..sig_at + at + needle.len()].copy_from_slice(replacement.as_bytes());
+        out
+    }
+
+    /// init + one chunk + finalize, returning the finalize status.
+    async fn upload_sealed(client: &Client, sealed: &[u8]) -> Status {
+        let (uuid, token, status) = do_init(client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(client, &uuid, &token, sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        do_finalize(client, &uuid, &token, sealed.len() as u64).await
+    }
+
+    /// Two containers from one sender, spelled differently, must share a single
+    /// rolling-limit bucket. Seed the bucket to leave room for exactly one
+    /// container, let the capitalized upload take that room, and the lowercase
+    /// one must then be refused. While the accounting key was the raw stored
+    /// spelling these were two buckets and both went through.
+    #[rocket::async_test]
+    async fn two_spellings_of_one_sender_share_a_rolling_limit_bucket() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let canonical = seal_payload(&setup, b"one sender, two spellings").await;
+        let capitalized = respell_stored_sender(&canonical, SENDER_EMAIL, "Bob@Example.COM");
+
+        let (client, dir) = test_client(&setup).await;
+        let store = client.rocket().state::<Store>().expect("Store managed");
+
+        let now = chrono::offset::Utc::now().timestamp();
+        store.record_upload(
+            SENDER_EMAIL.to_owned(),
+            ROLLING_LIMIT - capitalized.len() as u64,
+            now,
+        );
+
+        assert_eq!(
+            upload_sealed(&client, &capitalized).await,
+            Status::Ok,
+            "the first upload still fits inside the limit"
+        );
+        assert_eq!(
+            store.get_usage(SENDER_EMAIL, now).used_bytes,
+            ROLLING_LIMIT,
+            "the capitalized upload must accrue against the canonical bucket"
+        );
+        assert_eq!(
+            upload_sealed(&client, &canonical).await,
+            Status::PayloadTooLarge,
+            "the second spelling must not get a bucket of its own"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The accounting key is a function of the *canonical* sender, never of the
+    /// spelling the uploader chose. A regression here is silent -- every upload
+    /// still succeeds -- so pin the property over a table rather than one case.
+    #[test]
+    fn accounting_key_canonicalizes_the_sender_spelling() {
+        for atype in [
+            "pbdf.sidn-pbdf.email.email",
+            // Test deployments configure a test-scheme type (postguard#236);
+            // the rule is keyed on the tail, so it applies there too.
+            "irma-demo.sidn-pbdf.email.email",
+        ] {
+            for spelling in [
+                "bob@example.com",
+                "Bob@example.com",
+                "bob@Example.COM",
+                "BOB@EXAMPLE.COM",
+                "  bob@example.com  ",
+                "\tbob@example.com\n",
+            ] {
+                let key = accounting_key(None, atype, Some(spelling));
+                assert_eq!(
+                    key.as_deref(),
+                    Some(SENDER_EMAIL),
+                    "{atype} / {spelling:?} must not get a bucket of its own"
+                );
+                assert_eq!(
+                    key,
+                    Some(pg_core::identity::canonicalize(atype, spelling)),
+                    "the accounting key must stay canonicalize() of the container value"
+                );
+            }
+        }
+    }
+
+    /// A tenant id is not an identity attribute and has no rule, so it reaches
+    /// the store as the API key named it -- and it still wins over the sender.
+    #[test]
+    fn accounting_key_leaves_the_api_key_tenant_alone() {
+        assert_eq!(
+            accounting_key(
+                Some("Acme-EU"),
+                "pbdf.sidn-pbdf.email.email",
+                Some("Bob@Example.COM")
+            )
+            .as_deref(),
+            Some("api-key:Acme-EU")
+        );
+    }
+
+    /// No tenant and no sender is not accounted at all, as before.
+    #[test]
+    fn accounting_key_is_none_without_a_tenant_or_a_sender() {
+        assert_eq!(
+            accounting_key(None, "pbdf.sidn-pbdf.email.email", None),
+            None
+        );
     }
 
     /// Finalizing a session whose bytes are not a valid postguard stream makes

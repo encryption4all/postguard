@@ -135,6 +135,20 @@ Release-plz automation.
   source of truth, loaded on startup (`load_all_usage`) and written through on each
   `record_upload` (`record_usage`, which also prunes rows outside the 14d rolling
   window).
+- **The accounting key is not the sender value on the wire.** `upload_finalize`
+  routes the rolling limit through the `accounting_key` helper: an API key
+  accounts per `api-key:<tenant>` (a tenant id is not an identity attribute and
+  has no rule), everything else per
+  `pg_core::identity::canonicalize(config.email_attribute(), sender)`. Do not
+  reach past it for the raw value. What the container stores as its public
+  signing policy is caller-chosen even for a genuine sender: `Policy::derive`
+  canonicalizes before deriving the signer's identity, so one signing key for
+  `bob@example.com` verifies a container storing `Bob@Example.COM` too, and the
+  `Unsealer` hands the raw spelling back as `pub_id`. pg-core's `Sealer` does
+  canonicalize the policy before writing it, but that is the honest client's
+  courtesy, not a gate — a client that skips it produces a container that
+  verifies just the same. `state.sender` is deliberately left raw: it is the
+  confirmation-mail recipient and `Reply-To`, a different concern.
 - Upload sessions: `Store::persist_session(id, &FileState)` writes one upsert, and
   it is called at each of the three transitions **before the handler responds** —
   `Store::create` (init), `upload_chunk` after the rolling token advances, and
