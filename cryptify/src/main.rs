@@ -3752,6 +3752,24 @@ mod integration {
         out
     }
 
+    /// The sender email a container stores in its public signing policy, read
+    /// back exactly the way `upload_finalize` reads it. Verifying the container
+    /// is part of that read, so this doubles as the check that a respelled one
+    /// is still accepted.
+    async fn stored_sender(sealed: &[u8], setup: &TestSetup) -> Option<String> {
+        let vk = VerifyingKey(setup.ibs_pk.0.clone());
+        let mut cursor = futures::io::Cursor::new(sealed.to_vec());
+
+        Unsealer::<_, UnsealerStreamConfig>::new(&mut cursor, &vk)
+            .await
+            .expect("the container must verify")
+            .pub_id
+            .con
+            .into_iter()
+            .find(|a| a.atype == "pbdf.sidn-pbdf.email.email")
+            .and_then(|a| a.value)
+    }
+
     /// init + one chunk + finalize, returning the finalize status.
     async fn upload_sealed(client: &Client, sealed: &[u8]) -> Status {
         let (uuid, token, status) = do_init(client, SENDER_EMAIL).await;
@@ -3772,6 +3790,20 @@ mod integration {
         let setup = TestSetup::new(&mut rng);
         let canonical = seal_payload(&setup, b"one sender, two spellings").await;
         let capitalized = respell_stored_sender(&canonical, SENDER_EMAIL, "Bob@Example.COM");
+
+        // The fixture is only worth something if cryptify really reads the new
+        // spelling back, so pin that before the buckets are counted -- a byte
+        // substitution that landed somewhere inert would leave this test
+        // passing over a canonical container and guarding nothing.
+        assert_eq!(
+            stored_sender(&capitalized, &setup).await.as_deref(),
+            Some("Bob@Example.COM"),
+            "the container must present the capitalized spelling to finalize"
+        );
+        assert_eq!(
+            stored_sender(&canonical, &setup).await.as_deref(),
+            Some(SENDER_EMAIL)
+        );
 
         let (client, dir) = test_client(&setup).await;
         let store = client.rocket().state::<Store>().expect("Store managed");
