@@ -924,7 +924,7 @@ impl<'r> FromRequest<'r> for FinalizeHeaders {
 /// one signing key for `bob@example.com` also verifies a container storing
 /// `Bob@Example.COM`, and the raw spelling is what reaches us as `pub_id`.
 /// Canonicalizing here is what keeps those spellings in one bucket instead of
-/// minting a fresh 30-day quota per capitalization.
+/// minting a fresh 14-day quota per capitalization.
 fn accounting_key(
     api_key_tenant: Option<&str>,
     email_attribute: &str,
