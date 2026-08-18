@@ -58,8 +58,23 @@ Format changes roll out readers first. Read support ships in one release and
 the write default flips a major later, so nothing gets written that the
 installed base cannot open.
 
-Email envelopes are the `@e4a/pg-js` layer and carry the same guarantee; their
-compat gate is planned in [postguard-js#131].
+Email envelopes are the `@e4a/pg-js` layer and carry the same guarantee. Their
+compat gate is live ([postguard-js#131]): the `envelope-compat` job, display
+name `Envelope compatibility`, in [postguard-js]'s
+`.github/workflows/integration.yml`. It is deliberately not path-filtered,
+because a path-filtered required check reports nothing on the pull requests that
+miss the filter, and `packages/pg-js/tests/ci-wiring.test.ts` asserts it still
+runs both directions.
+
+Envelope detection is covered by this section as well. Detection is how a
+delivered message is recognised as PostGuard before anything is decrypted, so
+the readers doing it are installed mail clients holding messages no later
+release can reach. The `postguard.encrypted` attachment name is therefore kept
+forever. Every message already in a mailbox is found by it, and dropping that
+leg would cost read access to stored artifacts, which this section rules out.
+So the deprecation process at the bottom of this file does not apply to it. A
+detection leg added later inherits the same rule, and the set only grows
+([#259]).
 
 Enforcement today: `pg-core/tests/wire_format.rs` opens the committed golden
 fixtures under `pg-core/testdata/wire-format-v3/` on every
@@ -133,11 +148,16 @@ is what both branch protection and the `main: required checks` ruleset pin — s
 that name is load bearing, and `pg-core/tests/ci_wiring.rs` ([#272]) asserts it
 still belongs to the job that aggregates both halves.
 
-The envelope tiers have their own gate, [postguard-js#131]. Still planned, each
-an open issue:
+The envelope tiers have their own gate, the live `Envelope compatibility` job
+described under Stored artifacts. Two further jobs were listed here as planned;
+one has since landed:
 
-- [postguard-e2e#25], the forward-direction fixture job
-- [postguard-e2e#21], the version sweep, to run nightly and pre-deploy
+- [postguard-e2e#25], the forward-direction fixture job, is still planned and
+  its issue is still open.
+- [postguard-e2e#21], the version sweep, landed as [postguard-e2e#41]. It runs
+  nightly against edge from `.github/workflows/version-sweep.yml` in
+  [postguard-e2e] and exposes a `pre-deploy` profile over `workflow_call`, for
+  a deploy pipeline to call against candidate images. No pipeline calls it yet.
 
 A gate that needs a different set of readers changes this file first. The two
 npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
@@ -148,9 +168,9 @@ Known coverage gap in the rows above, tracked in [#268]: the `nuget` row has no
 gate. `E4A.PostGuard` is a producer-only SDK (seal via pg-ffi, no unseal path),
 so a reader gate needs a decrypt capability the SDK does not have. Decided:
 leave it declared-but-ungated here rather than build that capability into this
-gate; the .NET seal direction is instead covered by promoting
-[postguard-e2e#21]'s version sweep to CI with decrypt legs, which already owns
-driving published NuGet versions against a target server.
+gate; the .NET seal direction is instead covered by [postguard-e2e#21]'s version
+sweep, now in CI with decrypt legs, which owns driving published NuGet versions
+against a target server.
 
 ## Deprecation
 
@@ -169,6 +189,7 @@ Skipping step 2 is how you break the consumers you cannot see.
 
 [#249]: https://github.com/encryption4all/postguard/issues/249
 [#257]: https://github.com/encryption4all/postguard/issues/257
+[#259]: https://github.com/encryption4all/postguard/issues/259
 [#260]: https://github.com/encryption4all/postguard/issues/260
 [#261]: https://github.com/encryption4all/postguard/issues/261
 [#262]: https://github.com/encryption4all/postguard/issues/262
@@ -176,9 +197,11 @@ Skipping step 2 is how you break the consumers you cannot see.
 [#272]: https://github.com/encryption4all/postguard/issues/272
 [postguard-js]: https://github.com/encryption4all/postguard-js
 [postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
+[postguard-e2e]: https://github.com/encryption4all/postguard-e2e
 [postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
 [postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21
 [postguard-e2e#25]: https://github.com/encryption4all/postguard-e2e/issues/25
+[postguard-e2e#41]: https://github.com/encryption4all/postguard-e2e/pull/41
 [postguard-dotnet#50]: https://github.com/encryption4all/postguard-dotnet/issues/50
 [postguard-outlook-addon#125]: https://github.com/encryption4all/postguard-outlook-addon/issues/125
 [postguard-ops#64]: https://github.com/privacybydesign/postguard-ops/issues/64
