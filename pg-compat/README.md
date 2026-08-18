@@ -122,13 +122,19 @@ stream-multi-segment.bin/.plain
   would drift.
 - `wireVersion`: the container version the bytes claim (`VERSION_V3`, `2`).
 - `sender.public`: the policy the sender signed the *header* with, visible to
-  anyone who has the bytes. This is what a reader checks the header signature
-  against, so a JS reader needs it as much as a Rust one.
+  anyone who has the bytes. Recorded in its **canonical** form, while the sealer
+  is handed a deliberately non-canonical value (`sample_set.rs`'s `SENDER`): that
+  disagreement is what makes the field a test rather than a copy of the input, so
+  a canonicalization that stops reaching the wire goes red here. Both halves of
+  the gate compare the sender policy a reader recovered against this.
 - `sender.private`: the policy the sender signed the *payload* with in the
   `*-privsig` cases. Despite the name it is not a secret key; it is the claims a
-  reader may only see after decrypting. It is present in the manifest for every
-  set, but only the cases with `privateSigning: true` were sealed with it, so
-  check it against `privateSigning` rather than against the case list.
+  reader may only see after decrypting. Canonical for the same reason as
+  `sender.public`, and non-canonical in the sealer for a different attribute
+  type, because the sealer canonicalizes the two policies in two separate
+  statements. It is present in the manifest for every set, but only the cases
+  with `privateSigning: true` were sealed with it, so check it against
+  `privateSigning` rather than against the case list.
 - `mode`: `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-wasm's
   `seal()` produces), `"stream"` for the segmented container (what cryptify
   stores). pg-js is stream mode in both directions — `toBytes()` seals with

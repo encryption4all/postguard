@@ -100,3 +100,37 @@ test('a bumped wire version is reported once, before any ciphertext is opened', 
     },
   );
 });
+
+test('a manifest promising the raw sender value is reported, not opened cleanly', async () => {
+  // `sample_set.rs` hands the sealer this value and the manifest promises
+  // `canonicalize` of it, so writing it back into the manifest is what a sealer
+  // that stopped canonicalizing on its way to the wire would have produced.
+  const RAW_SENDER = ' Sender@Sample.TEST ';
+
+  await withDamagedSet(
+    async (dir) => {
+      const path = join(dir, 'manifest.json');
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      assert.equal(typeof manifest.sender.public.con[0].v, 'string');
+      manifest.sender.public.con[0].v = RAW_SENDER;
+      await writeFile(path, JSON.stringify(manifest));
+    },
+    (dir) => {
+      const failures = runCase(dir, WASM_READER, 'mem');
+      assert.ok(failures.length > 0, 'a mismatched sender policy was reported as opening cleanly');
+      assert.ok(
+        failures.every((f) => f.includes('public signing policy is')),
+        JSON.stringify(failures),
+      );
+      // One per recipient, each naming which one it was.
+      assert.ok(
+        failures.some((f) => f.includes('mem/alice')),
+        JSON.stringify(failures),
+      );
+      assert.ok(
+        failures.some((f) => f.includes('mem/bob')),
+        JSON.stringify(failures),
+      );
+    },
+  );
+});

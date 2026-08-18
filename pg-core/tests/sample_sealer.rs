@@ -22,6 +22,7 @@ use pg_core::client::rust::stream::UnsealerStreamConfig;
 use pg_core::client::rust::UnsealerMemoryConfig;
 use pg_core::client::Unsealer;
 use pg_core::consts::VERSION_2;
+use pg_core::identity::Policy;
 use pg_core::kem::cgw_kv::CGWKV;
 
 use serde::Deserialize;
@@ -34,7 +35,17 @@ struct Manifest {
     wire_version: u16,
     #[serde(rename = "verifyingKey")]
     verifying_key: String,
+    sender: Sender,
     cases: Vec<Case>,
+}
+
+/// The sender policies the manifest promises. Unlike `pg-compat`, this test
+/// links against the `pg_core` that wrote them, so it can name `Policy`
+/// directly.
+#[derive(Deserialize)]
+struct Sender {
+    public: Policy,
+    private: Option<Policy>,
 }
 
 #[derive(Deserialize)]
@@ -169,6 +180,27 @@ fn head_reads_back_every_case() {
                 "{}: private signature presence",
                 case.name
             );
+
+            // The sender policies travel in full and a reader derives the
+            // signer's identity from them, so what came back has to be what the
+            // manifest promises. The sample set signs with deliberately
+            // non-canonical values while the manifest records their canonical
+            // form (#355), which is what makes this an assertion about
+            // canonicalization reaching the wire rather than a tautology.
+            assert_eq!(
+                verified.public, m.sender.public,
+                "{}/{}: public signing policy",
+                case.name, recipient.id
+            );
+            if case.private_signing {
+                assert_eq!(
+                    verified.private.as_ref(),
+                    m.sender.private.as_ref(),
+                    "{}/{}: private signing policy",
+                    case.name,
+                    recipient.id
+                );
+            }
         }
     }
 }

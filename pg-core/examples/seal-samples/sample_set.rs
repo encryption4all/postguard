@@ -41,7 +41,13 @@ pub const SCHEMA_VERSION: u32 = 1;
 const TIMESTAMP: u64 = 1_704_067_200;
 
 /// The sender identity that signs every sample.
-const SENDER: &str = "sender@sample.test";
+///
+/// Deliberately **not** in canonical form: the leading and trailing space and
+/// the mixed case exercise both halves of the email rule. The sealer is handed
+/// this value while the manifest promises `canonicalize` of it, so a reader that
+/// derives the sender identity from the raw header bytes only agrees with the
+/// signing key while canonicalization still reaches the wire.
+const SENDER: &str = " Sender@Sample.TEST ";
 
 /// Filename of the manifest that ties the set together.
 pub const MANIFEST: &str = "manifest.json";
@@ -169,13 +175,27 @@ fn public_sender_policy() -> Policy {
 
 /// The policy the sender signs the payload with in the `*-privsig` cases
 /// (encrypted, only visible to a recipient who can decrypt).
+///
+/// `fullname` carries no canonicalization rule and stays for the
+/// different-attribute-type coverage the `*-privsig` cases have always had; the
+/// mobile number is the non-canonical half. It covers the *phone* rule rather
+/// than the email rule a second time, and picks the `(0)` trunk group on
+/// purpose: dropping the parentheses while keeping the `0` yields
+/// `+310612345678`, which passes an E.164 shape check and dials nowhere.
+///
+/// `canonical_signing_key` guards the public policy and `with_priv_signing_key`
+/// canonicalizes this one in a separate statement, so a non-canonical value in
+/// only one of the two leaves the other as blind as an all-canonical corpus.
 fn private_sender_policy() -> Policy {
     Policy {
         timestamp: TIMESTAMP,
-        con: vec![Attribute::new(
-            "pbdf.gemeente.personalData.fullname",
-            Some("Sample Sender"),
-        )],
+        con: vec![
+            Attribute::new("pbdf.gemeente.personalData.fullname", Some("Sample Sender")),
+            Attribute::new(
+                "pbdf.sidn-pbdf.mobilenumber.mobilenumber",
+                Some("+31 (0)6 1234 5678"),
+            ),
+        ],
     }
 }
 
@@ -334,9 +354,15 @@ fn manifest(cases: &[Case], recipients: &[Recipient]) -> Vec<u8> {
         },
         "wireVersion": VERSION_2,
         "verifyingKey": "vk.json",
+        // The *canonical* forms, not the raw ones the sealer is handed. The
+        // manifest is the expectation readers are checked against, so this
+        // disagreement between what the caller passes and what the manifest
+        // promises is what makes the non-canonical sender a test rather than
+        // decoration. Derived with `canonical()` rather than written out, so
+        // there is no second copy of the value to drift.
         "sender": {
-            "public": public_sender_policy(),
-            "private": private_sender_policy(),
+            "public": public_sender_policy().canonical(),
+            "private": private_sender_policy().canonical(),
         },
         "cases": cases,
     });
