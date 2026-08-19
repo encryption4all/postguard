@@ -105,8 +105,13 @@ function hex(byte) {
 }
 
 /**
- * A policy as a comparable string: fixed key order, and a missing attribute
- * value distinguished from an empty one.
+ * A policy as a comparable string: attributes in a fixed order, and a missing
+ * attribute value distinguished from an empty one.
+ *
+ * `con` is sorted because the order a reader hands the conjunction back in is
+ * not part of the wire contract, and a reordering must not read as a break.
+ * `describe_policy` in `pg-compat/src/lib.rs` sorts it on the same grounds, so
+ * both halves of the gate rule the same recovered policy a match.
  *
  * @param {{ts: number, con: Array<{t: string, v?: string}>}} policy
  * @returns {string}
@@ -114,7 +119,14 @@ function hex(byte) {
 export function describePolicy(policy) {
   if (policy === null || typeof policy !== 'object') return JSON.stringify(policy ?? null);
 
-  const con = (policy.con ?? []).map(({ t, v }) => ({ t, v: v ?? null }));
+  const con = (policy.con ?? [])
+    .map(({ t, v }) => ({ t, v: v ?? null }))
+    .sort((a, b) => {
+      // Not `localeCompare`: the order has to be the same everywhere the gate
+      // runs, and code-unit order is what the Rust half's byte-wise sort does.
+      const [x, y] = [JSON.stringify(a), JSON.stringify(b)];
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
   return JSON.stringify({ ts: policy.ts, con });
 }
 

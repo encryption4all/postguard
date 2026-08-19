@@ -141,9 +141,18 @@ impl Header {
     ) -> Result<(Self, SharedSecret), Error> {
         // Canonicalize before deriving *and* before storing, so the hidden
         // policies that go on the wire carry the same values the identities
-        // were derived from. A reader that predates the canonicalization rule
-        // then derives the same identity from this header as we did, which is
-        // what makes the fix reach consumers who never upgrade.
+        // were derived from.
+        //
+        // The KEM identities are unaffected either way: `Policy::derive`
+        // canonicalizes internally, so `derive_kem` below reaches the same
+        // identity from a raw policy. What this call changes is what the
+        // *stored* `HiddenPolicy` says, and `to_hidden` blanks the value of
+        // every attribute type outside `HINT_TYPES` — so its only observable
+        // effect on the wire is the hint a recipient is shown for a hinted
+        // type, not what anyone derives. That also means no wire-compat fixture
+        // can reach it: a non-canonical recipient value is invisible to every
+        // reader. The sender side is where a fixture bites, because
+        // `SignatureExt.pol` is a full `Policy` (see `canonical_signing_key`).
         let policies: EncryptionPolicy = policies
             .iter()
             .map(|(rid, policy)| (rid.clone(), policy.canonical()))
