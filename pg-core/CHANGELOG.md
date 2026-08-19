@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.3...pg-core-v0.6.4) - 2026-08-18
+
+### Added
+
+- *(pg-core)* canonicalize identity attribute values before deriving ([#335](https://github.com/encryption4all/postguard/pull/335))
+
+### Fixed
+
+- *(pg-core)* bind the public signing policy into the AEAD plaintext ([#351](https://github.com/encryption4all/postguard/pull/351))
+- *(pg-core)* name the version constants after their wire values ([#345](https://github.com/encryption4all/postguard/pull/345))
+
+### Other
+
+- assert main's ruleset still requires the gate build.yml produces ([#333](https://github.com/encryption4all/postguard/pull/333))
+
 ## [0.6.3](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.2...pg-core-v0.6.3) - 2026-08-10
 
 ### Other

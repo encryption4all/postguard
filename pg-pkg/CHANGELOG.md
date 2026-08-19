@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.6.1...pg-pkg-v0.6.2) - 2026-08-18
+
+### Added
+
+- *(pg-core)* canonicalize identity attribute values before deriving ([#335](https://github.com/encryption4all/postguard/pull/335))
+
+### Fixed
+
+- *(cryptify)* build dev.Dockerfile from the repo root, like its sibling ([#329](https://github.com/encryption4all/postguard/pull/329))
+
+### Other
+
+- guard the Dockerfile/workspace-member invariant, scope the dev cook ([#326](https://github.com/encryption4all/postguard/pull/326))
+
 ## [0.6.1](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.6.0...pg-pkg-v0.6.1) - 2026-08-10
 
 ### Added
