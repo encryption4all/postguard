@@ -10,6 +10,10 @@ description = "End-to-end encrypted file sharing service"
 
 [dependencies]
 askama = "0.16.0"
+# Decodes the base64 `X-PostGuard-Proof` header. Same crate pg-core encodes its
+# artifacts with, so this adds nothing to the dependency tree; `alloc` is for
+# the encoding side, which only the tests need.
+base64ct = { version = "1.5", features = ["alloc"] }
 chrono = { version = "0.4.45", features = ["unstable-locales"] }
 lettre = "0.11.22"
 log = "0.4.33"

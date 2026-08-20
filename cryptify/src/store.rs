@@ -23,6 +23,46 @@ pub const ROLLING_WINDOW_SECS: i64 = 14 * 24 * 60 * 60;
 #[cfg(test)]
 pub const DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS: u64 = 60 * 60;
 
+/// What the uploader proved about the sender identity a container claims.
+///
+/// cryptify holds no decryption key and never opens an upload, so nothing
+/// inside the container can say who uploaded it: the header names a sender
+/// and, on its own, that is the uploader's word. This is the answer to the
+/// challenge minted at `upload_init` — either the uploader signed it with the
+/// key belonging to the identity the container's signing policy derives to, or
+/// they did not.
+///
+/// The values in `Proven` are canonical (see
+/// [`pg_core::identity::canonicalize`]), not the spellings the container
+/// happens to carry. `Policy::derive_ibs` canonicalizes before deriving the
+/// identity a signature is checked against, so a container spelling the
+/// address `Alice@Example.COM` verifies under a key issued for
+/// `alice@example.com`: the raw spelling is not what the proof pinned, and
+/// carrying it inside `Proven` would put an uploader-chosen string there. The
+/// spelling the container used stays available as [`FileState::sender`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind")]
+pub enum SenderClaim {
+    /// The uploader answered the challenge with a signature that verifies
+    /// under the identity the container's signing policy derives to.
+    Proven {
+        /// The proven sender email, canonicalized.
+        email: String,
+        /// The remaining attributes of the proven identity, canonicalized.
+        attrs: Vec<(String, String)>,
+    },
+    /// No proof was presented, or the one presented did not verify. Both are
+    /// this: what a deployment *does* about an unproven sender is decided
+    /// elsewhere, and this type only records what was established.
+    Unproven,
+}
+
+/// The durable encoding of [`SenderClaim::Unproven`]. Only reached when
+/// encoding a claim fails, which cannot happen for the owned strings this enum
+/// holds — but a `Proven` must not survive such a failure as one.
+/// `sender_claim_unproven_encodes_to_the_fallback` pins the two together.
+const UNPROVEN_JSON: &str = r#"{"kind":"Unproven"}"#;
+
 pub struct FileState {
     pub uploaded: u64,
     pub cryptify_token: String,
@@ -81,6 +121,21 @@ pub struct FileState {
     /// `upload_status` hashes what it was given and compares the two digests
     /// in constant time.
     pub recovery_token_hash: String,
+    /// The upload challenge minted at `upload_init` and handed to the client
+    /// in the init response, hex-encoded 32-byte random. The uploader signs
+    /// the *decoded* bytes, so the hex is a transport spelling only and
+    /// `upload_finalize` decodes it before verifying.
+    ///
+    /// `None` for a session restored from a row written before the column
+    /// existed. Such an upload was never given anything to answer, so it
+    /// finalizes as [`SenderClaim::Unproven`] however it is presented.
+    pub challenge: Option<String>,
+    /// What the uploader proved about the sender identity, established at
+    /// finalize. `None` until finalize has run, the same way [`sender`] is —
+    /// the two are populated by the same step.
+    ///
+    /// [`sender`]: FileState::sender
+    pub sender_claim: Option<SenderClaim>,
 }
 
 /// Replay record of the most recently committed chunk. See
@@ -170,6 +225,14 @@ struct PersistedSession {
     created_at: i64,
     /// Refreshed on every persisted transition.
     last_active_at: i64,
+    /// Verbatim copy of [`FileState::challenge`]. `None` on a row written
+    /// before the column existed — the session it describes predates the
+    /// challenge and has none.
+    challenge: Option<String>,
+    /// JSON encoding of [`SenderClaim`], written at finalize alongside
+    /// `sender`. `None` before then, and on a row written before the column
+    /// existed.
+    sender_claim: Option<String>,
 }
 
 impl PersistedSession {
@@ -212,6 +275,17 @@ impl PersistedSession {
                 .unwrap_or_else(|_| "[]".to_owned()),
             created_at: now,
             last_active_at: now,
+            challenge: state.challenge.clone(),
+            sender_claim: state.sender_claim.as_ref().map(|claim| {
+                // Infallible for the owned strings a claim holds. A `Proven`
+                // that somehow failed to encode must not be read back as one,
+                // and `None` would read as "finalize has not run yet", so
+                // degrade to the encoding of `Unproven`.
+                serde_json::to_string(claim).unwrap_or_else(|e| {
+                    log::error!("Cannot encode the sender claim for {}: {}", uuid, e);
+                    UNPROVEN_JSON.to_owned()
+                })
+            }),
         }
     }
 
@@ -269,6 +343,20 @@ impl PersistedSession {
             Vec::new()
         });
 
+        // Same reasoning as the attributes above, one step further: a claim
+        // that cannot be read is not evidence of anything, so it comes back as
+        // `Unproven` rather than dropping the session.
+        let sender_claim = self.sender_claim.as_deref().map(|encoded| {
+            serde_json::from_str(encoded).unwrap_or_else(|e| {
+                log::error!(
+                    "Restored upload session {} has an unreadable sender_claim: {}",
+                    uuid,
+                    e
+                );
+                SenderClaim::Unproven
+            })
+        });
+
         Some(FileState {
             uploaded: self.uploaded,
             cryptify_token: self.cryptify_token,
@@ -287,6 +375,8 @@ impl PersistedSession {
             api_key_validation_failed: self.api_key_validation_failed,
             last_chunk,
             recovery_token_hash: self.recovery_token_hash,
+            challenge: self.challenge,
+            sender_claim,
         })
     }
 }
@@ -334,7 +424,7 @@ const SESSION_COLUMNS: &str = "uuid, cryptify_token, prev_token, prev_uploaded, 
      recovery_token_hash, uploaded, expires, recipients, mail_content,
      mail_lang, confirm, notify_recipients, source_channel, client_version,
      client_app, api_key_tenant, api_key_validation_failed, sender,
-     sender_attributes, created_at, last_active_at";
+     sender_attributes, created_at, last_active_at, challenge, sender_claim";
 
 fn session_from_row(row: &rusqlite::Row) -> rusqlite::Result<PersistedSession> {
     Ok(PersistedSession {
@@ -360,13 +450,37 @@ fn session_from_row(row: &rusqlite::Row) -> rusqlite::Result<PersistedSession> {
         sender_attributes: row.get(19)?,
         created_at: row.get(20)?,
         last_active_at: row.get(21)?,
+        challenge: row.get(22)?,
+        sender_claim: row.get(23)?,
     })
 }
 
+/// Columns added to `upload_sessions` after the table first shipped, each with
+/// the statement that adds it.
+///
+/// `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it is, so a
+/// deployed database never gains a column from the create statement — every
+/// column added later has to be `ALTER TABLE`d on. Both are nullable, which is
+/// what `ADD COLUMN` can do without a default and also what the rows deserve:
+/// a session that predates the challenge has none, and one that predates the
+/// claim never had its sender proved either way.
+const SESSION_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "challenge",
+        "ALTER TABLE upload_sessions ADD COLUMN challenge TEXT",
+    ),
+    (
+        "sender_claim",
+        "ALTER TABLE upload_sessions ADD COLUMN sender_claim TEXT",
+    ),
+];
+
 impl StateDb {
     /// Open (creating if necessary) the SQLite database at `path` and ensure
-    /// the schema exists. Called once at startup, so an existing database
-    /// from before upload-session persistence simply gains the new table.
+    /// the schema exists. Called once at startup, so an existing database from
+    /// before upload-session persistence simply gains the new table, and one
+    /// whose table predates a column gains the column
+    /// ([`StateDb::migrate_sessions`]).
     fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = rusqlite::Connection::open(path)?;
         // WAL keeps writes from blocking the (rare) concurrent reads and
@@ -408,13 +522,44 @@ impl StateDb {
                  sender                    TEXT,
                  sender_attributes         TEXT    NOT NULL,
                  created_at                INTEGER NOT NULL,
-                 last_active_at            INTEGER NOT NULL
+                 last_active_at            INTEGER NOT NULL,
+                 challenge                 TEXT,
+                 sender_claim              TEXT
              )",
             [],
         )?;
+        Self::migrate_sessions(&conn)?;
         Ok(StateDb {
             conn: std::sync::Mutex::new(conn),
         })
+    }
+
+    /// Add any [`SESSION_COLUMN_MIGRATIONS`] column the table is missing.
+    ///
+    /// Driven off what the table actually has rather than off a stored schema
+    /// version, so it is a no-op on a database the create statement above just
+    /// built, a no-op on a second boot, and correct on a database whose table
+    /// was created by any earlier version — there is no version bookkeeping to
+    /// get out of step with the columns.
+    fn migrate_sessions(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+        let mut present = std::collections::HashSet::new();
+        {
+            let mut stmt = conn.prepare("SELECT name FROM pragma_table_info('upload_sessions')")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for name in names {
+                present.insert(name?);
+            }
+        }
+
+        for (column, statement) in SESSION_COLUMN_MIGRATIONS {
+            if present.contains(*column) {
+                continue;
+            }
+            conn.execute(statement, [])?;
+            log::info!("Added column {} to upload_sessions", column);
+        }
+
+        Ok(())
     }
 
     /// Write a session's current state, inserting on the first transition and
@@ -433,10 +578,11 @@ impl StateDb {
                  recovery_token_hash, uploaded, expires, recipients, mail_content,
                  mail_lang, confirm, notify_recipients, source_channel, client_version,
                  client_app, api_key_tenant, api_key_validation_failed, sender,
-                 sender_attributes, created_at, last_active_at
+                 sender_attributes, created_at, last_active_at, challenge, sender_claim
              ) VALUES (
                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                 ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+                 ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
+                 ?23, ?24
              )
              ON CONFLICT(uuid) DO UPDATE SET
                  cryptify_token            = excluded.cryptify_token,
@@ -458,7 +604,9 @@ impl StateDb {
                  api_key_validation_failed = excluded.api_key_validation_failed,
                  sender                    = excluded.sender,
                  sender_attributes         = excluded.sender_attributes,
-                 last_active_at            = excluded.last_active_at",
+                 last_active_at            = excluded.last_active_at,
+                 challenge                 = excluded.challenge,
+                 sender_claim              = excluded.sender_claim",
             rusqlite::params![
                 session.uuid,
                 session.cryptify_token,
@@ -482,6 +630,8 @@ impl StateDb {
                 session.sender_attributes,
                 session.created_at,
                 session.last_active_at,
+                session.challenge,
+                session.sender_claim,
             ],
         ) {
             log::error!("Failed to persist upload session {}: {}", session.uuid, e);
@@ -1094,6 +1244,8 @@ mod tests {
             api_key_validation_failed: false,
             last_chunk: None,
             recovery_token_hash: String::new(),
+            challenge: None,
+            sender_claim: None,
         }
     }
 
@@ -1321,6 +1473,9 @@ mod tests {
 
     const RECIPIENTS: &str = "one@example.com, two@example.com";
     const RECOVERY_TOKEN: &str = "3f7a9c1e-recovery-secret";
+    /// A stand-in for the hex the real mint produces, distinguishable from
+    /// every other string in the row.
+    const CHALLENGE_HEX: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
     /// 2100-01-01, so the 14-day on-disk expiry never lapses mid-test and a
     /// restore that drops the session is the idle window's doing, not this.
     const EXPIRES_AT: i64 = 4_102_444_800;
@@ -1346,6 +1501,8 @@ mod tests {
             api_key_validation_failed: false,
             last_chunk: None,
             recovery_token_hash: hash_recovery_token(RECOVERY_TOKEN),
+            challenge: Some(CHALLENGE_HEX.to_owned()),
+            sender_claim: None,
         }
     }
 
@@ -1386,6 +1543,11 @@ mod tests {
         assert!(!row.api_key_validation_failed);
         assert_eq!(row.sender, None, "sender is unknown until finalize");
         assert_eq!(row.sender_attributes, "[]");
+        assert_eq!(row.challenge.as_deref(), Some(CHALLENGE_HEX));
+        assert_eq!(
+            row.sender_claim, None,
+            "nothing is proved until finalize verifies it"
+        );
         // No chunk committed yet, so the whole replay record is absent.
         assert_eq!(row.prev_token, None);
         assert_eq!(row.prev_uploaded, None);
@@ -1671,11 +1833,184 @@ mod tests {
         assert!(!state.api_key_validation_failed);
         assert_eq!(state.sender, None);
         assert!(state.sender_attributes.is_empty());
+        assert_eq!(
+            state.challenge.as_deref(),
+            Some(CHALLENGE_HEX),
+            "an upload interrupted by a restart must still be able to answer \
+             the challenge it was given"
+        );
+        assert_eq!(state.sender_claim, None);
         assert!(state.last_chunk.is_none(), "no chunk was committed");
         assert_eq!(
             state.recovery_token_hash,
             hash_recovery_token(RECOVERY_TOKEN),
             "the digest the status endpoint authenticates against must survive"
+        );
+    }
+
+    /// A finalized session carries both halves of the proof — the challenge it
+    /// issued and the claim it settled on — and a restart must not turn a
+    /// `Proven` sender into anything else.
+    #[rocket::async_test]
+    async fn a_restored_session_keeps_its_challenge_and_claim() {
+        let claim = SenderClaim::Proven {
+            email: "bob@example.com".to_owned(),
+            attrs: vec![(
+                "pbdf.gemeente.personalData.name".to_owned(),
+                "Bob".to_owned(),
+            )],
+        };
+
+        let db = TempDbPath::new();
+        {
+            let store = store_with_db(&db);
+            store.create("live-claim".into(), populated_filestate());
+            let handle = store.get("live-claim").expect("live session");
+            let mut state = handle.lock().await;
+            // What `upload_finalize` writes once the proof has been checked.
+            state.sender = Some("bob@example.com".to_owned());
+            state.sender_claim = Some(claim.clone());
+            store.persist_session("live-claim", &state);
+        }
+
+        let store = store_with_db(&db);
+        let handle = store.get("live-claim").expect("session restored on boot");
+        let state = handle.lock().await;
+        assert_eq!(state.challenge.as_deref(), Some(CHALLENGE_HEX));
+        assert_eq!(state.sender_claim, Some(claim));
+    }
+
+    /// An `Unproven` claim has to survive as `Unproven` rather than as "no
+    /// claim yet": the two are different states, and only the first means
+    /// finalize has already run and settled the question.
+    #[rocket::async_test]
+    async fn a_restored_session_keeps_an_unproven_claim() {
+        let db = TempDbPath::new();
+        {
+            let store = store_with_db(&db);
+            store.create("live-unproven".into(), populated_filestate());
+            let handle = store.get("live-unproven").expect("live session");
+            let mut state = handle.lock().await;
+            state.sender_claim = Some(SenderClaim::Unproven);
+            store.persist_session("live-unproven", &state);
+        }
+
+        let store = store_with_db(&db);
+        let handle = store
+            .get("live-unproven")
+            .expect("session restored on boot");
+        assert_eq!(
+            handle.lock().await.sender_claim,
+            Some(SenderClaim::Unproven)
+        );
+    }
+
+    /// The fallback in `PersistedSession::from_state` is a literal, so it has
+    /// to keep matching what serde actually writes for `Unproven`.
+    #[test]
+    fn sender_claim_unproven_encodes_to_the_fallback() {
+        assert_eq!(
+            serde_json::to_string(&SenderClaim::Unproven).expect("encode Unproven"),
+            UNPROVEN_JSON
+        );
+    }
+
+    /// A deployed database has its `upload_sessions` table already, so
+    /// `CREATE TABLE IF NOT EXISTS` never adds a column to it — the migration
+    /// has to. Build the table as the version before this change wrote it,
+    /// seed a row, and boot: the row must survive and load, and new writes
+    /// must reach the added columns.
+    #[rocket::async_test]
+    async fn a_sessions_table_without_the_proof_columns_gains_them() {
+        let db = TempDbPath::new();
+        let now = chrono::offset::Utc::now().timestamp();
+        {
+            let conn = rusqlite::Connection::open(db.as_str()).expect("open bare database");
+            conn.execute(
+                "CREATE TABLE upload_sessions (
+                     uuid                      TEXT    PRIMARY KEY,
+                     cryptify_token            TEXT    NOT NULL,
+                     prev_token                TEXT,
+                     prev_uploaded             INTEGER,
+                     response_token            TEXT,
+                     recovery_token_hash       TEXT    NOT NULL,
+                     uploaded                  INTEGER NOT NULL,
+                     expires                   INTEGER NOT NULL,
+                     recipients                TEXT    NOT NULL,
+                     mail_content              TEXT    NOT NULL,
+                     mail_lang                 TEXT    NOT NULL,
+                     confirm                   INTEGER NOT NULL,
+                     notify_recipients         INTEGER NOT NULL,
+                     source_channel            TEXT    NOT NULL,
+                     client_version            TEXT,
+                     client_app                TEXT,
+                     api_key_tenant            TEXT,
+                     api_key_validation_failed INTEGER NOT NULL,
+                     sender                    TEXT,
+                     sender_attributes         TEXT    NOT NULL,
+                     created_at                INTEGER NOT NULL,
+                     last_active_at            INTEGER NOT NULL
+                 )",
+                [],
+            )
+            .expect("create the pre-migration sessions table");
+            conn.execute(
+                "INSERT INTO upload_sessions (
+                     uuid, cryptify_token, recovery_token_hash, uploaded, expires,
+                     recipients, mail_content, mail_lang, confirm, notify_recipients,
+                     source_channel, api_key_validation_failed, sender_attributes,
+                     created_at, last_active_at
+                 ) VALUES (
+                     'legacy-1', 'legacy-token', 'legacy-hash', 17, ?1,
+                     ?2, 'legacy content', 'EN', 1, 1,
+                     'website', 0, '[]',
+                     ?3, ?3
+                 )",
+                rusqlite::params![EXPIRES_AT, RECIPIENTS, now],
+            )
+            .expect("seed a pre-migration row");
+        }
+
+        let store = store_with_db(&db);
+
+        // The row a deployment already had must come back, and come back
+        // without a challenge or a claim — there is nothing else it could have.
+        let handle = store.get("legacy-1").expect("pre-migration row restored");
+        {
+            let state = handle.lock().await;
+            assert_eq!(state.cryptify_token, "legacy-token");
+            assert_eq!(state.uploaded, 17);
+            assert_eq!(state.challenge, None);
+            assert_eq!(state.sender_claim, None);
+        }
+
+        // And the added columns are writable, so a session created after the
+        // migration persists its challenge into the migrated table.
+        store.create("after-migration".into(), populated_filestate());
+        let row = read_back(db.as_str(), "after-migration").expect("row written after migration");
+        assert_eq!(row.challenge.as_deref(), Some(CHALLENGE_HEX));
+    }
+
+    /// Booting twice must not try to add the columns again — `ADD COLUMN` on a
+    /// column that exists is an error, so a second boot would fail the open.
+    #[rocket::async_test]
+    async fn the_proof_column_migration_is_a_no_op_on_a_migrated_database() {
+        let db = TempDbPath::new();
+        {
+            let store = store_with_db(&db);
+            store.create("twice-1".into(), populated_filestate());
+        }
+
+        let store = store_with_db(&db);
+        assert_eq!(
+            store
+                .get("twice-1")
+                .expect("session restored on the second boot")
+                .lock()
+                .await
+                .challenge
+                .as_deref(),
+            Some(CHALLENGE_HEX)
         );
     }
 
