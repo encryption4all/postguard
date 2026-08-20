@@ -1213,7 +1213,13 @@ async fn upload_finalize(
 
     state.sender = sender.clone();
     state.sender_attributes = sender_attributes;
-    state.sender_claim = Some(claim);
+    // A proof already established must survive a retried finalize: the client
+    // may repeat the request without the header, and that must not erase what
+    // was proved. Only the verification above produces a `Proven`, so this
+    // keeps the claim written once in the direction that matters.
+    if !matches!(state.sender_claim, Some(SenderClaim::Proven { .. })) {
+        state.sender_claim = Some(claim);
+    }
 
     // Persist the finalize transition (the sender is only known now) before
     // the notification email goes out, so the durable row is never behind the
@@ -4351,6 +4357,37 @@ mod integration {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The wire contract pins the standard base64 alphabet, so the same valid
+    /// signature respelled in base64url proves nothing. Reaching for base64url
+    /// is the reflex in web crypto code, and this is what makes the spec's
+    /// claim about the alphabet load-bearing: the signature here verifies when
+    /// spelled the documented way, so the alphabet is the only difference.
+    #[rocket::async_test]
+    async fn a_base64url_proof_leaves_the_sender_unproven() {
+        use base64ct::{Base64, Base64Url, Encoding};
+
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a proof spelled in base64url").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            let standard = proof_header(&setup.signing_keys[2], uuid, challenge);
+            let bytes = Base64::decode_vec(&standard).expect("the header is standard base64");
+            let url = Base64Url::encode_string(&bytes);
+            assert_ne!(
+                url, standard,
+                "the two alphabets must disagree for this to test anything"
+            );
+            Some(url)
+        })
+        .await;
+
+        assert_eq!(claim, Some(SenderClaim::Unproven));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// No header at all is the state of every client that has not shipped the
     /// proof yet: unproven, and uploading exactly as before.
     #[rocket::async_test]
@@ -4382,6 +4419,80 @@ mod integration {
                     .await;
             assert_eq!(claim, Some(SenderClaim::Unproven), "{junk:?}");
         }
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A finalize can be repeated: the client retries after a lost response,
+    /// or resumes after a refresh, in which case it no longer holds the
+    /// challenge and cannot rebuild the header at all. Neither may erase a
+    /// proof that already succeeded, and the unproven-to-proven direction
+    /// must still work.
+    #[rocket::async_test]
+    async fn a_retried_finalize_does_not_erase_a_proof() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"an upload finalized twice").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim_after = |uuid: String| {
+            let store = client.rocket().state::<Store>().expect("Store managed");
+            let handle = store
+                .get(&uuid)
+                .expect("the session outlives a successful finalize");
+            async move { handle.lock().await.sender_claim.clone() }
+        };
+
+        // Proven first, then a retry with no header: the claim must stick.
+        let (uuid, token, challenge) = do_init_with_challenge(&client, SENDER_EMAIL).await;
+        let challenge = challenge.expect("init must serve a challenge");
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        let total = sealed.len() as u64;
+        let proof = proof_header(&setup.signing_keys[2], &uuid, &challenge);
+
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, Some(&proof)).await;
+        assert_eq!(status, Status::Ok);
+        let proven = Some(SenderClaim::Proven {
+            email: SENDER_EMAIL.to_owned(),
+            attrs: vec![(SENDER_NAME_ATTRIBUTE.to_owned(), "Bob".to_owned())],
+        });
+        assert_eq!(
+            claim_after(uuid.clone()).await,
+            proven,
+            "the first finalize proves the sender"
+        );
+
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, None).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            claim_after(uuid.clone()).await,
+            proven,
+            "a retried finalize without the header must not downgrade a Proven claim"
+        );
+
+        // Unproven first, then a finalize that answers: the claim must upgrade.
+        let (uuid, token, challenge) = do_init_with_challenge(&client, SENDER_EMAIL).await;
+        let challenge = challenge.expect("init must serve a challenge");
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, None).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            claim_after(uuid.clone()).await,
+            Some(SenderClaim::Unproven),
+            "no header leaves the sender unproven"
+        );
+
+        let proof = proof_header(&setup.signing_keys[2], &uuid, &challenge);
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, Some(&proof)).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            claim_after(uuid).await,
+            proven,
+            "a later finalize carrying a valid proof must still prove the sender"
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }

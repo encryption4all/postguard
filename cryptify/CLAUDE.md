@@ -134,7 +134,7 @@ Release-plz automation.
   it is a no-op on a fresh database, on a second boot, and on a table created by
   any earlier version. Nullable is not laziness — `ADD COLUMN` cannot add a
   `NOT NULL` column without a default, and a row written before the column
-  existed genuinely has no value for it, which is what `FileState::challenge`
+  existed has no value for it, which is what `FileState::challenge`
   being an `Option` records.
 - **Do not read the checked-in `conf/config.toml` as prod's config.** It does
   not set `usage_db`, which reads as "persistence is dark in production". That
@@ -180,6 +180,13 @@ Release-plz automation.
   read off `pub_id.canonical()`, not off the container's spellings: `derive_ibs`
   canonicalizes before the signature is checked, so the canonical values are the
   ones the proof actually pinned, and the raw spelling stays in `state.sender`.
+  **Finalize is repeatable, so the claim only moves one way.** Nothing marks a
+  session finalized, so a client retrying after a lost response, or resuming
+  after a refresh that lost the challenge, reaches `upload_finalize` again with
+  no header — and an unconditional assignment would recompute `Unproven` over a
+  stored `Proven`. The assignment is guarded against that: `Unproven` to
+  `Proven` still upgrades, `Proven` never degrades. Only the verification
+  produces a `Proven`, so the guard does not widen what can prove a sender.
 - Upload sessions: `Store::persist_session(id, &FileState)` writes one upsert, and
   it is called at each of the three transitions **before the handler responds** —
   `Store::create` (init), `upload_chunk` after the rolling token advances, and

@@ -209,7 +209,11 @@ paths:
                         header on finalize. That is what proves the uploader
                         holds the key for the sender identity their container
                         claims; without it cryptify only has the uploader's
-                        word for it. Fresh per session, and served here only.
+                        word for it. Fresh per session, and served here only:
+                        a client that resumes with `X-Recovery-Token` after a
+                        refresh must persist it alongside the UUID, because
+                        `GET /fileupload/{uuid}/status` does not repeat it, and
+                        an upload that cannot answer finalizes unproven.
                         Answering is optional — see the header on
                         `POST /fileupload/finalize/{uuid}`."
           "400":
@@ -373,7 +377,9 @@ paths:
         description:
           "The answer to the `challenge` served at `/fileupload/init`: a
           signature over the decoded challenge bytes, made with the uploader's
-          PostGuard signing key under the `uuid` as the context, base64-encoded.
+          PostGuard signing key under the `uuid` as the context, encoded as
+          standard base64 (RFC 4648 section 4, `+` and `/`) — the base64url
+          alphabet is rejected.
           Verified against the identity the uploaded container's own signing
           policy derives to, so it proves the uploader holds the key for the
           sender that container claims — there is no identity to send along and
