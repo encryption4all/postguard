@@ -28,27 +28,28 @@ use std::fs;
 use std::path::PathBuf;
 
 /// The cap from the host's cwd decision. Against an orientation file that lands
-/// near 3,100 B it leaves room to add a part or reword a line, not room for a
+/// near 3,300 B it leaves room to add a part or reword a line, not room for a
 /// second corpus. Raising it should be a decision, not a reflex.
 const MAX_BYTES: u64 = 4_000;
 
 /// The revision that holds the cut corpus. The old file is not migrated and not
-/// reconstructed anywhere, so this SHA is its only address -- and three source
-/// comments still say "see CLAUDE.md" about content that now lives only there
-/// (`scripts/ruleset-drift.sh`, `.github/workflows/api-diff.yml`,
-/// `cryptify/src/main.rs`). Dropping the pointer from the file strands all of
-/// them, which the byte count alone would not notice.
+/// reconstructed anywhere, so this SHA is its only address -- and four places
+/// still send a reader to `CLAUDE.md` for content that now lives only there:
+/// `scripts/ruleset-drift.sh`, `.github/workflows/api-diff.yml`,
+/// `cryptify/src/main.rs`, and the wire-compat section of `CONTRIBUTING.md`.
+/// Dropping the pointer strands all of them, which the byte count alone would
+/// not notice.
 const ARCHIVE_REV: &str = "af6116c";
 
-fn claude_md() -> PathBuf {
+fn repo_file(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("CLAUDE.md")
+        .join(name)
 }
 
 #[test]
 fn claude_md_stays_orientation_sized() {
-    let path = claude_md();
+    let path = repo_file("CLAUDE.md");
     let bytes = fs::metadata(&path)
         .unwrap_or_else(|e| panic!("stat {}: {e}", path.display()))
         .len();
@@ -63,7 +64,7 @@ fn claude_md_stays_orientation_sized() {
 
 #[test]
 fn claude_md_still_names_the_revision_holding_the_corpus() {
-    let path = claude_md();
+    let path = repo_file("CLAUDE.md");
     let body = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     assert!(
         body.contains(ARCHIVE_REV),
@@ -71,5 +72,23 @@ fn claude_md_still_names_the_revision_holding_the_corpus() {
          file was cut from. That corpus was deliberately left in git history rather than migrated, \
          so the SHA is the only way back to it -- keep the `git show {ARCHIVE_REV}:CLAUDE.md` \
          pointer even when the surrounding prose changes."
+    );
+}
+
+/// The three source comments reach the corpus through `CLAUDE.md`'s redirect, but
+/// `CONTRIBUTING.md` names the revision itself: it is the one pointer aimed at a
+/// human contributor -- someone whose `wire-compat` gate just went red -- and they
+/// have no reason to open an agent-orientation file to be redirected a second time.
+/// The cost of that shortcut is a second copy of the SHA, so pin the two together.
+#[test]
+fn contributing_md_points_at_the_same_revision() {
+    let path = repo_file("CONTRIBUTING.md");
+    let body = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    assert!(
+        body.contains(ARCHIVE_REV),
+        "CONTRIBUTING.md no longer names `{ARCHIVE_REV}`. Its wire-compat section sends a \
+         contributor to the wire-format note for whether their change is additive, and that note \
+         is only at `git show {ARCHIVE_REV}:CLAUDE.md` -- without the SHA the pointer is a dead \
+         end at the moment the gate is red. If the corpus moves, move it in both files."
     );
 }

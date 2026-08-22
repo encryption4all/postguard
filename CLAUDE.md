@@ -56,7 +56,10 @@ A durable check is a rule, filed once and delivered to the next container at
 are written to be read before they are edited.
 
 The corpus this file used to be is in git history: 67,118 bytes at `af6116c`,
-the last revision carrying it (`git show af6116c:CLAUDE.md`). Source comments
-that say "see CLAUDE.md" mean that revision and not this file.
+the last revision carrying it (`git show af6116c:CLAUDE.md`). Anything else in
+this repo that sends a reader to `CLAUDE.md` for a convention or a trap — the
+escape hatch in `scripts/ruleset-drift.sh`, the local-repro command in
+`.github/workflows/api-diff.yml`, the enum-gate reasoning in
+`cryptify/src/main.rs` — means that revision and not this file.
 `cryptify/CLAUDE.md` is a second corpus of the same kind and this change does
 not touch it. A test in `pg-core` holds this file to 4,000 bytes.
