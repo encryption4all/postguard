@@ -33,12 +33,17 @@ use std::path::PathBuf;
 const MAX_BYTES: u64 = 4_000;
 
 /// The revision that holds the cut corpus. The old file is not migrated and not
-/// reconstructed anywhere, so this SHA is its only address -- and four places
+/// reconstructed anywhere, so this SHA is its only address -- and three places
 /// still send a reader to `CLAUDE.md` for content that now lives only there:
-/// `scripts/ruleset-drift.sh`, `.github/workflows/api-diff.yml`,
-/// `cryptify/src/main.rs`, and the wire-compat section of `CONTRIBUTING.md`.
-/// Dropping the pointer strands all of them, which the byte count alone would
-/// not notice.
+/// `scripts/ruleset-drift.sh`, `.github/workflows/api-diff.yml`, and the
+/// wire-compat section of `CONTRIBUTING.md`. Dropping the pointer strands all of
+/// them, which the byte count alone would not notice.
+///
+/// `cryptify/src/main.rs`'s `See CLAUDE.md` is deliberately not a fourth: it sits
+/// in `mod api_gate_tests` and means `cryptify/CLAUDE.md`, which this cut did not
+/// touch. Aiming it here would land a reader on the pg-pkg spec's paragraph in
+/// the archive -- a different gate, different counts, and plausible enough to be
+/// read as an answer.
 const ARCHIVE_REV: &str = "af6116c";
 
 fn repo_file(name: &str) -> PathBuf {
@@ -75,7 +80,7 @@ fn claude_md_still_names_the_revision_holding_the_corpus() {
     );
 }
 
-/// The three source comments reach the corpus through `CLAUDE.md`'s redirect, but
+/// The two source comments reach the corpus through `CLAUDE.md`'s redirect, but
 /// `CONTRIBUTING.md` names the revision itself: it is the one pointer aimed at a
 /// human contributor -- someone whose `wire-compat` gate just went red -- and they
 /// have no reason to open an agent-orientation file to be redirected a second time.
