@@ -49,8 +49,10 @@ repo in both.
 
 Not in this file. Documentation lives at
 [docs.postguard.eu/repos/postguard](https://docs.postguard.eu/repos/postguard).
-A durable check is a rule, filed once and delivered to the next container at
-`~/dobby-rules.md`. A trap tied to one file is a comment beside it:
+A durable check that can fire in any repo is a rule, filed once and delivered to
+the next container at `~/dobby-rules.md`; one that can only fire here goes to
+`repos/postguard/` in the dobby memory repo, which costs no index context
+elsewhere. A trap tied to one file is a comment beside it:
 `pg-core/tests/ci_wiring.rs`, `pg-pkg/tests/api_gate.rs`,
 `pg-pkg/tests/dockerfile_workspace_members.rs` and `scripts/semver-checks.sh`
 are written to be read before they are edited.

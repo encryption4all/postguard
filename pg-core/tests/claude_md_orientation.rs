@@ -27,9 +27,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-/// The cap from the host's cwd decision. Against an orientation file that lands
-/// near 3,300 B it leaves room to add a part or reword a line, not room for a
-/// second corpus. Raising it should be a decision, not a reflex.
+/// The cap from the host's cwd decision -- `CLAUDE_MD_CWD_MAX_BYTES` in
+/// dobby-code's `docker/entrypoint.sh`, copied here because nothing spans the two
+/// repos to keep them in step. Against an orientation file that lands near
+/// 3,500 B it leaves room to add a part or reword a line, not room for a second
+/// corpus. Raising it should be a decision, not a reflex.
 const MAX_BYTES: u64 = 4_000;
 
 /// The revision that holds the cut corpus. The old file is not migrated and not
