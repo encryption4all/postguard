@@ -116,10 +116,11 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         let key = get_key(&self.config.key).await?;
 
         // Check for a private signing key, otherwise fall back to the public one.
+        let pub_pol_bytes = crate::bincode_compat::serialize(&self.pub_sign_key.policy)?;
         let signing_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
 
         let pol_bytes = crate::bincode_compat::serialize(&signing_key.policy)?;
-        let pol_len: u32 = pol_bytes.len() as u32;
+        let pol_len: u32 = (pol_bytes.len() + pub_pol_bytes.len()) as u32;
 
         if pol_len + POL_SIZE_SIZE as u32 > self.config.segment_size {
             return Err(Error::ConstraintViolation.into());
@@ -127,6 +128,17 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
 
         let buf = Uint8Array::new_with_length(self.config.segment_size + SIG_BYTES as u32);
 
+        // First segment: DEM.K (pol_len || pol || pub_pol || m_0 || sig_0 )
+        // Other segments: DEM.K (m_i || sig_0)
+        //
+        // `pub_pol` is the sender's public signing policy, the same value that
+        // goes into the header signature outside the AEAD. It sits inside the
+        // length-delimited policy region because that is the one place a reader
+        // skips wholesale: `pol_len` covers both policies and the reader drains
+        // the region before splitting the segment at `len - SIG_BYTES`. Anything
+        // appended after `sig_0` would be read as message or signature bytes.
+        // The message signature covers the message only — the region is excluded
+        // from it here and stays excluded.
         buf.set(
             &Uint8Array::from(&(pol_len as u32).to_be_bytes()[..]).into(),
             0,
@@ -134,6 +146,10 @@ impl<'r, Rng: RngCore + CryptoRng> Sealer<'r, Rng, StreamSealerConfig> {
         buf.set(
             &Uint8Array::from(&pol_bytes[..]).into(),
             POL_SIZE_SIZE as u32,
+        );
+        buf.set(
+            &Uint8Array::from(&pub_pol_bytes[..]).into(),
+            POL_SIZE_SIZE as u32 + pol_bytes.len() as u32,
         );
 
         let mut counter = 0u32;
@@ -352,6 +368,7 @@ where
 
         fn extract_policy(
             plain: Uint8Array,
+            pub_id: &Policy,
         ) -> Result<(Option<(Policy, Identity)>, Uint8Array), Error> {
             if plain.byte_length() < POL_SIZE_SIZE as u32 {
                 return Err(Error::FormatViolation(alloc::string::String::from(
@@ -368,8 +385,26 @@ where
                     "policy truncated",
                 )));
             }
-            let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, pol_end);
-            let pol: Policy = crate::bincode_compat::deserialize(&pol_bytes.to_vec())?;
+            let pol_bytes = plain.slice(POL_SIZE_SIZE as u32, pol_end).to_vec();
+            let (pol, read): (Policy, usize) =
+                crate::bincode_compat::deserialize_with_len(&pol_bytes)?;
+
+            // The rest of the region, if the sealer wrote one, is a copy of the
+            // sender's public signing policy. The header signature outside the
+            // AEAD claims a policy too; if they disagree, that block was
+            // swapped. An exhausted region means the sealer predates the copy.
+            // Both readings are authenticated against the DEM key and reach no
+            // further, so the exhausted case is not the safe half of the two —
+            // see the note on `MessageAndSignature` in `client/web/mod.rs`.
+            if read < pol_bytes.len() {
+                let sealed_pub_pol: Policy =
+                    crate::bincode_compat::deserialize(&pol_bytes[read..])?;
+
+                if &sealed_pub_pol != pub_id {
+                    return Err(Error::IncorrectSignature.into());
+                }
+            }
+
             let id = pol.derive_ibs()?;
             let new_plain = plain.slice(pol_end, plain.byte_length());
 
@@ -409,7 +444,7 @@ where
                     .await?;
 
                     if counter == 0 {
-                        (pol_id, plain) = extract_policy(plain)?;
+                        (pol_id, plain) = extract_policy(plain, &self.pub_id)?;
                     }
 
                     if plain.byte_length() < SIG_BYTES as u32 {
@@ -453,7 +488,7 @@ where
         .await?;
 
         if counter == 0 {
-            (pol_id, final_plain) = extract_policy(final_plain)?;
+            (pol_id, final_plain) = extract_policy(final_plain, &self.pub_id)?;
         }
 
         if final_plain.byte_length() < SIG_BYTES as u32 {

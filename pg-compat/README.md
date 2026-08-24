@@ -34,7 +34,7 @@ a single case by hand:
 
 ```sh
 cargo run --manifest-path pg-compat/Cargo.toml --locked --bin pg-compat-case -- \
-  "$PWD/target/wire-compat/artifacts" 0.6.1 mem
+  "$PWD/target/wire-compat/artifacts" 0.6.3 mem
 ```
 
 ## Adding a version to the support window
@@ -43,12 +43,20 @@ The list of published readers is the support window declared in [#252]; the
 manifest here and that document are meant to be the same list. Adding one is two
 lines:
 
-1. `pg-compat/Cargo.toml`: `pg-core-0-6-2 = { package = "pg-core", version = "=0.6.2", features = ["stream"] }`
-2. `pg-compat/src/lib.rs`: `reader!(v0_6_2, pg_core_0_6_2, "0.6.2");` plus an
+1. `pg-compat/Cargo.toml`: `pg-core-0-7-0 = { package = "pg-core", version = "=0.7.0", features = ["stream"] }`
+2. `pg-compat/src/lib.rs`: `reader!(v0_7_0, pg_core_0_7_0, "0.7.0");` plus an
    entry in `readers()`.
 
 Each version is a separate crate with separate types, which is why the check
 body is a macro instantiated per version rather than a generic function.
+
+One pin per minor line. Two `0.6.x` pins do not resolve: they are
+semver-compatible, so cargo unifies them to a single version and the `=`
+requirements conflict. Moving a line to a newer patch is therefore a
+replacement, not an addition — the window is "the highest published patch of
+each line". `tests/support_window.rs` fails, naming both versions, if two pins
+ever land in one compatibility bucket — `major.minor` while the major is `0`, the
+major alone from `1.0.0` on.
 
 `tests/support_window.rs` parses the `crates.io` row(s) out of
 `COMPATIBILITY.md`'s `Reader list` block and asserts they match `readers()`, so
@@ -80,7 +88,7 @@ stream-multi-segment.bin/.plain
 ```json
 {
   "schemaVersion": 1,
-  "sealedBy": { "crate": "pg-core", "version": "0.6.1" },
+  "sealedBy": { "crate": "pg-core", "version": "..." },
   "wireVersion": 2,
   "verifyingKey": "vk.json",
   "sender": {
@@ -108,16 +116,25 @@ stream-multi-segment.bin/.plain
   no gate.
 - `sealedBy`: which crate at which version produced the set. Informational: it
   is the *writer*, so it is never the version a reader should check itself
-  against. Use `wireVersion` for that.
+  against. Use `wireVersion` for that. The value is HEAD's own `pg-core`
+  version, not one of the pins above, so it moves with every release — which is
+  why the example leaves it a placeholder rather than naming a version that
+  would drift.
 - `wireVersion`: the container version the bytes claim (`VERSION_V3`, `2`).
 - `sender.public`: the policy the sender signed the *header* with, visible to
-  anyone who has the bytes. This is what a reader checks the header signature
-  against, so a JS reader needs it as much as a Rust one.
+  anyone who has the bytes. Recorded in its **canonical** form, while the sealer
+  is handed a deliberately non-canonical value (`sample_set.rs`'s `SENDER`): that
+  disagreement is what makes the field a test rather than a copy of the input, so
+  a canonicalization that stops reaching the wire goes red here. Both halves of
+  the gate compare the sender policy a reader recovered against this.
 - `sender.private`: the policy the sender signed the *payload* with in the
   `*-privsig` cases. Despite the name it is not a secret key; it is the claims a
-  reader may only see after decrypting. It is present in the manifest for every
-  set, but only the cases with `privateSigning: true` were sealed with it, so
-  check it against `privateSigning` rather than against the case list.
+  reader may only see after decrypting. Canonical for the same reason as
+  `sender.public`, and non-canonical in the sealer for a different attribute
+  type, because the sealer canonicalizes the two policies in two separate
+  statements. It is present in the manifest for every set, but only the cases
+  with `privateSigning: true` were sealed with it, so check it against
+  `privateSigning` rather than against the case list.
 - `mode`: `"memory"` for `Sealer<_, SealerMemoryConfig>::seal` (what pg-wasm's
   `seal()` produces), `"stream"` for the segmented container (what cryptify
   stores). pg-js is stream mode in both directions — `toBytes()` seals with
@@ -177,11 +194,11 @@ artifact's name. `pg-core/tests/sample_sealer.rs` holds the sealer to that.
 
 Read a green run carefully. The header is a length-prefixed region and `bincode`
 ignores trailing bytes, so a field appended at the *end* of `Header` really does
-still open with 0.6.1. A field inserted anywhere else, a changed field type, or
+still open with 0.6.3. A field inserted anywhere else, a changed field type, or
 a reordering shifts every following byte and the set stops opening.
 
 How it stops opening is worth knowing, because it is not a decode error. The
-shifted bytes make 0.6.1 read a garbage length prefix and attempt a
+shifted bytes make 0.6.3 read a garbage length prefix and attempt a
 multi-gigabyte allocation, which aborts the process rather than returning
 `Err`. That is why each case runs in its own child: the gate reports the
 aborted case by name and carries on with the rest, so the failure list still
@@ -189,7 +206,7 @@ tells you whether the break is in the header, the payload, or one mode only.
 Expect lines like:
 
 ```text
-pg-core 0.6.1: mem: reader died on signal 6 before it could report: memory allocation of 21474836480 bytes failed
+pg-core 0.6.3: mem: reader died on signal 6 before it could report: memory allocation of 21474836480 bytes failed
 ```
 
 A `VERSION_V3` bump is the one break reported before any ciphertext is touched,

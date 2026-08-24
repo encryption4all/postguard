@@ -26,6 +26,7 @@ use pg_core::api::Parameters;
 use pg_core::artifacts::VerifyingKey;
 use pg_core::client::rust::stream::UnsealerStreamConfig;
 use pg_core::client::Unsealer;
+use pg_core::identity::Policy;
 
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -46,7 +47,7 @@ use rocket::http::Method;
 use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 
 use serde::{Deserialize, Serialize};
-use store::{FileState, LastChunkRecord, Store};
+use store::{FileState, LastChunkRecord, SenderClaim, Store};
 
 #[derive(Serialize, Deserialize)]
 struct InitBody {
@@ -86,6 +87,14 @@ struct InitResponse {
     /// same accessor the enforcement path reads, so a client that sizes its
     /// chunks from this field cannot be out of step with the deployment.
     max_chunk_size_bytes: u64,
+    /// This session's upload challenge, hex-encoded 32-byte random. The client
+    /// signs the *decoded* bytes with its signing key, under the uuid as the
+    /// context, and returns the signature base64-encoded in an
+    /// `X-PostGuard-Proof` header on finalize — which is what proves the
+    /// uploader holds the key for the identity their container claims.
+    /// Answering is optional: an upload that does not answer finalizes as
+    /// [`SenderClaim::Unproven`], and is not refused for it.
+    challenge: String,
 }
 
 struct CryptifyToken(String);
@@ -447,6 +456,7 @@ async fn upload_init(
 
     let init_cryptify_token = bytes_to_hex(&rand::random::<[u8; 32]>());
     let recovery_token = bytes_to_hex(&rand::random::<[u8; 32]>());
+    let challenge = bytes_to_hex(&rand::random::<[u8; 32]>());
 
     log::info!(
         "upload_init uuid={} channel={} client_version={:?}",
@@ -477,6 +487,11 @@ async fn upload_init(
             // Only the digest is kept: the plaintext below is the client's
             // copy, and `upload_status` re-hashes whatever it is presented.
             recovery_token_hash: store::hash_recovery_token(&recovery_token),
+            challenge: Some(challenge.clone()),
+            // Nothing has been proved yet, and nothing here may claim
+            // otherwise: the only place a `SenderClaim` is written is the
+            // verification at finalize.
+            sender_claim: None,
         },
     );
 
@@ -485,6 +500,7 @@ async fn upload_init(
             uuid,
             recovery_token,
             max_chunk_size_bytes: config.chunk_size(),
+            challenge,
         }),
         cryptify_token: CryptifyToken(init_cryptify_token),
     })
@@ -607,6 +623,30 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         write!(s, "{:02x}", byte).unwrap();
     }
     s
+}
+
+/// The inverse of [`bytes_to_hex`]: `None` for an odd length or any byte that
+/// is not a hex digit. Works on bytes rather than `char`s so a non-ASCII input
+/// is rejected instead of being sliced through a character.
+fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
+    fn nibble(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let bytes = hex.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+
+    bytes
+        .chunks(2)
+        .map(|pair| Some(nibble(pair[0])? << 4 | nibble(pair[1])?))
+        .collect()
 }
 
 fn compute_hash(cryptify_token: &[u8], data: &[u8]) -> String {
@@ -864,9 +904,17 @@ fn classify_chunk_request(
     ChunkClassification::Reject(Error::BadRequest(Some(TOKEN_MISMATCH_MSG.to_owned())))
 }
 
+/// Header the uploader answers the init challenge in. Its value is the
+/// signature `pg-wasm`'s `signChallenge` returns, base64-encoded.
+const PROOF_HEADER: &str = "X-PostGuard-Proof";
+
 struct FinalizeHeaders {
     cryptify_token: String,
     content_range: ContentRange,
+    /// The [`PROOF_HEADER`] value, when the client sent one. Absent for every
+    /// client that has not shipped the header yet, which is not an error: it
+    /// finalizes as [`SenderClaim::Unproven`].
+    proof: Option<String>,
 }
 
 #[rocket::async_trait]
@@ -906,7 +954,148 @@ impl<'r> FromRequest<'r> for FinalizeHeaders {
         rocket::request::Outcome::Success(FinalizeHeaders {
             cryptify_token,
             content_range,
+            proof: request.headers().get_one(PROOF_HEADER).map(str::to_owned),
         })
+    }
+}
+
+/// The key the rolling limit accounts against.
+///
+/// A validated API key accounts per tenant. `api-key:<tenant>` is not an
+/// identity attribute, carries no canonicalization rule, and is used exactly
+/// as the key named it; it also wins over the sender, so one tenant cannot
+/// evade quota by varying sender attributes.
+///
+/// Everything else accounts per sender email, and that value is read verbatim
+/// out of the uploaded container's public signing policy, so it is
+/// caller-chosen even when the sender is entirely genuine. `Policy::derive`
+/// canonicalizes before it derives the signer's identity (postguard#250), so
+/// one signing key for `bob@example.com` also verifies a container storing
+/// `Bob@Example.COM`, and the raw spelling is what reaches us as `pub_id`.
+/// Canonicalizing here is what keeps those spellings in one bucket instead of
+/// minting a fresh 14-day quota per capitalization.
+fn accounting_key(
+    api_key_tenant: Option<&str>,
+    email_attribute: &str,
+    sender: Option<&str>,
+) -> Option<String> {
+    match api_key_tenant {
+        Some(tenant) => Some(format!("api-key:{}", tenant)),
+        None => sender.map(|s| pg_core::identity::canonicalize(email_attribute, s)),
+    }
+}
+
+/// Decode a [`PROOF_HEADER`] value into an IBS signature.
+///
+/// The encoding is the one the client is handed: `pg-wasm`'s `signChallenge`
+/// returns `bincode_compat::serialize` of the signature, and the client
+/// base64s exactly those bytes. That serialization is a fixed `SIG_BYTES`
+/// long, and extra bytes must not be able to ride along on an otherwise valid
+/// proof. Two layers stop them and neither truncates: the buffer is exactly
+/// `SIG_BYTES`, so `Base64::decode` refuses anything longer outright, and
+/// `deserialize` needs all of them, so anything shorter is not a signature.
+/// The length check below is that invariant written where a reader looks for
+/// it, not a third layer.
+///
+/// `None` for anything that is not such a value; a malformed proof is a failed
+/// proof, never an error.
+fn decode_proof(header: &str) -> Option<pg_core::ibs::gg::Signature> {
+    use base64ct::{Base64, Encoding};
+
+    let mut buf = [0u8; pg_core::ibs::gg::SIG_BYTES];
+    let bytes = Base64::decode(header, &mut buf).ok()?;
+    if bytes.len() != pg_core::ibs::gg::SIG_BYTES {
+        return None;
+    }
+
+    pg_core::bincode_compat::deserialize(bytes).ok()
+}
+
+/// Reduce the uploader's answer to this session's challenge to a
+/// [`SenderClaim`]. The only place a `SenderClaim` is produced.
+///
+/// The signature is verified against the identity derived from the
+/// container's *own* signing policy, so there is no claimed-identity field to
+/// compare and no spelling to match: either the uploader holds the key for the
+/// identity that policy derives to, or they do not.
+/// [`pg_core::challenge::verify_challenge`] answers exactly that and reports
+/// every way a proof can fail — including a policy no identity derives from —
+/// as `false`, so there is no error branch here and each failure lands in the
+/// same arm as a missing header.
+///
+/// A proof that is absent, malformed or simply wrong is `Unproven` all the
+/// same, and none of them refuses the upload: what a deployment does about an
+/// unproven sender is decided elsewhere, and rejecting here would break every
+/// client that has not shipped the header.
+fn sender_claim(
+    vk: &VerifyingKey,
+    pub_id: &Policy,
+    uuid: &str,
+    challenge: Option<&str>,
+    proof: Option<&str>,
+    email_attribute: &str,
+) -> SenderClaim {
+    let Some(proof) = proof else {
+        return SenderClaim::Unproven;
+    };
+
+    let Some(challenge) = challenge else {
+        // A session restored from a row written before challenges existed was
+        // never given anything to answer.
+        log::info!("finalize of {uuid} presented a proof for a session that has no challenge");
+        return SenderClaim::Unproven;
+    };
+
+    let Some(challenge) = hex_to_bytes(challenge) else {
+        log::error!("upload session {uuid} carries a challenge that is not hex");
+        return SenderClaim::Unproven;
+    };
+
+    let Some(sig) = decode_proof(proof) else {
+        log::info!("finalize of {uuid} presented a malformed {PROOF_HEADER}");
+        return SenderClaim::Unproven;
+    };
+
+    if !pg_core::challenge::verify_challenge(vk, pub_id, uuid, &challenge, &sig) {
+        log::info!(
+            "finalize of {uuid} presented a proof that does not verify under the sender identity \
+             its container claims"
+        );
+        return SenderClaim::Unproven;
+    }
+
+    // Read the claim off the canonical policy rather than the spellings the
+    // container carries: canonicalizing is what `derive_ibs` did before the
+    // signature was checked, so this is the identity the proof pinned. See
+    // `SenderClaim`.
+    let proven = pub_id.canonical();
+    let Some(email) = proven
+        .con
+        .iter()
+        .find(|attribute| attribute.atype == email_attribute)
+        .and_then(|attribute| attribute.value.clone())
+    else {
+        // The proof holds, but the attribute carries no value, so there is no
+        // address to attribute it to and nothing to claim. Unreachable for a
+        // container a `Sealer` wrote — the public signing policy carries its
+        // values — and `state.sender` is `None` here for the same reason.
+        log::error!("finalize of {uuid} proved an identity with no {email_attribute} value");
+        return SenderClaim::Unproven;
+    };
+
+    SenderClaim::Proven {
+        email,
+        attrs: proven
+            .con
+            .iter()
+            .filter(|attribute| attribute.atype != email_attribute)
+            .filter_map(|attribute| {
+                attribute
+                    .value
+                    .clone()
+                    .map(|value| (attribute.atype.clone(), value))
+            })
+            .collect(),
     }
 }
 
@@ -939,20 +1128,22 @@ async fn upload_finalize(
         })?
         .compat();
 
-    let attributes = Unsealer::<_, UnsealerStreamConfig>::new(&mut file, &vk.public_key)
+    // The whole signing policy, not just its attributes: it is also what the
+    // uploader's proof is verified against.
+    let pub_id = Unsealer::<_, UnsealerStreamConfig>::new(&mut file, &vk.public_key)
         .await
         .map_err(|e| {
             log::error!("could not read postguard file during finalize: {}", e);
             Error::InternalServerError(Some(GENERIC_INTERNAL_ERROR_MSG.to_owned()))
         })?
-        .pub_id
-        .con;
+        .pub_id;
 
     // The attribute type carrying the sender's email is configurable
     // (postguard#236): test environments use a test-scheme type since pbdf
     // credentials cannot be issued outside production.
     let email_attribute = config.email_attribute();
-    let sender = attributes
+    let sender = pub_id
+        .con
         .iter()
         .find(|x| x.atype == email_attribute)
         .ok_or_else(|| {
@@ -964,13 +1155,11 @@ async fn upload_finalize(
         .value
         .clone();
 
-    let sender_attributes: Vec<(String, String)> = attributes
-        .into_iter()
+    let sender_attributes: Vec<(String, String)> = pub_id
+        .con
+        .iter()
         .filter(|x| x.atype != email_attribute)
-        .filter_map(|x| {
-            let atype = x.atype;
-            x.value.map(|v| (atype, v))
-        })
+        .filter_map(|x| x.value.clone().map(|v| (x.atype.clone(), v)))
         .collect();
 
     let rolling_limit = if state.api_key_tenant.is_some() {
@@ -979,14 +1168,11 @@ async fn upload_finalize(
         ROLLING_LIMIT
     };
     let now_secs = chrono::offset::Utc::now().timestamp();
-    // Account per-tenant when an API key was validated, otherwise per
-    // sender email. The tenant key (`api-key:<tenant>`) prevents a single
-    // tenant from evading quota by varying sender attributes.
-    let accounting_key = state
-        .api_key_tenant
-        .as_deref()
-        .map(|t| format!("api-key:{}", t))
-        .or_else(|| sender.clone());
+    let accounting_key = accounting_key(
+        state.api_key_tenant.as_deref(),
+        email_attribute,
+        sender.as_deref(),
+    );
     if let Some(key) = accounting_key.as_deref() {
         let usage = store.get_usage(key, now_secs);
         log::info!(
@@ -1019,8 +1205,24 @@ async fn upload_finalize(
         }
     }
 
+    let claim = sender_claim(
+        &vk.public_key,
+        &pub_id,
+        uuid,
+        state.challenge.as_deref(),
+        headers.proof.as_deref(),
+        email_attribute,
+    );
+
     state.sender = sender.clone();
     state.sender_attributes = sender_attributes;
+    // A proof already established must survive a retried finalize: the client
+    // may repeat the request without the header, and that must not erase what
+    // was proved. Only the verification above produces a `Proven`, so this
+    // keeps the claim written once in the direction that matters.
+    if !matches!(state.sender_claim, Some(SenderClaim::Proven { .. })) {
+        state.sender_claim = Some(claim);
+    }
 
     // Persist the finalize transition (the sender is only known now) before
     // the notification email goes out, so the durable row is never behind the
@@ -1036,12 +1238,13 @@ async fn upload_finalize(
     metrics.record_upload_app(state.client_app.as_deref().unwrap_or(CHANNEL_UNKNOWN));
 
     log::info!(
-        "upload_finalize uuid={} channel={} client_version={:?} app={:?} bytes={}",
+        "upload_finalize uuid={} channel={} client_version={:?} app={:?} bytes={} sender_proven={}",
         uuid,
         state.source_channel,
         state.client_version,
         state.client_app,
-        state.uploaded
+        state.uploaded,
+        matches!(state.sender_claim, Some(SenderClaim::Proven { .. }))
     );
 
     if let Some(key) = accounting_key {
@@ -1485,7 +1688,10 @@ fn build_cors(allowed_origins: AllowedOrigins) -> rocket_cors::Cors {
         // `Authorization` is here for the Bearer-API-key tier flow;
         // `cryptifytoken`, `content-range`, and `content-type` ride on
         // chunk PUTs; `x-recovery-token` authenticates GET /…/status;
-        // `x-cryptify-source` tags requests for per-channel metrics.
+        // `x-cryptify-source` tags requests for per-channel metrics;
+        // `x-postguard-proof` carries the challenge signature on finalize,
+        // where a missing entry breaks the upload rather than leaving it
+        // `Unproven`.
         .allowed_headers(AllowedHeaders::some(&[
             "Authorization",
             "Content-Type",
@@ -1493,6 +1699,7 @@ fn build_cors(allowed_origins: AllowedOrigins) -> rocket_cors::Cors {
             "CryptifyToken",
             "Range",
             "X-Cryptify-Source",
+            "X-PostGuard-Proof",
             "X-Recovery-Token",
             // Browser clients (pg-js) send this on every request; without it
             // in the preflight allowlist the browser blocks cross-origin
@@ -2226,6 +2433,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
+    // Browser preflight regression, the sibling of the two above. A browser
+    // cannot send `X-PostGuard-Proof` on `POST /fileupload/finalize/{uuid}`
+    // unless the CORS allow-list names it: rocket_cors answers the preflight
+    // 403 with no `Access-Control-Allow-Origin`, so the header being optional
+    // buys nothing and the upload fails before it starts. Nothing else holds
+    // the entry in place, since the other tests are same-origin and the
+    // `api-description.yaml` drift test compares routes, not headers.
+    #[rocket::async_test]
+    async fn finalize_preflight_advertises_x_postguard_proof() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cryptify-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let client = status_client_with_cors(&data_dir).await;
+
+        let res = client
+            .req(
+                rocket::http::Method::Options,
+                "/fileupload/finalize/00000000-0000-0000-0000-000000000000",
+            )
+            .header(Header::new("Origin", "https://example.com"))
+            .header(Header::new("Access-Control-Request-Method", "POST"))
+            .header(Header::new(
+                "Access-Control-Request-Headers",
+                format!("CryptifyToken, {PROOF_HEADER}"),
+            ))
+            .dispatch()
+            .await;
+
+        assert!(
+            res.status().code < 400,
+            "expected 2xx preflight, got {}",
+            res.status()
+        );
+        let allow_headers = res
+            .headers()
+            .get_one("Access-Control-Allow-Headers")
+            .expect("CORS allow-headers in preflight response");
+        let allow_headers_lc = allow_headers.to_ascii_lowercase();
+        assert!(
+            allow_headers_lc.contains(&PROOF_HEADER.to_ascii_lowercase()),
+            "Access-Control-Allow-Headers `{}` should include {}",
+            allow_headers,
+            PROOF_HEADER
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
     // Design AC for #146: a successful `/status` call must reset the idle
     // eviction deadline (otherwise rehydrate succeeds, then the very next
     // chunk PUT 404s because the session aged out between the GET and the
@@ -2326,6 +2582,8 @@ mod tests {
             api_key_validation_failed: false,
             last_chunk: None,
             recovery_token_hash: String::new(),
+            challenge: None,
+            sender_claim: None,
         }
     }
 
@@ -2493,6 +2751,47 @@ mod tests {
     fn extract_pg_bearer_rejects_pg_prefix_without_scheme() {
         // The PG- prefix alone (no `Bearer `) is not a valid bearer.
         assert_eq!(extract_pg_bearer(Some("PG-abc123")), None);
+    }
+
+    // ----- Hex and proof decoding unit tests -----
+
+    #[test]
+    fn hex_round_trips_through_bytes_to_hex() {
+        for bytes in [
+            vec![],
+            vec![0x00],
+            vec![0xff, 0x00, 0x7f],
+            (0u8..=255).collect(),
+        ] {
+            assert_eq!(hex_to_bytes(&bytes_to_hex(&bytes)), Some(bytes));
+        }
+    }
+
+    #[test]
+    fn hex_to_bytes_accepts_either_case() {
+        assert_eq!(hex_to_bytes("DeadBEef"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
+    }
+
+    #[test]
+    fn hex_to_bytes_rejects_what_is_not_hex() {
+        // An odd length, a non-hex digit, and a multi-byte character that a
+        // `char`-indexed decoder would slice through the middle of.
+        for input in ["abc", "zz", "ab cd", "aébc", "é"] {
+            assert_eq!(hex_to_bytes(input), None, "{input:?} is not hex");
+        }
+    }
+
+    #[test]
+    fn decode_proof_rejects_values_that_are_not_a_signature() {
+        use base64ct::{Base64, Encoding};
+
+        assert!(decode_proof("not base64 ~~").is_none());
+        // Well-formed base64 of the wrong length, both ways: a truncated
+        // signature and a whole one with bytes hung off the end.
+        let short = Base64::encode_string(&[0u8; pg_core::ibs::gg::SIG_BYTES - 1]);
+        assert!(decode_proof(&short).is_none());
+        let long = Base64::encode_string(&[0u8; pg_core::ibs::gg::SIG_BYTES + 1]);
+        assert!(decode_proof(&long).is_none());
     }
 
     // ----- Range header parser unit tests -----
@@ -2819,6 +3118,8 @@ mod tests {
                 api_key_validation_failed: false,
                 last_chunk: None,
                 recovery_token_hash: String::new(),
+                challenge: None,
+                sender_claim: None,
             };
             store.create(uuid.to_owned(), state);
         }
@@ -3667,6 +3968,592 @@ mod integration {
 
         let final_status = do_finalize(&client, &uuid, &token, sealed.len() as u64).await;
         assert_eq!(final_status, Status::Ok);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Rewrite the sender spelling stored in a sealed container's public
+    /// signing policy.
+    ///
+    /// pg-core's `Sealer` canonicalizes the signing policy before writing it,
+    /// but that is a courtesy of the honest client, not a gate: `Unsealer::new`
+    /// verifies the header signature against the identity *derived* from that
+    /// policy, and `Policy::derive` canonicalizes, so a container storing any
+    /// other spelling of the same address verifies just the same and hands
+    /// cryptify the raw spelling as `pub_id`. This produces what a client that
+    /// skips the courtesy uploads.
+    ///
+    /// The rewrite is a byte substitution confined to the header-signature
+    /// block, so `replacement` must be as long as `original`: every length
+    /// prefix in the stream then stays valid, and the header bytes the
+    /// signature covers are left untouched.
+    fn respell_stored_sender(sealed: &[u8], original: &str, replacement: &str) -> Vec<u8> {
+        use pg_core::consts::{HEADER_SIZE_SIZE, PRELUDE_SIZE, SIG_SIZE_SIZE, VERSION_SIZE};
+
+        assert_eq!(
+            original.len(),
+            replacement.len(),
+            "the rewrite must not move any length prefix"
+        );
+
+        // PRELUDE | version | header len | header | signature len | signature | ...
+        let header_len_at = PRELUDE_SIZE + VERSION_SIZE;
+        let header_at = header_len_at + HEADER_SIZE_SIZE;
+        let header_len = u32::from_be_bytes(
+            sealed[header_len_at..header_at]
+                .try_into()
+                .expect("header length"),
+        ) as usize;
+        let sig_len_at = header_at + header_len;
+        let sig_at = sig_len_at + SIG_SIZE_SIZE;
+        let sig_len = u32::from_be_bytes(
+            sealed[sig_len_at..sig_at]
+                .try_into()
+                .expect("signature length"),
+        ) as usize;
+
+        let block = &sealed[sig_at..sig_at + sig_len];
+        let needle = original.as_bytes();
+        let at = block
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .expect("the stored policy carries the sender address");
+        assert!(
+            block[at + needle.len()..]
+                .windows(needle.len())
+                .all(|w| w != needle),
+            "the sender address must occur once in the signature block"
+        );
+
+        let mut out = sealed.to_vec();
+        out[sig_at + at..sig_at + at + needle.len()].copy_from_slice(replacement.as_bytes());
+        out
+    }
+
+    /// The sender email a container stores in its public signing policy, read
+    /// back exactly the way `upload_finalize` reads it. Verifying the container
+    /// is part of that read, so this doubles as the check that a respelled one
+    /// is still accepted.
+    async fn stored_sender(sealed: &[u8], setup: &TestSetup) -> Option<String> {
+        let vk = VerifyingKey(setup.ibs_pk.0.clone());
+        let mut cursor = futures::io::Cursor::new(sealed.to_vec());
+
+        Unsealer::<_, UnsealerStreamConfig>::new(&mut cursor, &vk)
+            .await
+            .expect("the container must verify")
+            .pub_id
+            .con
+            .into_iter()
+            .find(|a| a.atype == "pbdf.sidn-pbdf.email.email")
+            .and_then(|a| a.value)
+    }
+
+    /// init + one chunk + finalize, returning the finalize status.
+    async fn upload_sealed(client: &Client, sealed: &[u8]) -> Status {
+        let (uuid, token, status) = do_init(client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(client, &uuid, &token, sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        do_finalize(client, &uuid, &token, sealed.len() as u64).await
+    }
+
+    /// Two containers from one sender, spelled differently, must share a single
+    /// rolling-limit bucket. Seed the bucket to leave room for exactly one
+    /// container, let the capitalized upload take that room, and the lowercase
+    /// one must then be refused. While the accounting key was the raw stored
+    /// spelling these were two buckets and both went through.
+    #[rocket::async_test]
+    async fn two_spellings_of_one_sender_share_a_rolling_limit_bucket() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let canonical = seal_payload(&setup, b"one sender, two spellings").await;
+        let capitalized = respell_stored_sender(&canonical, SENDER_EMAIL, "Bob@Example.COM");
+
+        // The fixture is only worth something if cryptify really reads the new
+        // spelling back, so pin that before the buckets are counted -- a byte
+        // substitution that landed somewhere inert would leave this test
+        // passing over a canonical container and guarding nothing.
+        assert_eq!(
+            stored_sender(&capitalized, &setup).await.as_deref(),
+            Some("Bob@Example.COM"),
+            "the container must present the capitalized spelling to finalize"
+        );
+        assert_eq!(
+            stored_sender(&canonical, &setup).await.as_deref(),
+            Some(SENDER_EMAIL)
+        );
+
+        let (client, dir) = test_client(&setup).await;
+        let store = client.rocket().state::<Store>().expect("Store managed");
+
+        let now = chrono::offset::Utc::now().timestamp();
+        store.record_upload(
+            SENDER_EMAIL.to_owned(),
+            ROLLING_LIMIT - capitalized.len() as u64,
+            now,
+        );
+
+        assert_eq!(
+            upload_sealed(&client, &capitalized).await,
+            Status::Ok,
+            "the first upload still fits inside the limit"
+        );
+        assert_eq!(
+            store.get_usage(SENDER_EMAIL, now).used_bytes,
+            ROLLING_LIMIT,
+            "the capitalized upload must accrue against the canonical bucket"
+        );
+        assert_eq!(
+            upload_sealed(&client, &canonical).await,
+            Status::PayloadTooLarge,
+            "the second spelling must not get a bucket of its own"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The accounting key is a function of the *canonical* sender, never of the
+    /// spelling the uploader chose. A regression here is silent -- every upload
+    /// still succeeds -- so pin the property over a table rather than one case.
+    #[test]
+    fn accounting_key_canonicalizes_the_sender_spelling() {
+        for atype in [
+            "pbdf.sidn-pbdf.email.email",
+            // Test deployments configure a test-scheme type (postguard#236);
+            // the rule is keyed on the tail, so it applies there too.
+            "irma-demo.sidn-pbdf.email.email",
+        ] {
+            for spelling in [
+                "bob@example.com",
+                "Bob@example.com",
+                "bob@Example.COM",
+                "BOB@EXAMPLE.COM",
+                "  bob@example.com  ",
+                "\tbob@example.com\n",
+            ] {
+                let key = accounting_key(None, atype, Some(spelling));
+                assert_eq!(
+                    key.as_deref(),
+                    Some(SENDER_EMAIL),
+                    "{atype} / {spelling:?} must not get a bucket of its own"
+                );
+                assert_eq!(
+                    key,
+                    Some(pg_core::identity::canonicalize(atype, spelling)),
+                    "the accounting key must stay canonicalize() of the container value"
+                );
+            }
+        }
+    }
+
+    /// A tenant id is not an identity attribute and has no rule, so it reaches
+    /// the store as the API key named it -- and it still wins over the sender.
+    #[test]
+    fn accounting_key_leaves_the_api_key_tenant_alone() {
+        assert_eq!(
+            accounting_key(
+                Some("Acme-EU"),
+                "pbdf.sidn-pbdf.email.email",
+                Some("Bob@Example.COM")
+            )
+            .as_deref(),
+            Some("api-key:Acme-EU")
+        );
+    }
+
+    /// No tenant and no sender is not accounted at all, as before.
+    #[test]
+    fn accounting_key_is_none_without_a_tenant_or_a_sender() {
+        assert_eq!(
+            accounting_key(None, "pbdf.sidn-pbdf.email.email", None),
+            None
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Upload proof (postguard#364).
+    //
+    // Driven through real HTTP requests end to end, so the challenge signed is
+    // the one the client was handed, the proof travels in the header a client
+    // sends, and the claim asserted on is the one finalize stored.
+    // ---------------------------------------------------------------------
+
+    /// The name attribute `TestSetup`'s Bob policy carries beside his email,
+    /// and therefore the one attribute a proof of that identity claims.
+    const SENDER_NAME_ATTRIBUTE: &str = "pbdf.gemeente.personalData.name";
+
+    /// [`do_init`], also returning the `challenge` from the response body.
+    async fn do_init_with_challenge(
+        client: &Client,
+        recipient: &str,
+    ) -> (String, String, Option<String>) {
+        let res = client
+            .post("/fileupload/init")
+            .header(ContentType::JSON)
+            .body(init_body_json(recipient))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::Ok);
+        let token = res
+            .headers()
+            .get_one("cryptifytoken")
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let body = res.into_string().await.unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(&body).expect("init body is JSON");
+        let field = |name: &str| {
+            json.get(name)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        };
+        (field("uuid").expect("uuid"), token, field("challenge"))
+    }
+
+    /// The `X-PostGuard-Proof` value a client sends: `signChallenge` over the
+    /// *decoded* challenge with the uuid as the context, serialized the way
+    /// `pg-wasm` returns it, base64-encoded.
+    fn proof_header(
+        key: &pg_core::artifacts::SigningKeyExt,
+        uuid: &str,
+        challenge: &str,
+    ) -> String {
+        use base64ct::{Base64, Encoding};
+
+        let mut rng = rand08::thread_rng();
+        let challenge = hex_to_bytes(challenge).expect("the challenge is hex");
+        let sig = pg_core::challenge::sign_challenge(key, uuid, &challenge, &mut rng);
+        let bytes = pg_core::bincode_compat::serialize(&sig).expect("serialize the signature");
+
+        Base64::encode_string(&bytes)
+    }
+
+    async fn do_finalize_with_proof(
+        client: &Client,
+        uuid: &str,
+        token: &str,
+        total: u64,
+        proof: Option<&str>,
+    ) -> Status {
+        let mut req = client
+            .post(format!("/fileupload/finalize/{}", uuid))
+            .header(Header::new("CryptifyToken", token.to_string()))
+            .header(Header::new("Content-Range", format!("bytes */{}", total)));
+        if let Some(proof) = proof {
+            req = req.header(Header::new(PROOF_HEADER, proof.to_string()));
+        }
+
+        req.dispatch().await.status()
+    }
+
+    /// init → one chunk → finalize, with the proof header `proof` builds from
+    /// the uuid and challenge the server just minted. Returns the claim
+    /// finalize settled on, and asserts along the way that the upload was
+    /// accepted whatever the proof did — no proof outcome may refuse an
+    /// upload in this ticket.
+    async fn upload_with_proof(
+        client: &Client,
+        sealed: &[u8],
+        proof: impl FnOnce(&str, &str) -> Option<String>,
+    ) -> Option<SenderClaim> {
+        let (uuid, token, challenge) = do_init_with_challenge(client, SENDER_EMAIL).await;
+        let challenge = challenge.expect("init must serve a challenge");
+
+        let (chunk_status, token) = do_chunk(client, &uuid, &token, sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+
+        let header = proof(&uuid, &challenge);
+        let status = do_finalize_with_proof(
+            client,
+            &uuid,
+            &token,
+            sealed.len() as u64,
+            header.as_deref(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            Status::Ok,
+            "a proof that fails or is absent must not refuse the upload"
+        );
+
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let handle = store
+            .get(&uuid)
+            .expect("the session outlives a successful finalize");
+        let claim = handle.lock().await.sender_claim.clone();
+
+        claim
+    }
+
+    /// The client cannot answer a challenge it was not given, and two sessions
+    /// must not share one — a reused challenge would let a proof collected for
+    /// one upload be replayed onto another.
+    #[rocket::async_test]
+    async fn init_serves_a_fresh_challenge_and_stores_it() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir) = test_client(&setup).await;
+
+        let (uuid, _token, challenge) = do_init_with_challenge(&client, SENDER_EMAIL).await;
+        let challenge = challenge.expect("init must serve a challenge");
+        assert_eq!(
+            hex_to_bytes(&challenge).map(|bytes| bytes.len()),
+            Some(32),
+            "the challenge must decode to the 32 bytes the client signs"
+        );
+
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let handle = store.get(&uuid).expect("live session");
+        assert_eq!(
+            handle.lock().await.challenge.as_deref(),
+            Some(challenge.as_str()),
+            "the session must hold the challenge the client was handed"
+        );
+
+        let (_, _, second) = do_init_with_challenge(&client, SENDER_EMAIL).await;
+        assert_ne!(
+            second.as_deref(),
+            Some(challenge.as_str()),
+            "each session must get its own challenge"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The done bar: a signature by the key belonging to the identity the
+    /// container claims proves the sender, and the claim names that identity.
+    #[rocket::async_test]
+    async fn a_signed_challenge_proves_the_sender() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"an upload that proves its sender").await;
+        let (client, dir) = test_client(&setup).await;
+
+        // `seal_payload` signs the container with this key, so it is the one
+        // the container's identity belongs to.
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            Some(proof_header(&setup.signing_keys[2], uuid, challenge))
+        })
+        .await;
+
+        assert_eq!(
+            claim,
+            Some(SenderClaim::Proven {
+                email: SENDER_EMAIL.to_owned(),
+                attrs: vec![(SENDER_NAME_ATTRIBUTE.to_owned(), "Bob".to_owned())],
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A signature by a key for some *other* identity is the attack this whole
+    /// ticket exists for: someone relaying a container they did not seal. It
+    /// must not prove anything, and must not error either.
+    #[rocket::async_test]
+    async fn a_proof_from_another_identity_leaves_the_sender_unproven() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a container someone else sealed").await;
+        let (client, dir) = test_client(&setup).await;
+
+        // Alice's key: a real, PKG-issued signing key for an identity that is
+        // not the one the container claims.
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            Some(proof_header(&setup.signing_keys[0], uuid, challenge))
+        })
+        .await;
+
+        assert_eq!(claim, Some(SenderClaim::Unproven));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A signature over anything other than this session's challenge proves
+    /// nothing — otherwise one proof, once collected, would answer forever.
+    #[rocket::async_test]
+    async fn a_proof_over_another_challenge_leaves_the_sender_unproven() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a proof over the wrong challenge").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            let other = "00".repeat(32);
+            assert_ne!(other, challenge, "the minted challenge is random");
+            Some(proof_header(&setup.signing_keys[2], uuid, &other))
+        })
+        .await;
+
+        assert_eq!(claim, Some(SenderClaim::Unproven));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The uuid is the context the proof is bound to, so a proof collected for
+    /// one upload does not answer another's challenge even when the challenge
+    /// bytes are somehow the same.
+    #[rocket::async_test]
+    async fn a_proof_bound_to_another_upload_leaves_the_sender_unproven() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a proof bound to another upload").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            let other_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+            assert_ne!(other_uuid, uuid);
+            Some(proof_header(&setup.signing_keys[2], &other_uuid, challenge))
+        })
+        .await;
+
+        assert_eq!(claim, Some(SenderClaim::Unproven));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The wire contract pins the standard base64 alphabet, so the same valid
+    /// signature respelled in base64url proves nothing. Reaching for base64url
+    /// is the reflex in web crypto code, and this is what makes the spec's
+    /// claim about the alphabet load-bearing: the signature here verifies when
+    /// spelled the documented way, so the alphabet is the only difference.
+    #[rocket::async_test]
+    async fn a_base64url_proof_leaves_the_sender_unproven() {
+        use base64ct::{Base64, Base64Url, Encoding};
+
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a proof spelled in base64url").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            // A signature is 96 bytes, so its standard base64 is 128
+            // characters, and roughly one in fifty of them happens to contain
+            // neither `+` nor `/`. Then both alphabets spell it identically and
+            // there is nothing left to test. Signing is randomised, so draw
+            // again until the two spellings actually differ.
+            let url = loop {
+                let standard = proof_header(&setup.signing_keys[2], uuid, challenge);
+                let bytes = Base64::decode_vec(&standard).expect("the header is standard base64");
+                let url = Base64Url::encode_string(&bytes);
+                if url != standard {
+                    break url;
+                }
+            };
+            Some(url)
+        })
+        .await;
+
+        assert_eq!(claim, Some(SenderClaim::Unproven));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// No header at all is the state of every client that has not shipped the
+    /// proof yet: unproven, and uploading exactly as before.
+    #[rocket::async_test]
+    async fn no_proof_header_leaves_the_sender_unproven() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"an upload from a client without the header").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim = upload_with_proof(&client, &sealed, |_uuid, _challenge| None).await;
+
+        assert_eq!(claim, Some(SenderClaim::Unproven));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A header that is not a signature at all is a failed proof, not a
+    /// malformed request: same arm, same 200.
+    #[rocket::async_test]
+    async fn a_malformed_proof_header_leaves_the_sender_unproven() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"an upload with a junk proof").await;
+        let (client, dir) = test_client(&setup).await;
+
+        for junk in ["", "not base64 ~~", "AAAA"] {
+            let claim =
+                upload_with_proof(&client, &sealed, |_uuid, _challenge| Some(junk.to_owned()))
+                    .await;
+            assert_eq!(claim, Some(SenderClaim::Unproven), "{junk:?}");
+        }
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A finalize can be repeated: the client retries after a lost response,
+    /// or resumes after a refresh, in which case it no longer holds the
+    /// challenge and cannot rebuild the header at all. Neither may erase a
+    /// proof that already succeeded, and the unproven-to-proven direction
+    /// must still work.
+    #[rocket::async_test]
+    async fn a_retried_finalize_does_not_erase_a_proof() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"an upload finalized twice").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim_after = |uuid: String| {
+            let store = client.rocket().state::<Store>().expect("Store managed");
+            let handle = store
+                .get(&uuid)
+                .expect("the session outlives a successful finalize");
+            async move { handle.lock().await.sender_claim.clone() }
+        };
+
+        // Proven first, then a retry with no header: the claim must stick.
+        let (uuid, token, challenge) = do_init_with_challenge(&client, SENDER_EMAIL).await;
+        let challenge = challenge.expect("init must serve a challenge");
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        let total = sealed.len() as u64;
+        let proof = proof_header(&setup.signing_keys[2], &uuid, &challenge);
+
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, Some(&proof)).await;
+        assert_eq!(status, Status::Ok);
+        let proven = Some(SenderClaim::Proven {
+            email: SENDER_EMAIL.to_owned(),
+            attrs: vec![(SENDER_NAME_ATTRIBUTE.to_owned(), "Bob".to_owned())],
+        });
+        assert_eq!(
+            claim_after(uuid.clone()).await,
+            proven,
+            "the first finalize proves the sender"
+        );
+
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, None).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            claim_after(uuid.clone()).await,
+            proven,
+            "a retried finalize without the header must not downgrade a Proven claim"
+        );
+
+        // Unproven first, then a finalize that answers: the claim must upgrade.
+        let (uuid, token, challenge) = do_init_with_challenge(&client, SENDER_EMAIL).await;
+        let challenge = challenge.expect("init must serve a challenge");
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, None).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            claim_after(uuid.clone()).await,
+            Some(SenderClaim::Unproven),
+            "no header leaves the sender unproven"
+        );
+
+        let proof = proof_header(&setup.signing_keys[2], &uuid, &challenge);
+        let status = do_finalize_with_proof(&client, &uuid, &token, total, Some(&proof)).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            claim_after(uuid).await,
+            proven,
+            "a later finalize carrying a valid proof must still prove the sender"
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }

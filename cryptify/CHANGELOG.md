@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.31](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.30...cryptify-v0.1.31) - 2026-08-24
+
+### Fixed
+
+- *(cryptify)* canonicalize the default-tier accounting key ([#366](https://github.com/encryption4all/postguard/pull/366))
+
+## [0.1.30](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.29...cryptify-v0.1.30) - 2026-08-18
+
+### Added
+
+- *(cryptify)* serve the configured max upload-chunk size on init ([#346](https://github.com/encryption4all/postguard/pull/346))
+- *(cryptify)* restore upload sessions on boot ([#330](https://github.com/encryption4all/postguard/pull/330))
+
+### Fixed
+
+- *(cryptify)* build dev.Dockerfile from the repo root, like its sibling ([#329](https://github.com/encryption4all/postguard/pull/329))
+
 ## [0.1.29](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.28...cryptify-v0.1.29) - 2026-08-10
 
 ### Added

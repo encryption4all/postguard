@@ -78,6 +78,13 @@ impl<'r, R, C> Sealer<'r, R, C> {
 ///
 /// 2. Then, the user has input the user secret key and the recipient for which decryption should
 ///    take place.
+///
+/// Step 1 does *not* authenticate the sender. The [`pub_id`] read there is claimed, not bound to
+/// the ciphertext; only the [`VerificationResult`] returned by step 2 can carry a bound sender,
+/// and then only against a party on the wire and only for a container that carries the AEAD-side
+/// copy of the policy. Do not display step 1's identity as a verified sender.
+///
+/// [`pub_id`]: Unsealer#structfield.pub_id
 #[derive(Debug)]
 pub struct Unsealer<R, C: UnsealerConfig> {
     /// The version found before the raw header.
@@ -86,7 +93,14 @@ pub struct Unsealer<R, C: UnsealerConfig> {
     /// The parsed header.
     pub header: Header,
 
-    /// The verified public identity which was used to sign the header.
+    /// The sender identity *claimed* in the header.
+    ///
+    /// The header signature over it verifies, but nothing binds it to the ciphertext until
+    /// `unseal` returns: a container's header signature can be replaced by any party the PKG will
+    /// issue a signing key to (see <https://github.com/encryption4all/postguard/issues/338>). The
+    /// closest to a bound answer is the `public` field of the [`VerificationResult`] that `unseal`
+    /// returns, which catches that swap only for a container carrying the AEAD-side copy of the
+    /// policy and only against a party who does not hold the DEM key.
     pub pub_id: Policy,
 
     // The input.

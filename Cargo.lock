@@ -1082,9 +1082,10 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "cryptify"
-version = "0.1.29"
+version = "0.1.31"
 dependencies = [
  "askama",
+ "base64ct",
  "chrono",
  "futures 0.3.32",
  "lettre",
@@ -3137,7 +3138,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pg-cli"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -3157,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "pg-core"
-version = "0.6.3"
+version = "0.6.5"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -3212,7 +3213,7 @@ dependencies = [
 
 [[package]]
 name = "pg-pkg"
-version = "0.6.1"
+version = "0.6.3"
 dependencies = [
  "actix-cors",
  "actix-governor",

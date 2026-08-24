@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crate::artifacts::{PublicKey, UserSecretKey, VerifyingKey};
 use crate::client::*;
 use crate::error::Error;
-use crate::identity::EncryptionPolicy;
+use crate::identity::{EncryptionPolicy, Policy};
 
 use aead::{Aead, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
@@ -52,8 +52,33 @@ impl From<aes_gcm::aes::cipher::InvalidLength> for Error {
     }
 }
 
+/// The AEAD plaintext as this version writes it.
+///
+/// `pub_pol` is a copy of the sender's public signing policy, the same value
+/// that goes into `h_sig_ext` outside the AEAD. Only the copy in here is
+/// covered by the AEAD, so a reader can tell that a party on the wire replaced
+/// the header signature block with one made by another signing key.
+///
+/// The copy is authenticated against the DEM key, not against the sender's
+/// signing key, so it covers a party on the wire and nobody who holds the DEM
+/// key themselves. Read it as a check against the wire, not as sender
+/// authentication. Binding the policy under something only the sender controls
+/// is a design change, not this check.
 #[derive(Debug, Serialize, Deserialize)]
 struct MessageAndSignature {
+    message: Vec<u8>,
+    sig: SignatureExt,
+    pub_pol: Policy,
+}
+
+/// The part of that plaintext every version writes.
+///
+/// bincode encodes fields positionally and ignores trailing bytes, so this
+/// decodes both a container sealed by this version and one sealed before
+/// `pub_pol` existed. The reader decodes this and inspects what follows
+/// itself, rather than decoding a shape an older sealer never wrote.
+#[derive(Debug, Serialize, Deserialize)]
+struct MessageAndSignaturePrefix {
     message: Vec<u8>,
     sig: SignatureExt,
 }
@@ -110,6 +135,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
         out.extend_from_slice(&u32::try_from(h_sig_ext_bytes.len())?.to_be_bytes());
         out.extend_from_slice(&h_sig_ext_bytes);
 
+        let pub_pol = self.pub_sign_key.policy.clone();
         let m_sig_key = self.priv_sign_key.unwrap_or(self.pub_sign_key);
         let m_sig = signer.chain(&message).sign(&m_sig_key.key.0, self.rng);
 
@@ -122,6 +148,7 @@ impl<'r, R: RngCore + CryptoRng> Sealer<'r, R, SealerMemoryConfig> {
                 sig: m_sig,
                 pol: m_sig_key.policy,
             },
+            pub_pol,
         })?;
 
         let ciphertext = aead.encrypt(&nonce, enc_input.as_ref())?;
@@ -192,7 +219,24 @@ impl Unsealer<Vec<u8>, UnsealerMemoryConfig> {
 
         let plain = aead.decrypt(&nonce, &*self.r)?;
 
-        let msg: MessageAndSignature = crate::bincode_compat::deserialize(&plain)?;
+        let (msg, read): (MessageAndSignaturePrefix, usize) =
+            crate::bincode_compat::deserialize_with_len(&plain)?;
+
+        // A container sealed by this version carries the sender's public
+        // signing policy behind the message signature, under the AEAD. The
+        // header signature outside the AEAD claims a policy too; if they
+        // disagree, that block was swapped. Nothing following means the sealer
+        // predates the copy. Both readings are authenticated against the DEM
+        // key and reach no further, so the absence branch is not the safe half
+        // of the two — see the note on `MessageAndSignature`.
+        if let Some(trailing) = plain.get(read..).filter(|t| !t.is_empty()) {
+            let sealed_pub_pol: Policy = crate::bincode_compat::deserialize(trailing)?;
+
+            if sealed_pub_pol != self.pub_id {
+                return Err(Error::IncorrectSignature);
+            }
+        }
+
         let id = msg.sig.pol.derive_ibs()?;
 
         if !self
@@ -461,6 +505,127 @@ mod tests {
                 other
             ),
         }
+    }
+
+    /// Splits a sealed in-memory container into the header bytes, the header
+    /// signature block and the ciphertext.
+    fn split_container(sealed: &[u8]) -> (&[u8], &[u8], &[u8]) {
+        let (_, header_len) =
+            preamble_checked(&sealed[..PREAMBLE_SIZE]).expect("preamble should parse");
+        let sig_len_at = PREAMBLE_SIZE + header_len;
+        let sig_len = u32::from_be_bytes(
+            sealed[sig_len_at..sig_len_at + SIG_SIZE_SIZE]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let sig_at = sig_len_at + SIG_SIZE_SIZE;
+
+        (
+            &sealed[PREAMBLE_SIZE..sig_len_at],
+            &sealed[sig_at..sig_at + sig_len],
+            &sealed[sig_at + sig_len..],
+        )
+    }
+
+    /// The attack: keep the preamble, header and ciphertext byte for byte, and
+    /// replace only the header signature block with one made over the same
+    /// header bytes by another signing key, carrying that key's policy.
+    fn swap_header_signature<R: rand::RngCore + rand::CryptoRng>(
+        sealed: &[u8],
+        attacker: &crate::artifacts::SigningKeyExt,
+        rng: &mut R,
+    ) -> Vec<u8> {
+        let (header_bytes, _, ct) = split_container(sealed);
+
+        let h_sig_ext = SignatureExt {
+            sig: Signer::new().chain(header_bytes).sign(&attacker.key.0, rng),
+            pol: attacker.policy.clone(),
+        };
+        let h_sig_ext_bytes = crate::bincode_compat::serialize(&h_sig_ext).unwrap();
+
+        let mut out = sealed[..PREAMBLE_SIZE + header_bytes.len()].to_vec();
+        out.extend_from_slice(&(h_sig_ext_bytes.len() as u32).to_be_bytes());
+        out.extend_from_slice(&h_sig_ext_bytes);
+        out.extend_from_slice(ct);
+
+        out
+    }
+
+    /// A container sealed before the AEAD carried a copy of the public signing
+    /// policy: same bytes, but with the appended policy cut off the plaintext
+    /// and the ciphertext recomputed.
+    fn strip_pub_pol(sealed: &[u8], ident: &str, usk: &UserSecretKey<CGWKV>) -> Vec<u8> {
+        let (header_bytes, _, ct) = split_container(sealed);
+        let header: Header = crate::bincode_compat::deserialize(header_bytes).unwrap();
+        let ss = header.recipients.get(ident).unwrap().decaps(usk).unwrap();
+
+        let Algorithm::Aes128Gcm(iv) = header.algo;
+        let aead = Aes128Gcm::new_from_slice(&ss.0[..KEY_SIZE]).unwrap();
+        let nonce = Nonce::from(iv.0);
+
+        let plain = aead.decrypt(&nonce, ct).unwrap();
+        let (_, read): (MessageAndSignaturePrefix, usize) =
+            crate::bincode_compat::deserialize_with_len(&plain).unwrap();
+        assert!(
+            read < plain.len(),
+            "the sealer wrote no appended policy — nothing to strip"
+        );
+
+        let mut out = sealed[..sealed.len() - ct.len()].to_vec();
+        out.extend_from_slice(&aead.encrypt(&nonce, &plain[..read]).unwrap());
+
+        out
+    }
+
+    /// Replacing the header signature with one made by another signing key over
+    /// the same header bytes must be rejected: the AEAD-protected copy of the
+    /// public signing policy no longer matches the one the block claims.
+    #[test]
+    fn test_unseal_rejects_swapped_header_signature() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_memory(&setup, &mut rng);
+
+        // Charlie's name-only key — a key the PKG hands to whoever authenticates
+        // as Charlie, which is exactly what makes the swap cheap.
+        let swapped = swap_header_signature(&sealed, &setup.signing_keys[4], &mut rng);
+
+        let unsealer = Unsealer::<_, UnsealerMemoryConfig>::new(swapped, &setup.ibs_pk)
+            .expect("the swapped header signature still verifies — that is the attack");
+        assert_eq!(
+            unsealer.pub_id, setup.policies[4],
+            "the container now claims the attacker as public sender"
+        );
+
+        match unsealer.unseal("Bob", &setup.usks[2]) {
+            Err(Error::IncorrectSignature) => {}
+            other => panic!("expected IncorrectSignature, got {:?}", other),
+        }
+    }
+
+    /// A container sealed by a pg-core that predates the appended copy carries
+    /// nothing behind the message signature. It must still unseal, and report
+    /// the same sender it always did.
+    #[test]
+    fn test_unseal_accepts_container_without_appended_policy() {
+        let mut rng = rand::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_memory(&setup, &mut rng);
+        let legacy = strip_pub_pol(&sealed, "Bob", &setup.usks[2]);
+
+        let (plain, verified) = Unsealer::<_, UnsealerMemoryConfig>::new(legacy, &setup.ibs_pk)
+            .unwrap()
+            .unseal("Bob", &setup.usks[2])
+            .expect("a container without the appended policy must still open");
+
+        assert_eq!(&plain, b"SECRET DATA");
+        assert_eq!(
+            verified,
+            VerificationResult {
+                public: setup.policies[0].clone(),
+                private: Some(setup.policies[1].clone()),
+            }
+        );
     }
 
     #[test]

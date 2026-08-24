@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Output};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 pub mod support_window;
 
@@ -42,8 +43,28 @@ pub struct Manifest {
     pub wire_version: u16,
     /// File holding the PKG parameters with the verifying key.
     pub verifying_key: String,
+    /// The policies every container in the set was signed under.
+    pub sender: Sender,
     /// The sealed containers.
     pub cases: Vec<Case>,
+}
+
+/// The sender policies the manifest promises, in the canonical form the sealer
+/// wrote them in.
+///
+/// Held as raw JSON rather than as a `Policy`: every pinned `pg-core` is a
+/// distinct crate with a distinct `Policy` type, so naming one of them in the
+/// shared manifest would tie it to a single reader. The comparison is
+/// structural, through [`describe_policy`].
+#[derive(Debug, Deserialize)]
+pub struct Sender {
+    /// The policy the *header* signature was made under, visible to anyone who
+    /// has the bytes.
+    pub public: Value,
+    /// The policy the *payload* signature was made under in the `*-privsig`
+    /// cases. Present for every set; only checked for a case whose
+    /// `privateSigning` is true.
+    pub private: Option<Value>,
 }
 
 /// One sealed container plus everything needed to open and check it.
@@ -156,6 +177,59 @@ pub fn describe_plaintext_mismatch(got: &[u8], want: &[u8]) -> String {
     }
 }
 
+/// A policy as a comparable string: attributes in a fixed order, and a missing
+/// value distinguished from an empty one.
+///
+/// `con` is sorted because the order a reader hands the conjunction back in is
+/// not part of the wire contract, and a reordering must not read as a break.
+/// `describePolicy` in `pg-compat-js/src/failures.mjs` sorts it on the same
+/// grounds, so both halves of the gate rule the same recovered policy a match
+/// and name the same fields when they don't. The two texts are not identical:
+/// `serde_json` here has no `preserve_order`, so object keys come out
+/// alphabetically, while the JS half emits `ts` before `con`.
+pub fn describe_policy(policy: &Value) -> String {
+    let mut con: Vec<Value> = policy
+        .get("con")
+        .and_then(Value::as_array)
+        .map(|attributes| {
+            attributes
+                .iter()
+                .map(|a| {
+                    serde_json::json!({
+                        "t": a.get("t").cloned().unwrap_or(Value::Null),
+                        "v": a.get("v").cloned().unwrap_or(Value::Null),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    con.sort_by_cached_key(Value::to_string);
+
+    serde_json::json!({
+        "ts": policy.get("ts").cloned().unwrap_or(Value::Null),
+        "con": con,
+    })
+    .to_string()
+}
+
+/// Compare a signing policy a reader recovered against the one the manifest
+/// says was signed.
+///
+/// Recovering the right plaintext is not enough on its own: `SignatureExt.pol`
+/// travels in full and a published reader derives the signer's identity from it,
+/// so this is where a canonicalization that stops reaching the wire shows up.
+pub fn describe_policy_mismatch(what: &str, got: &Value, want: &Value) -> Option<String> {
+    let got = describe_policy(got);
+    let want = describe_policy(want);
+    if got == want {
+        return None;
+    }
+
+    Some(format!(
+        "{what} signing policy is {got}, manifest says {want}"
+    ))
+}
+
 /// Open one case in a child process and turn its outcome into failure
 /// messages.
 ///
@@ -255,17 +329,28 @@ macro_rules! reader {
             use pg_core::client::rust::stream::UnsealerStreamConfig;
             use pg_core::client::rust::UnsealerMemoryConfig;
             use pg_core::client::{Unsealer, VerificationResult};
+            // `VERSION_V3` is a deprecated alias for `VERSION_2` in this tree
+            // from #339 onwards. Neither pinned release carries that
+            // deprecation yet — 0.6.3 and 0.5.10 contain no `#[deprecated]` at
+            // all — so these two allows are inert today and are here for the
+            // pin that first ships it, where `pg-compat-lint`'s clippy
+            // `-D warnings` would make the lint a hard error on both the
+            // import and the use below.
+            #[allow(deprecated)]
             use pg_core::consts::VERSION_V3;
             use pg_core::kem::cgw_kv::CGWKV;
 
             use serde::Deserialize;
 
-            use crate::{describe_plaintext_mismatch, read_file, Case, Manifest};
+            use crate::{
+                describe_plaintext_mismatch, describe_policy_mismatch, read_file, Case, Manifest,
+            };
 
             /// The crates.io version this module reads with.
             pub const VERSION: &str = $version;
 
             /// The container version this published reader speaks.
+            #[allow(deprecated)]
             pub const WIRE_VERSION: u16 = VERSION_V3;
 
             #[derive(Deserialize)]
@@ -330,6 +415,53 @@ macro_rules! reader {
                                     case.private_signing,
                                 ));
                             }
+                            failures.extend(check_sender(&label, &verified, manifest, case));
+                        }
+                    }
+                }
+
+                failures
+            }
+
+            /// Hold the recovered sender identity to what the manifest
+            /// promises. The policies are serialized back to JSON because this
+            /// module's `Policy` is one pinned crate's type and the manifest is
+            /// shared by all of them.
+            fn check_sender(
+                label: &str,
+                verified: &VerificationResult,
+                manifest: &Manifest,
+                case: &Case,
+            ) -> Vec<String> {
+                let mut failures = Vec::new();
+
+                match serde_json::to_value(&verified.public) {
+                    Ok(got) => failures.extend(
+                        describe_policy_mismatch("public", &got, &manifest.sender.public)
+                            .map(|m| format!("{label}: {m}")),
+                    ),
+                    Err(e) => {
+                        failures.push(format!("{label}: serialize the public signing policy: {e}"))
+                    }
+                }
+
+                // A `private` the reader did not surface is already reported as
+                // a presence mismatch by the caller, so only the both-present
+                // case is left to compare.
+                if case.private_signing {
+                    if let Some(private) = &verified.private {
+                        match (serde_json::to_value(private), &manifest.sender.private) {
+                            (Ok(got), Some(want)) => failures.extend(
+                                describe_policy_mismatch("private", &got, want)
+                                    .map(|m| format!("{label}: {m}")),
+                            ),
+                            (Ok(_), None) => failures.push(format!(
+                                "{label}: recovered a private signing policy, the manifest names \
+                                 none",
+                            )),
+                            (Err(e), _) => failures.push(format!(
+                                "{label}: serialize the private signing policy: {e}",
+                            )),
                         }
                     }
                 }
@@ -372,16 +504,16 @@ macro_rules! reader {
     };
 }
 
-reader!(v0_6_1, pg_core_0_6_1, "0.6.1");
+reader!(v0_6_3, pg_core_0_6_3, "0.6.3");
 reader!(v0_5_10, pg_core_0_5_10, "0.5.10");
 
 /// Every published reader in the support window.
 pub fn readers() -> Vec<Reader> {
     vec![
         Reader {
-            version: v0_6_1::VERSION,
-            wire_version: v0_6_1::WIRE_VERSION,
-            verify_case: v0_6_1::verify_case,
+            version: v0_6_3::VERSION,
+            wire_version: v0_6_3::WIRE_VERSION,
+            verify_case: v0_6_3::verify_case,
         },
         Reader {
             version: v0_5_10::VERSION,
@@ -461,6 +593,46 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("got 0x58, expected 0x64"), "{message}");
+    }
+
+    /// The order a reader hands the conjunction back in is not part of the wire
+    /// contract, so a reordering must not read as a break.
+    #[test]
+    fn a_reordered_conjunction_is_not_a_mismatch() {
+        let one = serde_json::json!({"ts": 1, "con": [{"t": "a", "v": "1"}, {"t": "b"}]});
+        let other =
+            serde_json::json!({"ts": 1, "con": [{"t": "b", "v": null}, {"t": "a", "v": "1"}]});
+
+        assert_eq!(describe_policy(&one), describe_policy(&other));
+        assert_eq!(describe_policy_mismatch("public", &one, &other), None);
+    }
+
+    /// The non-canonical sender fixture (#355) turns on exactly this: the raw
+    /// value and the canonical one must not compare equal.
+    #[test]
+    fn a_non_canonical_value_is_reported_with_both_forms() {
+        let raw = serde_json::json!({"ts": 1, "con": [{"t": "e", "v": " Sender@Sample.TEST "}]});
+        let canonical =
+            serde_json::json!({"ts": 1, "con": [{"t": "e", "v": "sender@sample.test"}]});
+
+        let message = describe_policy_mismatch("public", &canonical, &raw)
+            .expect("a raw value must not match its canonical form");
+        assert!(
+            message.starts_with("public signing policy is "),
+            "{message}"
+        );
+        assert!(message.contains("sender@sample.test"), "{message}");
+        assert!(message.contains(" Sender@Sample.TEST "), "{message}");
+    }
+
+    /// A missing value is not an empty one: `Attribute.value` is an `Option`,
+    /// and `to_hidden` blanks a value to `""` rather than dropping it.
+    #[test]
+    fn an_absent_value_differs_from_an_empty_one() {
+        let absent = serde_json::json!({"ts": 1, "con": [{"t": "e"}]});
+        let empty = serde_json::json!({"ts": 1, "con": [{"t": "e", "v": ""}]});
+
+        assert!(describe_policy_mismatch("public", &absent, &empty).is_some());
     }
 
     #[test]

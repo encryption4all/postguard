@@ -15,7 +15,7 @@ publish = false
 # The support window (#252): one renamed entry per published pg-core release
 # that must keep reading what HEAD seals. Adding a version is this line plus one
 # `reader!` invocation in src/lib.rs.
-pg-core-0-6-1 = { package = "pg-core", version = "=0.6.1", features = ["stream"] }
+pg-core-0-6-3 = { package = "pg-core", version = "=0.6.3", features = ["stream"] }
 pg-core-0-5-10 = { package = "pg-core", version = "=0.5.10", features = ["stream"] }
 
 futures = "0.3"

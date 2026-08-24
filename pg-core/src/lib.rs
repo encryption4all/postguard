@@ -175,6 +175,7 @@ pub mod api;
 pub mod artifacts;
 #[doc(hidden)]
 pub mod bincode_compat;
+pub mod challenge;
 pub mod consts;
 pub mod error;
 pub mod identity;

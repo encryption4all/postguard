@@ -18,8 +18,12 @@ failing turns it red.
 
 - Make the change genuinely additive, so old readers still parse the new
   bytes (appending a field at the end of a length-prefixed struct is
-  additive; inserting a field, changing a type, or reordering is not — see
-  the wire-format note in root `CLAUDE.md`).
+  additive; inserting a field, changing a type, or reordering is not).
+  Don't reason about "additive" from the struct alone — the AEAD plaintext
+  has one additive slot per mode, and an old reader that meets a shifted byte
+  aborts instead of reporting a decode error, so run the gate. The note this
+  used to point at went to git history with the rest of the `CLAUDE.md`
+  corpus: `git show af6116c:CLAUDE.md`.
 - If the change can't be additive, it's a new format. Ship read support for
   it a release ahead of flipping the write default, so nothing gets written
   that the installed base can't open yet (COMPATIBILITY.md's "Stored

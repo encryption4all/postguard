@@ -22,6 +22,18 @@ pub fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, DecodeError> 
     bincode_next::serde::decode_from_slice(bytes, bincode_next::config::legacy()).map(|(v, _)| v)
 }
 
+/// Deserialize `T` from a byte slice, also returning how many bytes it
+/// consumed.
+///
+/// [`deserialize`] throws that count away, which makes it impossible to tell
+/// where the first value ended and any appended value begins. Readers that have
+/// to look past a decoded value — at bytes an older sealer did not write — need
+/// the count.
+#[inline]
+pub fn deserialize_with_len<T: DeserializeOwned>(bytes: &[u8]) -> Result<(T, usize), DecodeError> {
+    bincode_next::serde::decode_from_slice(bytes, bincode_next::config::legacy())
+}
+
 /// Serialize `value` and append the bytes to `out`. Replaces the
 /// `bincode::serialize_into(&mut Vec<u8>, …)` pattern from bincode 1.x without
 /// requiring `std::io::Write` (pg-core is `no_std + alloc`).

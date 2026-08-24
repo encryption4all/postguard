@@ -543,9 +543,15 @@ mod tests {
 
     #[test]
     fn test_policy_canonicalization_reaches_the_wire() {
-        // `derive` canonicalizing is not enough on its own: the policy the
-        // sealer stores is what an older verifier reads, so the stored value
-        // has to move too.
+        // `derive` canonicalizing is not enough on its own: the *sender*
+        // signing policy travels in full as `SignatureExt.pol`, and an older
+        // verifier derives the signer's identity from those bytes, so the stored
+        // value has to move too.
+        //
+        // Recipient policies are the other case and they behave differently: a
+        // header stores `Policy::to_hidden`, which blanks the value outright for
+        // any type outside `HINT_TYPES`, so a recipient's value never reaches
+        // the wire unredacted and no reader derives from it.
         let mut policy = Policy {
             timestamp: 1_700_000_000,
             con: alloc::vec![
