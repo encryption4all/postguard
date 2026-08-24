@@ -168,6 +168,7 @@ paths:
                     - uuid
                     - recovery_token
                     - max_chunk_size_bytes
+                    - challenge
                   properties:
                     uuid:
                       type: "string"
@@ -198,6 +199,23 @@ paths:
                         with `X-Recovery-Token` after a refresh should persist
                         it alongside the UUID, because
                         `GET /fileupload/{uuid}/status` does not repeat it."
+                    challenge:
+                      type: "string"
+                      description:
+                        "This upload's challenge, hex-encoded 32-byte random.
+                        The client signs the *decoded* bytes with its PostGuard
+                        signing key, using the `uuid` as the context, and sends
+                        the signature base64-encoded in an `X-PostGuard-Proof`
+                        header on finalize. That is what proves the uploader
+                        holds the key for the sender identity their container
+                        claims; without it cryptify only has the uploader's
+                        word for it. Fresh per session, and served here only:
+                        a client that resumes with `X-Recovery-Token` after a
+                        refresh must persist it alongside the UUID, because
+                        `GET /fileupload/{uuid}/status` does not repeat it, and
+                        an upload that cannot answer finalizes unproven.
+                        Answering is optional — see the header on
+                        `POST /fileupload/finalize/{uuid}`."
           "400":
             description:
               "The `recipient` address could not be parsed. A body that is not
@@ -354,6 +372,25 @@ paths:
         schema:
           type: "string"
         required: true
+      - in: "header"
+        name: "X-PostGuard-Proof"
+        description:
+          "The answer to the `challenge` served at `/fileupload/init`: a
+          signature over the decoded challenge bytes, made with the uploader's
+          PostGuard signing key under the `uuid` as the context, encoded as
+          standard base64 (RFC 4648 section 4, `+` and `/`). A value spelled in
+          the base64url alphabet does not decode, and so proves nothing, unless
+          it happens to contain neither `-` nor `_` — so a base64url client
+          proves nothing except by luck.
+          Verified against the identity the uploaded container's own signing
+          policy derives to, so it proves the uploader holds the key for the
+          sender that container claims — there is no identity to send along and
+          nothing to compare. Optional: an absent header and one that does not
+          verify both leave the sender unproven, and neither refuses the
+          upload."
+        schema:
+          type: "string"
+        required: false
       - in: "path"
         name: "uuid"
         description: "The unique identifier received when initializing file upload."

@@ -913,6 +913,8 @@ mod tests {
             api_key_validation_failed: false,
             last_chunk: None,
             recovery_token_hash: String::new(),
+            challenge: None,
+            sender_claim: None,
         }
     }
 

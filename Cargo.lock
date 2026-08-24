@@ -1085,6 +1085,7 @@ name = "cryptify"
 version = "0.1.31"
 dependencies = [
  "askama",
+ "base64ct",
  "chrono",
  "futures 0.3.32",
  "lettre",

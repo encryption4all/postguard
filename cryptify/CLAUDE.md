@@ -122,6 +122,20 @@ Release-plz automation.
   stay in memory only (the old behaviour, and what every unit test uses); a
   configured-but-unopenable DB panics at startup. The key name was left alone on
   purpose: renaming it would be an ops-visible change for zero behavioural gain.
+- **`CREATE TABLE IF NOT EXISTS` migrates nothing.** A deployed database already
+  has `upload_sessions`, so the create statement is skipped whole and a column
+  added to it never appears — editing the `CREATE TABLE` is enough for a fresh
+  database and a silent no-op for every existing one. Since postguard#364 the
+  columns added after the table first shipped are also listed in
+  `SESSION_COLUMN_MIGRATIONS`, and `StateDb::migrate_sessions` runs them at
+  startup, so **a new column has to be added in both places**. The migration is
+  driven off `pragma_table_info('upload_sessions')` rather than a stored schema
+  version: there is no version counter to get out of step with the columns, and
+  it is a no-op on a fresh database, on a second boot, and on a table created by
+  any earlier version. Nullable is not laziness — `ADD COLUMN` cannot add a
+  `NOT NULL` column without a default, and a row written before the column
+  existed has no value for it, which is what `FileState::challenge`
+  being an `Option` records.
 - **Do not read the checked-in `conf/config.toml` as prod's config.** It does
   not set `usage_db`, which reads as "persistence is dark in production". That
   is wrong. Per @rubenhensen (postguard#303), prod's config is templated by
@@ -149,6 +163,34 @@ Release-plz automation.
   courtesy, not a gate — a client that skips it produces a container that
   verifies just the same. `state.sender` is deliberately left raw: it is the
   confirmation-mail recipient and `Reply-To`, a different concern.
+- **The uploader is not the sender until they prove it** (postguard#364).
+  `upload_init` mints a 32-byte challenge, hands it to the client hex-encoded in
+  the init response, and stores it on the session; `upload_finalize` reads an
+  optional base64 `X-PostGuard-Proof` header and reduces it to a
+  `store::SenderClaim` through the `sender_claim` helper — the only place a
+  `SenderClaim` is constructed. Three things the wire format does not spell out:
+  the signature bytes are `pg_core::bincode_compat::serialize` of the signature,
+  exactly `pg_core::ibs::gg::SIG_BYTES` long, which is what `pg-wasm`'s
+  `signChallenge` returns and what `decode_proof` insists on; the challenge is
+  signed **decoded**, so the hex is a transport spelling only; and the context is
+  the upload uuid, which is what stops a proof collected for one upload
+  answering another. Nothing here refuses an upload — absent, malformed and
+  wrong proofs are all `Unproven` — because the rollout policy is a separate
+  ticket and rejecting would break every client without the header. The claim is
+  read off `pub_id.canonical()`, not off the container's spellings: `derive_ibs`
+  canonicalizes before the signature is checked, so the canonical values are the
+  ones the proof actually pinned, and the raw spelling stays in `state.sender`.
+  **Finalize is repeatable, so the claim only moves one way.** Nothing marks a
+  session finalized, so a client retrying after a lost response, or resuming
+  after a refresh that lost the challenge, reaches `upload_finalize` again with
+  no header — and an unconditional assignment would recompute `Unproven` over a
+  stored `Proven`. The assignment is guarded against that: `Unproven` to
+  `Proven` still upgrades, `Proven` never degrades. Only the verification
+  produces a `Proven`, so the guard does not widen what can prove a sender. The
+  claim is the only thing on that path that is guarded: `send_email` and
+  `store.record_upload` further down the same handler still run on every
+  finalize, so a retry notifies the recipient twice and spends the sender's
+  rolling quota twice (#375).
 - Upload sessions: `Store::persist_session(id, &FileState)` writes one upsert, and
   it is called at each of the three transitions **before the handler responds** —
   `Store::create` (init), `upload_chunk` after the rolling token advances, and
@@ -277,6 +319,17 @@ don't trust UUID knowledge alone as authorization.
 `AllowedOrigins::some_regex` compiles via `regex::RegexSet`; standard alternation
 works fine. The regex is anchored (`^...$`), so there's no subdomain/wildcard
 bypass.
+
+Any new request header a browser client sends needs an entry in `build_cors`'s
+`AllowedHeaders::some` list. Without it `rocket_cors` answers the preflight 403
+with no `Access-Control-Allow-Origin`, so the request never reaches the handler
+and even an optional header breaks the call instead of being ignored. This has
+been missed twice (`X-Cryptify-Source`, `X-PostGuard-Proof`) and nothing else
+catches it: the integration tests are same-origin, and the
+`api-description.yaml` drift test compares routes, not headers. Each header has
+its own preflight test: `init_preflight_advertises_x_cryptify_source`,
+`status_preflight_advertises_x_recovery_token`,
+`finalize_preflight_advertises_x_postguard_proof`.
 
 ## Metrics
 - `GET /metrics`: Prometheus text format, unauthenticated by design. Lock down at
