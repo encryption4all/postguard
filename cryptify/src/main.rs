@@ -1688,7 +1688,10 @@ fn build_cors(allowed_origins: AllowedOrigins) -> rocket_cors::Cors {
         // `Authorization` is here for the Bearer-API-key tier flow;
         // `cryptifytoken`, `content-range`, and `content-type` ride on
         // chunk PUTs; `x-recovery-token` authenticates GET /…/status;
-        // `x-cryptify-source` tags requests for per-channel metrics.
+        // `x-cryptify-source` tags requests for per-channel metrics;
+        // `x-postguard-proof` carries the challenge signature on finalize,
+        // where a missing entry breaks the upload rather than leaving it
+        // `Unproven`.
         .allowed_headers(AllowedHeaders::some(&[
             "Authorization",
             "Content-Type",
@@ -1696,6 +1699,7 @@ fn build_cors(allowed_origins: AllowedOrigins) -> rocket_cors::Cors {
             "CryptifyToken",
             "Range",
             "X-Cryptify-Source",
+            "X-PostGuard-Proof",
             "X-Recovery-Token",
             // Browser clients (pg-js) send this on every request; without it
             // in the preflight allowlist the browser blocks cross-origin
@@ -2424,6 +2428,55 @@ mod tests {
             allow_headers_lc.contains("x-cryptify-source"),
             "Access-Control-Allow-Headers `{}` should include x-cryptify-source",
             allow_headers
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    // Browser preflight regression, the sibling of the two above. A browser
+    // cannot send `X-PostGuard-Proof` on `POST /fileupload/finalize/{uuid}`
+    // unless the CORS allow-list names it: rocket_cors answers the preflight
+    // 403 with no `Access-Control-Allow-Origin`, so the header being optional
+    // buys nothing and the upload fails before it starts. Nothing else holds
+    // the entry in place, since the other tests are same-origin and the
+    // `api-description.yaml` drift test compares routes, not headers.
+    #[rocket::async_test]
+    async fn finalize_preflight_advertises_x_postguard_proof() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cryptify-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let client = status_client_with_cors(&data_dir).await;
+
+        let res = client
+            .req(
+                rocket::http::Method::Options,
+                "/fileupload/finalize/00000000-0000-0000-0000-000000000000",
+            )
+            .header(Header::new("Origin", "https://example.com"))
+            .header(Header::new("Access-Control-Request-Method", "POST"))
+            .header(Header::new(
+                "Access-Control-Request-Headers",
+                format!("CryptifyToken, {PROOF_HEADER}"),
+            ))
+            .dispatch()
+            .await;
+
+        assert!(
+            res.status().code < 400,
+            "expected 2xx preflight, got {}",
+            res.status()
+        );
+        let allow_headers = res
+            .headers()
+            .get_one("Access-Control-Allow-Headers")
+            .expect("CORS allow-headers in preflight response");
+        let allow_headers_lc = allow_headers.to_ascii_lowercase();
+        assert!(
+            allow_headers_lc.contains(&PROOF_HEADER.to_ascii_lowercase()),
+            "Access-Control-Allow-Headers `{}` should include {}",
+            allow_headers,
+            PROOF_HEADER
         );
 
         let _ = std::fs::remove_dir_all(&data_dir);

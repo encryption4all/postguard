@@ -320,6 +320,17 @@ don't trust UUID knowledge alone as authorization.
 works fine. The regex is anchored (`^...$`), so there's no subdomain/wildcard
 bypass.
 
+Any new request header a browser client sends needs an entry in `build_cors`'s
+`AllowedHeaders::some` list. Without it `rocket_cors` answers the preflight 403
+with no `Access-Control-Allow-Origin`, so the request never reaches the handler
+and even an optional header breaks the call instead of being ignored. This has
+been missed twice (`X-Cryptify-Source`, `X-PostGuard-Proof`) and nothing else
+catches it: the integration tests are same-origin, and the
+`api-description.yaml` drift test compares routes, not headers. Each header has
+its own preflight test: `init_preflight_advertises_x_cryptify_source`,
+`status_preflight_advertises_x_recovery_token`,
+`finalize_preflight_advertises_x_postguard_proof`.
+
 ## Metrics
 - `GET /metrics`: Prometheus text format, unauthenticated by design. Lock down at
   the firewall, not the endpoint.
