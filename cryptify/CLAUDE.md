@@ -186,7 +186,11 @@ Release-plz automation.
   no header — and an unconditional assignment would recompute `Unproven` over a
   stored `Proven`. The assignment is guarded against that: `Unproven` to
   `Proven` still upgrades, `Proven` never degrades. Only the verification
-  produces a `Proven`, so the guard does not widen what can prove a sender.
+  produces a `Proven`, so the guard does not widen what can prove a sender. The
+  claim is the only thing on that path that is guarded: `send_email` and
+  `store.record_upload` further down the same handler still run on every
+  finalize, so a retry notifies the recipient twice and spends the sender's
+  rolling quota twice (#375).
 - Upload sessions: `Store::persist_session(id, &FileState)` writes one upsert, and
   it is called at each of the three transitions **before the handler responds** —
   `Store::create` (init), `upload_chunk` after the rolling token advances, and

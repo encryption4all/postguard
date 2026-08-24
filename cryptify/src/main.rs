@@ -990,9 +990,12 @@ fn accounting_key(
 /// The encoding is the one the client is handed: `pg-wasm`'s `signChallenge`
 /// returns `bincode_compat::serialize` of the signature, and the client
 /// base64s exactly those bytes. That serialization is a fixed `SIG_BYTES`
-/// long, and the buffer here is exactly that size, so a value decoding to
-/// anything longer or shorter is refused rather than truncated — extra bytes
-/// must not be able to ride along on an otherwise valid proof.
+/// long, and extra bytes must not be able to ride along on an otherwise valid
+/// proof. Two layers stop them and neither truncates: the buffer is exactly
+/// `SIG_BYTES`, so `Base64::decode` refuses anything longer outright, and
+/// `deserialize` needs all of them, so anything shorter is not a signature.
+/// The length check below is that invariant written where a reader looks for
+/// it, not a third layer.
 ///
 /// `None` for anything that is not such a value; a malformed proof is a failed
 /// proof, never an error.

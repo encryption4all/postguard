@@ -378,8 +378,8 @@ paths:
           "The answer to the `challenge` served at `/fileupload/init`: a
           signature over the decoded challenge bytes, made with the uploader's
           PostGuard signing key under the `uuid` as the context, encoded as
-          standard base64 (RFC 4648 section 4, `+` and `/`) — the base64url
-          alphabet is rejected.
+          standard base64 (RFC 4648 section 4, `+` and `/`); a value spelled in
+          the base64url alphabet does not decode, and so proves nothing.
           Verified against the identity the uploaded container's own signing
           policy derives to, so it proves the uploader holds the key for the
           sender that container claims — there is no identity to send along and
