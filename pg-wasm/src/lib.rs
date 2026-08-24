@@ -380,7 +380,12 @@ impl StreamUnsealer {
         get_recipients(&self.0.header)
     }
 
-    /// Returns the verified public identity of the sender.
+    /// Returns the sender identity *claimed* in the header.
+    ///
+    /// The header signature over it verifies, but nothing binds it to the ciphertext until
+    /// `unseal` returns: a container's header signature can be replaced by any party the PKG will
+    /// issue a signing key to (see <https://github.com/encryption4all/postguard/issues/338>). For
+    /// the bound answer, use the `public` field of the verification result `unseal` returns.
     pub fn public_identity(&self) -> Result<JsValue, JsValue> {
         Ok(serde_wasm_bindgen::to_value(&self.0.pub_id)?)
     }
@@ -415,7 +420,12 @@ impl MemoryUnsealer {
         get_recipients(&self.0.header)
     }
 
-    /// Returns the verified public identity of the sender.
+    /// Returns the sender identity *claimed* in the header.
+    ///
+    /// The header signature over it verifies, but nothing binds it to the ciphertext until
+    /// `unseal` returns: a container's header signature can be replaced by any party the PKG will
+    /// issue a signing key to (see <https://github.com/encryption4all/postguard/issues/338>). For
+    /// the bound answer, use the `public` field of the verification result `unseal` returns.
     pub fn public_identity(&self) -> Result<JsValue, JsValue> {
         Ok(serde_wasm_bindgen::to_value(&self.0.pub_id)?)
     }

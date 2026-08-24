@@ -78,6 +78,12 @@ impl<'r, R, C> Sealer<'r, R, C> {
 ///
 /// 2. Then, the user has input the user secret key and the recipient for which decryption should
 ///    take place.
+///
+/// Step 1 does *not* authenticate the sender. The [`pub_id`] read there is claimed, not bound to
+/// the ciphertext; only the [`VerificationResult`] returned by step 2 carries a sender identity
+/// that cannot have been swapped. Do not display step 1's identity as a verified sender.
+///
+/// [`pub_id`]: Unsealer#structfield.pub_id
 #[derive(Debug)]
 pub struct Unsealer<R, C: UnsealerConfig> {
     /// The version found before the raw header.
@@ -86,7 +92,13 @@ pub struct Unsealer<R, C: UnsealerConfig> {
     /// The parsed header.
     pub header: Header,
 
-    /// The verified public identity which was used to sign the header.
+    /// The sender identity *claimed* in the header.
+    ///
+    /// The header signature over it verifies, but nothing binds it to the ciphertext until
+    /// `unseal` returns: a container's header signature can be replaced by any party the PKG will
+    /// issue a signing key to (see <https://github.com/encryption4all/postguard/issues/338>). For
+    /// the bound answer, use the `public` field of the [`VerificationResult`] that `unseal`
+    /// returns.
     pub pub_id: Policy,
 
     // The input.
