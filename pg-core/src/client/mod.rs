@@ -96,9 +96,10 @@ pub struct Unsealer<R, C: UnsealerConfig> {
     ///
     /// The header signature over it verifies, but nothing binds it to the ciphertext until
     /// `unseal` returns: a container's header signature can be replaced by any party the PKG will
-    /// issue a signing key to (see <https://github.com/encryption4all/postguard/issues/338>). For
-    /// the bound answer, use the `public` field of the [`VerificationResult`] that `unseal`
-    /// returns.
+    /// issue a signing key to (see <https://github.com/encryption4all/postguard/issues/338>). The
+    /// closest to a bound answer is the `public` field of the [`VerificationResult`] that `unseal`
+    /// returns, which catches that swap only for a container carrying the AEAD-side copy of the
+    /// policy and only against a party who does not hold the DEM key.
     pub pub_id: Policy,
 
     // The input.
