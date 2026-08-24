@@ -80,8 +80,9 @@ impl<'r, R, C> Sealer<'r, R, C> {
 ///    take place.
 ///
 /// Step 1 does *not* authenticate the sender. The [`pub_id`] read there is claimed, not bound to
-/// the ciphertext; only the [`VerificationResult`] returned by step 2 carries a sender identity
-/// that cannot have been swapped. Do not display step 1's identity as a verified sender.
+/// the ciphertext; only the [`VerificationResult`] returned by step 2 can carry a bound sender,
+/// and then only against a party on the wire and only for a container that carries the AEAD-side
+/// copy of the policy. Do not display step 1's identity as a verified sender.
 ///
 /// [`pub_id`]: Unsealer#structfield.pub_id
 #[derive(Debug)]
