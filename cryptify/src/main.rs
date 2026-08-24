@@ -2732,7 +2732,6 @@ mod tests {
     fn decode_proof_rejects_values_that_are_not_a_signature() {
         use base64ct::{Base64, Encoding};
 
-        // Not base64 at all.
         assert!(decode_proof("not base64 ~~").is_none());
         // Well-formed base64 of the wrong length, both ways: a truncated
         // signature and a whole one with bytes hung off the end.
