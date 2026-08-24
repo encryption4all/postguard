@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.31](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.30...cryptify-v0.1.31) - 2026-08-24
+
+### Fixed
+
+- *(cryptify)* canonicalize the default-tier accounting key ([#366](https://github.com/encryption4all/postguard/pull/366))
+
 ## [0.1.30](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.29...cryptify-v0.1.30) - 2026-08-18
 
 ### Added

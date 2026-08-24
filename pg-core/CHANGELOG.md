@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.4...pg-core-v0.6.5) - 2026-08-24
+
+### Added
+
+- *(pg-core)* challenge-signature API for proving possession of a signing key ([#368](https://github.com/encryption4all/postguard/pull/368))
+
+### Other
+
+- cut CLAUDE.md to orientation and gate its size ([#374](https://github.com/encryption4all/postguard/pull/374))
+- give the wire-compat sample set a non-canonical sender identity ([#367](https://github.com/encryption4all/postguard/pull/367))
+
 ## [0.6.4](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.3...pg-core-v0.6.4) - 2026-08-18
 
 ### Added
