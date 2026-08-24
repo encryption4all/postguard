@@ -4372,13 +4372,19 @@ mod integration {
         let (client, dir) = test_client(&setup).await;
 
         let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
-            let standard = proof_header(&setup.signing_keys[2], uuid, challenge);
-            let bytes = Base64::decode_vec(&standard).expect("the header is standard base64");
-            let url = Base64Url::encode_string(&bytes);
-            assert_ne!(
-                url, standard,
-                "the two alphabets must disagree for this to test anything"
-            );
+            // A signature is 96 bytes, so its standard base64 is 128
+            // characters, and roughly one in fifty of them happens to contain
+            // neither `+` nor `/`. Then both alphabets spell it identically and
+            // there is nothing left to test. Signing is randomised, so draw
+            // again until the two spellings actually differ.
+            let url = loop {
+                let standard = proof_header(&setup.signing_keys[2], uuid, challenge);
+                let bytes = Base64::decode_vec(&standard).expect("the header is standard base64");
+                let url = Base64Url::encode_string(&bytes);
+                if url != standard {
+                    break url;
+                }
+            };
             Some(url)
         })
         .await;
