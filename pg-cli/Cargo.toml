@@ -11,10 +11,10 @@ license = "MIT"
 repository = "https://github.com/encryption4all/postguard"
 categories = ["cryptography"]
 name = "pg-cli"
-version = "0.3.9"
+version = "0.3.10"
 
 [dependencies]
-pg-core = { path = "../pg-core", version = "0.6.4", features = ["stream"] }
+pg-core = { path = "../pg-core", version = "0.6.5", features = ["stream"] }
 futures = "0.3.27"
 rand = "0.8.4"
 clap = { version = "4", features = ["derive"] }
