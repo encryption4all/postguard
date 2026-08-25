@@ -408,11 +408,11 @@ pub(crate) mod tests {
         setup(false).await
     }
 
-    /// `collect_metrics` counts *every* `/v2` request into `POSTGUARD_CLIENTS`,
-    /// which is process-wide and shared by every test in this binary. An app
-    /// that wraps it therefore adds series to the `/metrics` exposition that
-    /// `middleware::metrics`'s full-body assertions would race against, so only
-    /// those tests ask for it.
+    /// `collect_metrics` counts every `/v2` request that gets past the rate
+    /// limiter into `POSTGUARD_CLIENTS`, which is process-wide and shared by
+    /// every test in this binary. An app that wraps it therefore adds series to
+    /// the `/metrics` exposition that `middleware::metrics`'s full-body
+    /// assertions would race against, so only those tests ask for it.
     pub(crate) async fn setup(
         with_metrics: bool,
     ) -> (

@@ -121,16 +121,19 @@ pub(crate) fn collect_metrics<
         .map(HeaderValue::to_str)
         .and_then(Result::ok);
 
-    let fields = header.and_then(
-        |header| match header.split(',').collect::<Vec<&str>>()[..] {
-            [host, _host_version, client, client_version] => Some([
-                allowlisted(host, KNOWN_HOSTS),
-                allowlisted(client, KNOWN_CLIENTS),
-                client_version_label(client_version),
-            ]),
-            _ => None,
-        },
-    );
+    // Trimmed to match cryptify's parser: the two services read the same
+    // header, and a space after a comma must not change the labels.
+    let fields =
+        header.and_then(
+            |header| match header.split(',').map(str::trim).collect::<Vec<&str>>()[..] {
+                [host, _host_version, client, client_version] => Some([
+                    allowlisted(host, KNOWN_HOSTS),
+                    allowlisted(client, KNOWN_CLIENTS),
+                    client_version_label(client_version),
+                ]),
+                _ => None,
+            },
+        );
 
     let [host, client, client_version] = fields.unwrap_or_else(|| {
         [
@@ -402,6 +405,26 @@ mod tests {
         let expected = format!(
             "{PREAMBLE}\
             postguard_clients{{client=\"pg-js\",client_version=\"1.2.3\",host=\"unknown\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_padded_header_fields_are_trimmed() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        assert_eq!(
+            get(&app, "/v2/parameters", Some("node, 22.1.0, pg-js, 1.2.3")).await,
+            StatusCode::OK
+        );
+
+        // Every field lands on its real value, not the mixed row an untrimmed
+        // parse would give: a recognised host with `other` for the rest.
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"pg-js\",client_version=\"1.2.3\",host=\"node\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
         );
 
         assert_eq!(expected, scrape(&app).await);
