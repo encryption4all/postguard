@@ -23,9 +23,10 @@ const UNKNOWN: &str = "unknown";
 const OTHER: &str = "other";
 
 /// `host` values the senders actually emit, matched case-sensitively:
-/// `pg-js`'s `detectHost` and the add-ins' own override. The literal
-/// `unknown` is one of them — `pg-js` reports it for a runtime it cannot
-/// detect — so it is admitted here rather than folded into `other`.
+/// `pg-js`'s `detectHost`, the add-ins' own override, and `dotnet` from
+/// `E4A.PostGuard`'s `ClientVersion`. The literal `unknown` is one of them —
+/// `pg-js` reports it for a runtime it cannot detect — so it is admitted here
+/// rather than folded into `other`.
 const KNOWN_HOSTS: &[&str] = &[
     "node",
     "browser",
@@ -33,6 +34,7 @@ const KNOWN_HOSTS: &[&str] = &[
     "deno",
     "Outlook",
     "Thunderbird",
+    "dotnet",
     UNKNOWN,
 ];
 
@@ -49,12 +51,17 @@ const MAX_CLIENT_VERSIONS: usize = 64;
 
 /// The distinct `client_version` values emitted so far.
 ///
-/// The label is kept exact rather than bucketed: the legitimate set is small
-/// (57 published `@e4a/pg-js` versions across the package's entire history).
-/// But `IntCounterVec` never evicts, so a series created once lives until the
-/// process restarts, and the field is attacker-controlled. Real versions
-/// arrive continuously from live traffic and so take the slots first; an
-/// attacker minting distinct values meets the ceiling and lands in `other`.
+/// The label is kept exact rather than bucketed. `IntCounterVec` never evicts,
+/// so a series created once lives until the process restarts, and the field is
+/// attacker-controlled. Real versions arrive continuously from live traffic and
+/// so take the slots first; an attacker minting distinct values meets the
+/// ceiling and lands in `other`.
+///
+/// The cap is one budget shared by every client, not one per client, and 64 is
+/// under what the two SDKs have published between them (55 `@e4a/pg-js`, 9
+/// `E4A.PostGuard`). It holds only because a process sees the versions in live
+/// use rather than every version ever released; once it does fill, later real
+/// releases read as `other` until a restart.
 static SEEN_CLIENT_VERSIONS: LazyLock<RwLock<HashSet<String>>> =
     LazyLock::new(|| RwLock::new(HashSet::new()));
 
@@ -405,6 +412,34 @@ mod tests {
         let expected = format!(
             "{PREAMBLE}\
             postguard_clients{{client=\"pg-js\",client_version=\"1.2.3\",host=\"unknown\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_dotnet_sdk_host_is_not_other() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        // What `E4A.PostGuard`'s `ClientVersion` puts on the wire. Its second
+        // field is `RuntimeInformation.FrameworkDescription`, which carries a
+        // space; that field is not a label, so the space cannot reach one.
+        assert_eq!(
+            get(
+                &app,
+                "/v2/parameters",
+                Some("dotnet,.NET 8.0.7,pg-dotnet,0.6.0")
+            )
+            .await,
+            StatusCode::OK
+        );
+
+        // The .NET SDK is a live sender, so `other` staying empty here is what
+        // keeps it alertable.
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"pg-dotnet\",client_version=\"0.6.0\",host=\"dotnet\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
         );
 
         assert_eq!(expected, scrape(&app).await);
