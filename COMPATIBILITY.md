@@ -127,7 +127,6 @@ in either direction.
 crates.io pg-core 0.6.3 0.5.10
 npm @e4a/pg-wasm 0.6.1
 npm @e4a/pg-js 2.3.3 1.11.0
-nuget E4A.PostGuard 0.6.0
 ```
 
 Checked against the registries on 2026-08-06. A producer publishing a new
@@ -164,13 +163,14 @@ npm lines are also spelled out in `pg-compat-js/src/readers.mjs`, whose
 `test/manifest.test.mjs` parses the block above and fails when the two lists
 drift, so keep that block as rows and not as prose.
 
-Known coverage gap in the rows above, tracked in [#268]: the `nuget` row has no
-gate. `E4A.PostGuard` is a producer-only SDK (seal via pg-ffi, no unseal path),
-so a reader gate needs a decrypt capability the SDK does not have. Decided:
-leave it declared-but-ungated here rather than build that capability into this
-gate; the .NET seal direction is instead covered by [postguard-e2e#21]'s version
-sweep, now in CI with decrypt legs, which owns driving published NuGet versions
-against a target server.
+`E4A.PostGuard` is absent from the rows above on purpose. It is a producer-only
+SDK: `pg-ffi` exports a seal entry point and no unseal one, so a reader gate
+would have nothing to call. [#268] knew that and left the row in place as
+declared-but-ungated; this supersedes it. The .NET seal direction is covered by
+[postguard-e2e#21]'s version sweep, now in CI with decrypt legs, which owns
+driving published NuGet versions against a target server. The support window
+above still names the package. That list says what is supported; this one says
+what can read.
 
 ## Deprecation
 
