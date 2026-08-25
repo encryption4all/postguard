@@ -39,9 +39,19 @@ const KNOWN_HOSTS: &[&str] = &[
 ];
 
 /// `client` values the senders actually emit: cryptify's `KNOWN_APPS`, plus
-/// `pg-cli`, which sends no client header today but is the value it would
-/// send if it ever starts identifying itself.
-const KNOWN_CLIENTS: &[&str] = &["pg-js", "pg-dotnet", "pg4ol", "pg4tb", "pg-cli", UNKNOWN];
+/// `cli` and `pg-cli`. `cli` is the one that arrives today —
+/// `pg-cli/src/client.rs` sends `unknown,unknown,cli,<version>`, spelling the
+/// header name in mixed case, which HTTP matches all the same. `pg-cli` is
+/// kept for the value the CLI would send if it ever aligns with the rest.
+const KNOWN_CLIENTS: &[&str] = &[
+    "pg-js",
+    "pg-dotnet",
+    "pg4ol",
+    "pg4tb",
+    "cli",
+    "pg-cli",
+    UNKNOWN,
+];
 
 /// Longest `client_version` emitted verbatim.
 const MAX_CLIENT_VERSION_LEN: usize = 32;
@@ -440,6 +450,28 @@ mod tests {
         let expected = format!(
             "{PREAMBLE}\
             postguard_clients{{client=\"pg-dotnet\",client_version=\"0.6.0\",host=\"dotnet\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_pg_cli_client_is_not_other() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        // What `pg-cli/src/client.rs` puts on every PKG call: it detects no
+        // host and names itself `cli`, not the `pg-cli` the allowlist carried.
+        assert_eq!(
+            get(&app, "/v2/parameters", Some("unknown,unknown,cli,0.6.3")).await,
+            StatusCode::OK
+        );
+
+        // The CLI is a live sender too, so this row is the other half of what
+        // keeps `other` alertable.
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"cli\",client_version=\"0.6.3\",host=\"unknown\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
         );
 
         assert_eq!(expected, scrape(&app).await);
