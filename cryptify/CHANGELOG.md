@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.32](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.31...cryptify-v0.1.32) - 2026-08-25
+
+### Added
+
+- *(cryptify)* Grafana usage dashboard, pinned to the /metrics exporter ([#310](https://github.com/encryption4all/postguard/pull/310))
+- *(cryptify)* mint an upload challenge and verify it at finalize ([#373](https://github.com/encryption4all/postguard/pull/373))
+
 ## [0.1.31](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.30...cryptify-v0.1.31) - 2026-08-24
 
 ### Fixed
