@@ -7,6 +7,102 @@ use actix_web::{
 };
 use futures::Future;
 use futures_util::future::FutureExt;
+use std::collections::HashSet;
+use std::sync::{LazyLock, PoisonError, RwLock};
+
+/// Label value for a field the request did not identify: the client header
+/// absent, unreadable or not exactly four fields, or a URI actix matched no
+/// route for. This is the spelling `util::client_version` and cryptify's
+/// `CHANNEL_UNKNOWN` already use, so the two services keep one vocabulary for
+/// the header they share.
+const UNKNOWN: &str = "unknown";
+
+/// Label value for a field that was read but is not one this fleet emits.
+/// Nothing that happens in normal operation may land here: `other` going
+/// non-zero is a signal worth alerting on.
+const OTHER: &str = "other";
+
+/// `host` values the senders actually emit, matched case-sensitively:
+/// `pg-js`'s `detectHost` and the add-ins' own override. The literal
+/// `unknown` is one of them — `pg-js` reports it for a runtime it cannot
+/// detect — so it is admitted here rather than folded into `other`.
+const KNOWN_HOSTS: &[&str] = &[
+    "node",
+    "browser",
+    "bun",
+    "deno",
+    "Outlook",
+    "Thunderbird",
+    UNKNOWN,
+];
+
+/// `client` values the senders actually emit: cryptify's `KNOWN_APPS`, plus
+/// `pg-cli`, which sends no client header today but is the value it would
+/// send if it ever starts identifying itself.
+const KNOWN_CLIENTS: &[&str] = &["pg-js", "pg-dotnet", "pg4ol", "pg4tb", "pg-cli", UNKNOWN];
+
+/// Longest `client_version` emitted verbatim.
+const MAX_CLIENT_VERSION_LEN: usize = 32;
+
+/// How many distinct `client_version` values may create a series.
+const MAX_CLIENT_VERSIONS: usize = 64;
+
+/// The distinct `client_version` values emitted so far.
+///
+/// The label is kept exact rather than bucketed: the legitimate set is small
+/// (57 published `@e4a/pg-js` versions across the package's entire history).
+/// But `IntCounterVec` never evicts, so a series created once lives until the
+/// process restarts, and the field is attacker-controlled. Real versions
+/// arrive continuously from live traffic and so take the slots first; an
+/// attacker minting distinct values meets the ceiling and lands in `other`.
+static SEEN_CLIENT_VERSIONS: LazyLock<RwLock<HashSet<String>>> =
+    LazyLock::new(|| RwLock::new(HashSet::new()));
+
+fn allowlisted(field: &str, allowed: &[&str]) -> String {
+    if allowed.contains(&field) {
+        field.to_string()
+    } else {
+        OTHER.to_string()
+    }
+}
+
+fn client_version_label(field: &str) -> String {
+    let well_shaped = !field.is_empty()
+        && field.len() <= MAX_CLIENT_VERSION_LEN
+        && field
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+
+    if !well_shaped {
+        return OTHER.to_string();
+    }
+
+    // Neither reserved value consumes a slot of the cap.
+    if field == UNKNOWN || field == OTHER {
+        return field.to_string();
+    }
+
+    if SEEN_CLIENT_VERSIONS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(field)
+    {
+        return field.to_string();
+    }
+
+    let mut seen = SEEN_CLIENT_VERSIONS
+        .write()
+        .unwrap_or_else(PoisonError::into_inner);
+
+    if !seen.contains(field) {
+        if seen.len() >= MAX_CLIENT_VERSIONS {
+            return OTHER.to_string();
+        }
+        seen.insert(field.to_string());
+    }
+
+    field.to_string()
+}
 
 pub(crate) fn collect_metrics<
     B: MessageBody,
@@ -15,42 +111,50 @@ pub(crate) fn collect_metrics<
     req: ServiceRequest,
     srv: &S,
 ) -> impl Future<Output = Result<ServiceResponse<B>, actix_web::Error>> {
-    let mut values = None;
+    // Never the raw URI as a fallback: it is attacker-controlled and
+    // unbounded, where the route pattern is bounded by the route table.
+    let path = req.match_pattern().unwrap_or_else(|| UNKNOWN.to_string());
 
-    if let Some(Ok(header)) = req.headers().get(PG_CLIENT_HEADER).map(HeaderValue::to_str) {
-        if let Some(path) = req.match_pattern() {
-            if let [host, host_version, app, app_version] =
-                header.split(',').collect::<Vec<&str>>()[..]
-            {
-                values = Some([
-                    path,
-                    host.to_string(),
-                    host_version.to_string(),
-                    app.to_string(),
-                    app_version.to_string(),
-                ]);
-            }
-        }
-    }
+    let header = req
+        .headers()
+        .get(PG_CLIENT_HEADER)
+        .map(HeaderValue::to_str)
+        .and_then(Result::ok);
 
-    srv.call(req).map(|res| {
+    let fields = header.and_then(
+        |header| match header.split(',').collect::<Vec<&str>>()[..] {
+            [host, _host_version, client, client_version] => Some([
+                allowlisted(host, KNOWN_HOSTS),
+                allowlisted(client, KNOWN_CLIENTS),
+                client_version_label(client_version),
+            ]),
+            _ => None,
+        },
+    );
+
+    let [host, client, client_version] = fields.unwrap_or_else(|| {
+        [
+            UNKNOWN.to_string(),
+            UNKNOWN.to_string(),
+            UNKNOWN.to_string(),
+        ]
+    });
+
+    srv.call(req).map(move |res| {
         let status = match &res {
             Ok(resp) => resp.status(),
             Err(e) => e.as_response_error().status_code(),
         };
 
-        if let Some([a, b, c, d, e]) = values {
-            POSTGUARD_CLIENTS
-                .with_label_values(&[
-                    a.as_str(),
-                    b.as_str(),
-                    c.as_str(),
-                    d.as_str(),
-                    e.as_str(),
-                    status.as_str(),
-                ])
-                .inc();
-        }
+        POSTGUARD_CLIENTS
+            .with_label_values(&[
+                path.as_str(),
+                host.as_str(),
+                client.as_str(),
+                client_version.as_str(),
+                status.as_str(),
+            ])
+            .inc();
 
         res
     })
@@ -58,12 +162,19 @@ pub(crate) fn collect_metrics<
 
 #[cfg(test)]
 mod tests {
+    // Each `#[actix_web::test]` runs on its own single-threaded runtime with no
+    // other task to yield to, so blocking that thread on `EXCLUSIVE` across an
+    // await is exactly what keeps the exposition exclusive to one test.
+    #![allow(clippy::await_holding_lock)]
+
+    use std::collections::BTreeSet;
     use std::str::FromStr;
+    use std::sync::{Mutex, MutexGuard};
 
     use super::*;
-    use crate::server::tests::default_setup;
+    use crate::server::tests::setup;
     use actix_http::header::HeaderName;
-    use actix_http::StatusCode;
+    use actix_http::{Request, StatusCode};
     use actix_web::test;
     use irma::SessionStatus;
     use pg_core::api::{KeyResponse, Parameters};
@@ -71,9 +182,72 @@ mod tests {
     use pg_core::identity::{Attribute, Policy};
     use pg_core::kem::cgw_kv::CGWKV;
 
+    /// The two lines every `postguard_clients` scrape opens with.
+    const PREAMBLE: &str = concat!(
+        "# HELP postguard_clients Contains information about PostGuard clients connecting with the PKG.\n",
+        "# TYPE postguard_clients counter\n",
+    );
+
+    /// `POSTGUARD_CLIENTS` and `SEEN_CLIENT_VERSIONS` are process-wide, and the
+    /// assertions here are over the whole exposition: two of these tests
+    /// running at once would each see the other's series. Every test takes this
+    /// lock and starts from an empty counter and an empty cap.
+    static EXCLUSIVE: Mutex<()> = Mutex::new(());
+
+    fn exclusive() -> MutexGuard<'static, ()> {
+        let guard = EXCLUSIVE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        POSTGUARD_CLIENTS.reset();
+        SEEN_CLIENT_VERSIONS
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+
+        guard
+    }
+
+    fn client_header(value: &str) -> (HeaderName, HeaderValue) {
+        (
+            HeaderName::from_str(PG_CLIENT_HEADER).unwrap(),
+            HeaderValue::from_str(value).unwrap(),
+        )
+    }
+
+    async fn get<S>(app: &S, uri: &str, client: Option<&str>) -> StatusCode
+    where
+        S: Service<Request, Response = ServiceResponse, Error = actix_web::Error>,
+    {
+        let mut req = test::TestRequest::get().uri(uri);
+        if let Some(client) = client {
+            req = req.insert_header(client_header(client));
+        }
+
+        test::call_service(app, req.to_request()).await.status()
+    }
+
+    async fn scrape<S>(app: &S) -> String
+    where
+        S: Service<Request, Response = ServiceResponse, Error = actix_web::Error>,
+    {
+        let req = test::TestRequest::get().uri("/metrics").to_request();
+        let res = test::call_service(app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        String::from_utf8(test::read_body(res).await.to_vec()).unwrap()
+    }
+
+    fn client_versions(exposition: &str) -> BTreeSet<&str> {
+        exposition
+            .lines()
+            .filter_map(|line| line.split("client_version=\"").nth(1))
+            .filter_map(|rest| rest.split('"').next())
+            .collect()
+    }
+
     #[actix_web::test]
     async fn test_get_metrics() {
-        let (app, pk, _, _, _) = default_setup().await;
+        let _guard = exclusive();
+        let (app, pk, _, _, _) = setup(true).await;
         let header_name = HeaderName::from_str(PG_CLIENT_HEADER).unwrap();
 
         // First request
@@ -131,19 +305,171 @@ mod tests {
             test::call_and_read_body_json(&app, req_usk).await;
         assert_eq!(key_response.status, SessionStatus::Done);
 
-        // Collect metrics
-        let req = test::TestRequest::get().uri("/metrics").to_request();
-        let res = test::call_service(&app, req).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = test::read_body(res).await;
+        // Collect metrics. The `2` pins that a repeated request aggregates into
+        // one series rather than creating a second.
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",path=\"/v2/key/{{timestamp}}\",status=\"200\"}} 1\n\
+            postguard_clients{{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",path=\"/v2/parameters\",status=\"200\"}} 2\n\
+            postguard_clients{{client=\"pg4tb\",client_version=\"0.0.2\",host=\"Thunderbird\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
 
-        let expected = "\
-        # HELP postguard_clients Contains information about PostGuard clients connecting with the PKG.\n\
-        # TYPE postguard_clients counter\n\
-        postguard_clients{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",host_version=\"1234.5678.90\",path=\"/v2/key/{timestamp}\",status=\"200\"} 1\n\
-        postguard_clients{client=\"pg4ol\",client_version=\"0.0.1\",host=\"Outlook\",host_version=\"1234.5678.90\",path=\"/v2/parameters\",status=\"200\"} 2\n\
-        postguard_clients{client=\"pg4tb\",client_version=\"0.0.2\",host=\"Thunderbird\",host_version=\"1234.5678.90\",path=\"/v2/parameters\",status=\"200\"} 1\n";
+        assert_eq!(expected, scrape(&app).await);
+    }
 
-        assert_eq!(actix_web::web::Bytes::from(expected), body);
+    #[actix_web::test]
+    async fn test_request_without_client_header_is_counted() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        assert_eq!(get(&app, "/v2/parameters", None).await, StatusCode::OK);
+
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"unknown\",client_version=\"unknown\",host=\"unknown\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_malformed_client_header_shares_the_unknown_series() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        assert_eq!(get(&app, "/v2/parameters", None).await, StatusCode::OK);
+        assert_eq!(
+            get(&app, "/v2/parameters", Some("only,three,fields")).await,
+            StatusCode::OK
+        );
+
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"unknown\",client_version=\"unknown\",host=\"unknown\",path=\"/v2/parameters\",status=\"200\"}} 2\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_unmatched_route_is_counted_without_its_uri() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        assert_eq!(
+            get(&app, "/v2/../etc/passwd?q=1", None).await,
+            StatusCode::NOT_FOUND
+        );
+
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"unknown\",client_version=\"unknown\",host=\"unknown\",path=\"unknown\",status=\"404\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_unrecognised_host_and_client_become_other() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        assert_eq!(
+            get(&app, "/v2/parameters", Some("Emacs,1.0,pg4emacs,0.0.1")).await,
+            StatusCode::OK
+        );
+
+        // The allowlist applies per label: the version is still exact.
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"other\",client_version=\"0.0.1\",host=\"other\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_sender_reported_unknown_is_not_other() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        // What pg-js emits from a runtime its `detectHost` cannot place.
+        assert_eq!(
+            get(&app, "/v2/parameters", Some("unknown,unknown,pg-js,1.2.3")).await,
+            StatusCode::OK
+        );
+
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"pg-js\",client_version=\"1.2.3\",host=\"unknown\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_misshapen_client_version_becomes_other() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        // One character over the 32 the shape gate accepts.
+        let too_long = "a".repeat(33);
+        assert_eq!(
+            get(
+                &app,
+                "/v2/parameters",
+                Some(&format!("node,22.1.0,pg-js,{too_long}"))
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            get(
+                &app,
+                "/v2/parameters",
+                Some("browser,1.0,pg-js,1.0.0; DROP")
+            )
+            .await,
+            StatusCode::OK
+        );
+
+        // Both rows keep their real host and client.
+        let expected = format!(
+            "{PREAMBLE}\
+            postguard_clients{{client=\"pg-js\",client_version=\"other\",host=\"browser\",path=\"/v2/parameters\",status=\"200\"}} 1\n\
+            postguard_clients{{client=\"pg-js\",client_version=\"other\",host=\"node\",path=\"/v2/parameters\",status=\"200\"}} 1\n"
+        );
+
+        assert_eq!(expected, scrape(&app).await);
+    }
+
+    #[actix_web::test]
+    async fn test_client_version_cap_holds() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        let minted = 70;
+        for i in 0..minted {
+            assert_eq!(
+                get(
+                    &app,
+                    "/v2/parameters",
+                    Some(&format!("node,22.1.0,pg-js,9.9.{i}"))
+                )
+                .await,
+                StatusCode::OK
+            );
+        }
+
+        let body = scrape(&app).await;
+        let versions = client_versions(&body);
+
+        // 64 versions, plus everything after the cap folded into one `other`.
+        assert!(versions.contains(OTHER));
+        assert_eq!(versions.len(), 65);
+        assert!(body.contains(&format!(
+            "postguard_clients{{client=\"pg-js\",client_version=\"other\",host=\"node\",path=\"/v2/parameters\",status=\"200\"}} {}\n",
+            minted - 64
+        )));
     }
 }

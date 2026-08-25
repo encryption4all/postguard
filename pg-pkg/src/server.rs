@@ -30,14 +30,7 @@ pub(crate) static POSTGUARD_CLIENTS: LazyLock<IntCounterVec> = LazyLock::new(|| 
     register_int_counter_vec!(
         "postguard_clients",
         "Contains information about PostGuard clients connecting with the PKG.",
-        &[
-            "path",
-            "host",
-            "host_version",
-            "client",
-            "client_version",
-            "status"
-        ]
+        &["path", "host", "client", "client_version", "status"]
     )
     .expect("could not initialize metrics")
 });
@@ -386,6 +379,7 @@ pub(crate) mod tests {
     use actix_web::{test, web, App, Error};
 
     use crate::middleware::irma_noauth::NoAuth;
+    use futures_util::future::Either;
     use irma::{ProofStatus, SessionStatus};
     use pg_core::api::{KeyResponse, Parameters, SigningKeyRequest, SigningKeyResponse};
     use pg_core::ibs::gg;
@@ -405,6 +399,23 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn default_setup() -> (
+        impl Service<Request, Response = ServiceResponse, Error = Error>,
+        <CGWKV as IBKEM>::Pk,
+        <CGWKV as IBKEM>::Sk,
+        gg::PublicKey,
+        gg::SecretKey,
+    ) {
+        setup(false).await
+    }
+
+    /// `collect_metrics` counts *every* `/v2` request into `POSTGUARD_CLIENTS`,
+    /// which is process-wide and shared by every test in this binary. An app
+    /// that wraps it therefore adds series to the `/metrics` exposition that
+    /// `middleware::metrics`'s full-body assertions would race against, so only
+    /// those tests ask for it.
+    pub(crate) async fn setup(
+        with_metrics: bool,
+    ) -> (
         impl Service<Request, Response = ServiceResponse, Error = Error>,
         <CGWKV as IBKEM>::Pk,
         <CGWKV as IBKEM>::Sk,
@@ -440,7 +451,13 @@ pub(crate) mod tests {
                 .service(resource("/metrics").route(web::get().to(handlers::metrics)))
                 .service(
                     scope("/v2")
-                        .wrap_fn(collect_metrics)
+                        .wrap_fn(move |req, srv| {
+                            if with_metrics {
+                                Either::Left(collect_metrics(req, srv))
+                            } else {
+                                Either::Right(srv.call(req))
+                            }
+                        })
                         .service(
                             resource("/parameters")
                                 .app_data(Data::new(pd))
