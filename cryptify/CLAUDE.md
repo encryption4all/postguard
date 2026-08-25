@@ -332,8 +332,9 @@ its own preflight test: `init_preflight_advertises_x_cryptify_source`,
 `finalize_preflight_advertises_x_postguard_proof`.
 
 ## Metrics
-- `GET /metrics`: Prometheus text format, unauthenticated by design. Lock down at
-  the firewall, not the endpoint.
+- `GET /metrics`: Prometheus text format. Gated by a Bearer token when
+  `metrics_token` is set; with the key unset the endpoint is open and startup
+  logs a warning. Lock it down at the firewall either way.
 - Channel label derived in priority: `X-Cryptify-Source`, then
   `Authorization: Bearer` / `X-Api-Key` (-> `api`), then `Origin` (-> `website` /
   `staging-website`), then `User-Agent` (-> `outlook` / `thunderbird`), then
@@ -342,6 +343,18 @@ its own preflight test: `init_preflight_advertises_x_cryptify_source`,
   `metrics_scan_interval_secs`).
 - `FileState.source_channel` is populated at `upload_init` from request headers;
   populate it in any new test fixtures too.
+- **No metric here knows which deployment it runs in.** There is no `env` label
+  in the exporter and adding one would be wrong: staging and Procolix production
+  are separate scrape targets, so `env` belongs in the Prometheus job's static
+  `labels:`. `docs/grafana/README.md` has the scrape config.
+- The reference dashboard is `docs/grafana/cryptify-usage.json`, pinned to the
+  exporter by `mod dashboard_tests` in `src/metrics.rs`. It reads the `# TYPE`
+  lines out of a real `Metrics::render()` and compares them against the metric
+  names in the committed panel queries, both directions, so renaming a metric
+  fails `cargo test` rather than silently emptying a graph. It also requires
+  every panel query to carry `env=~"$env"`. Adding a metric therefore means
+  adding a panel in the same PR. That coupling is deliberate; don't loosen the
+  test to avoid it.
 
 ## Integration test harness
 - `build_rocket(figment, vk)` is the injection point. `#[launch] rocket()` wraps it

@@ -366,6 +366,185 @@ pub async fn storage_sampler(
     }
 }
 
+/// Pins the committed Grafana dashboard to what this module actually exports.
+///
+/// The dashboard is a separate artefact from the exporter, so nothing but a
+/// test stops the two drifting: renaming a metric here leaves panels querying
+/// a name that no longer exists, and Grafana renders that as an empty graph
+/// rather than an error. These tests fail instead.
+#[cfg(test)]
+mod dashboard_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    use serde_json::Value;
+
+    const DASHBOARD: &str = include_str!("../docs/grafana/cryptify-usage.json");
+
+    /// Label matcher every panel must carry, so that every panel is scoped to
+    /// the environments selected in the `env` variable. Note that this only
+    /// filters: panels 2 through 6 all aggregate `env` away, so with All
+    /// selected they report staging and production as one total.
+    const ENV_SELECTOR: &str = "env=~\"$env\"";
+
+    fn dashboard() -> Value {
+        serde_json::from_str(DASHBOARD).expect("cryptify-usage.json must be valid JSON")
+    }
+
+    /// The metric names the exporter emits, read off the `# TYPE` lines of a
+    /// real render rather than from a hand-kept list.
+    fn exported_metrics() -> BTreeSet<String> {
+        Metrics::new()
+            .render()
+            .lines()
+            .filter_map(|l| l.strip_prefix("# TYPE "))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Every `expr` in the dashboard. Rows nest their panels one level deeper,
+    /// so this walks the whole tree instead of looping over `panels`.
+    fn panel_exprs(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Object(map) => {
+                if let Some(Value::String(expr)) = map.get("expr") {
+                    out.push(expr.clone());
+                }
+                for child in map.values() {
+                    panel_exprs(child, out);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    panel_exprs(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn all_exprs() -> Vec<String> {
+        let mut out = Vec::new();
+        panel_exprs(&dashboard(), &mut out);
+        assert!(!out.is_empty(), "dashboard has no queries at all");
+        out
+    }
+
+    /// The `query` of each dashboard variable, where it is a plain string.
+    /// The datasource variable's query is the string `prometheus`, which
+    /// carries no metric name and so contributes nothing.
+    fn variable_queries() -> Vec<String> {
+        dashboard()
+            .get("templating")
+            .and_then(|t| t.get("list"))
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|v| v.get("query").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Pull `cryptify_*` identifiers out of a PromQL string.
+    fn cryptify_idents(promql: &str) -> BTreeSet<String> {
+        let bytes = promql.as_bytes();
+        let mut found = BTreeSet::new();
+        let mut i = 0;
+        while let Some(rel) = promql[i..].find("cryptify_") {
+            let start = i + rel;
+            let mut end = start;
+            while end < bytes.len() {
+                let c = bytes[end] as char;
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            found.insert(promql[start..end].to_string());
+            i = end;
+        }
+        found
+    }
+
+    /// Metrics named by an actual panel query. The "everything exported is on
+    /// the dashboard" direction must use this rather than `referenced_metrics`:
+    /// a metric mentioned only in a template variable's `query` is on no graph,
+    /// so it must not count as covered.
+    fn panel_metrics() -> BTreeSet<String> {
+        all_exprs()
+            .iter()
+            .flat_map(|q| cryptify_idents(q))
+            .collect()
+    }
+
+    /// Every `cryptify_*` name the dashboard mentions anywhere, panels and
+    /// template variables alike. Used for the other direction, where a variable
+    /// querying a metric the exporter dropped is just as broken.
+    fn referenced_metrics() -> BTreeSet<String> {
+        panel_metrics()
+            .into_iter()
+            .chain(variable_queries().iter().flat_map(|q| cryptify_idents(q)))
+            .collect()
+    }
+
+    #[test]
+    fn every_exported_metric_appears_on_the_dashboard() {
+        let on_a_panel = panel_metrics();
+        for metric in exported_metrics() {
+            assert!(
+                on_a_panel.contains(&metric),
+                "{metric} is exported but no dashboard panel queries it — \
+                 add a panel to cryptify/docs/grafana/cryptify-usage.json"
+            );
+        }
+    }
+
+    #[test]
+    fn every_metric_the_dashboard_queries_is_exported() {
+        let exported = exported_metrics();
+        for metric in referenced_metrics() {
+            assert!(
+                exported.contains(&metric),
+                "the dashboard queries {metric}, which this module does not emit — \
+                 the panel would render empty"
+            );
+        }
+    }
+
+    #[test]
+    fn every_panel_filters_on_the_environment_variable() {
+        for expr in all_exprs() {
+            assert!(
+                expr.contains(ENV_SELECTOR),
+                "query is missing the {ENV_SELECTOR} matcher, so it ignores the \
+                 environment the dashboard is scoped to:\n{expr}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_environment_variable_is_declared() {
+        let declared = dashboard()
+            .get("templating")
+            .and_then(|t| t.get("list"))
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .any(|v| v.get("name").and_then(Value::as_str) == Some("env"))
+            })
+            .unwrap_or(false);
+        assert!(
+            declared,
+            "panels filter on $env but no `env` variable is declared, so every \
+             panel resolves to an empty selector"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
