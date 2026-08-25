@@ -873,6 +873,7 @@ components:
         - recipient
         - subject
         - from
+        - attributed
         - html
         - text
       properties:
@@ -890,8 +891,16 @@ components:
           type: "string"
           nullable: true
           description:
-            "The sender's address on a recipient notification; null on the
-            sender's own confirmation copy."
+            "The *proven* sender's address on a recipient notification; null
+            when the upload proved no sender, when `attributed_email` is off,
+            and on the sender's own confirmation copy."
+        attributed:
+          type: "boolean"
+          description:
+            "Whether this rendering attributes the upload to a proven sender
+            (the checkmark, the `on behalf of` line, the sender's proven
+            attributes). False is the neutral rendering, which names no
+            sender at all."
         html:
           type: "string"
         text:

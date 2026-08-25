@@ -1,0 +1,10 @@
+{% extends "email/email.txt" %}
+{% block sender_block %}
+
+---
+{{on_behalf_of}} {{sender_email}}
+{% if !sender_attributes.is_empty() %}
+{% for attr in sender_attributes %}- {{attr.1}}
+{% endfor %}
+{% endif %}
+{% endblock %}

@@ -1,4 +1,4 @@
-{{header}} {{subheader}}
+{{header}}
 {{file_size}} - {{expires_str}} {{expiry_date}}
 {% if html_content != "" %}
 
@@ -14,12 +14,4 @@
 
 {{confirm}}
 {% endif %}
-{% if sender_email != "" %}
-
----
-{{files_from}} {{sender_email}}
-{% if !sender_attributes.is_empty() %}
-{% for attr in sender_attributes %}- {{attr.1}}
-{% endfor %}
-{% endif %}
-{% endif %}
+{% block sender_block %}{% endblock %}

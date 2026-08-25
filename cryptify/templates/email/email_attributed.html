@@ -1,0 +1,17 @@
+{% extends "email/email.html" %}
+{% block sender_block %}
+                <div style="margin-top:40px;padding-top:30px;border-top:1px solid #C6E2F6;text-align:center;">
+                    <div style="margin-bottom:12px;">
+                        <img src="cid:pg-check" alt="" width="16" height="13" style="display:inline-block;vertical-align:middle;" />
+                    </div>
+                    <p style="font-size:13px;color:#5F7381;margin:0 0 6px 0;">{{on_behalf_of}}</p>
+                    <p style="font-size:15px;font-weight:700;color:#030E17;margin:0 0 12px 0;">{{sender_email}}</p>
+                    {% if !sender_attributes.is_empty() %}
+                    <div style="text-align:center;">
+                        {% for attr in sender_attributes %}
+                        <span style="display:inline-block;border:1px solid #C6E2F6;border-radius:100px;padding:4px 14px;margin:3px 4px;font-size:12px;color:#5F7381;">{{attr.1}}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+{% endblock %}

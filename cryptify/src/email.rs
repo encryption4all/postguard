@@ -1,5 +1,5 @@
 use crate::config::CryptifyConfig;
-use crate::store::FileState;
+use crate::store::{FileState, SenderClaim};
 
 use askama::Template;
 
@@ -57,61 +57,15 @@ impl Header for AutoSubmitted {
     }
 }
 
-/// Suffix that identifies the signer's full-name attribute across IRMA
-/// schemes — prod (`pbdf.gemeente.personalData.fullname`) and demo
-/// (`irma-demo.gemeente.personalData.fullname`) both end with this. When
-/// such an attribute appears in `FileState.sender_attributes` we render
-/// the disclosed name in place of the bare email everywhere the sender
-/// is shown in the body.
-const FULLNAME_ATYPE_SUFFIX: &str = ".gemeente.personalData.fullname";
-
-/// Per-credential suffixes for the `(firstName, lastName)` pairs the
-/// signer may disclose instead of the gemeente fullname (postguard#239
-/// follow-up). Each entry's `.firstName` / `.lastName` pair, when both
-/// are present and non-empty, is concatenated into a single display name.
-/// Suffix-matching catches both `pbdf.pbdf.*` and `irma-demo.pbdf.*`.
-const NAME_PAIR_CREDENTIAL_SUFFIXES: &[&str] =
-    &[".pbdf.passport", ".pbdf.idcard", ".pbdf.drivinglicence"];
-
-fn is_fullname_atype(atype: &str) -> bool {
-    atype.ends_with(FULLNAME_ATYPE_SUFFIX)
-}
-
-/// If `attrs` contains `<cred>.firstName` and `<cred>.lastName` for one of
-/// the supported credentials and both are non-empty, remove them and
-/// return `"<firstName> <lastName>"`. Otherwise leave `attrs` untouched.
-fn take_firstname_lastname_pair(attrs: &mut Vec<(String, String)>) -> Option<String> {
-    for cred in NAME_PAIR_CREDENTIAL_SUFFIXES {
-        let first_suffix = format!("{}.firstName", cred);
-        let last_suffix = format!("{}.lastName", cred);
-
-        let first_idx = attrs.iter().position(|(t, _)| t.ends_with(&first_suffix));
-        let last_idx = attrs.iter().position(|(t, _)| t.ends_with(&last_suffix));
-
-        if let (Some(fi), Some(li)) = (first_idx, last_idx) {
-            let first_val = attrs[fi].1.clone();
-            let last_val = attrs[li].1.clone();
-            if !first_val.is_empty() && !last_val.is_empty() {
-                // Remove the higher index first so the second remove is
-                // still valid.
-                let (hi, lo) = if fi > li { (fi, li) } else { (li, fi) };
-                attrs.remove(hi);
-                attrs.remove(lo);
-                return Some(format!("{} {}", first_val, last_val));
-            }
-        }
-    }
-    None
-}
-
 /// Embedded PostGuard logo, served inline via a `Content-ID: <pg-logo>`
 /// MIME part rather than fetched from postguard.eu. Removes the
 /// HTML-only-plus-remote-image spam signal flagged in postguard#197.
 const LOGO_PNG: &[u8] = include_bytes!("../templates/email/pg_logo.png");
 
-/// Inline checkmark glyph shown next to the signer-verified email in the
-/// HTML email, referenced via `cid:pg-check`. Replaces the previous
-/// unicode `&#10003;` so the mark renders consistently across clients.
+/// Inline checkmark glyph shown next to the *proven* sender email in the
+/// HTML email, referenced via `cid:pg-check`. Attached only to the
+/// attributed rendering, so a mail that certifies nothing carries no
+/// checkmark for a client to display.
 const CHECK_PNG: &[u8] = include_bytes!("../templates/email/check.png");
 
 use serde::{Deserialize, Serialize};
@@ -152,53 +106,59 @@ impl Language {
 }
 
 struct MailStrings<'a> {
-    subject_str: &'a str,
-    sender_str: &'a str,
     expires_str: &'a str,
     download_str: &'a str,
     link_str: &'a str,
     header_confirm: &'a str,
     subject_confirm: &'a str,
     confirm: &'a str,
-    files_from: &'a str,
+    /// Opens the attribution block, and so appears on the attributed
+    /// rendering only. Body copy: the proven address must not reach `From`
+    /// or the subject, where Microsoft 365 Defender scores a display name
+    /// resembling a known contact from an external domain.
+    on_behalf_of: &'a str,
+    /// Subject *and* headline of every recipient notification, both
+    /// renderings. Brand-only, so what an upload proved changes the body
+    /// and nothing a mail filter reads.
+    subject_neutral: &'a str,
 }
 
 const NL_STRINGS: MailStrings = MailStrings {
-    subject_str: "heeft je bestanden gestuurd",
-    sender_str: "heeft je bestanden gestuurd",
     expires_str: "Verloopt op",
     download_str: "Download jouw bestanden",
     link_str: "Download link",
     header_confirm: "Je hebt het volgende gestuurd aan",
     subject_confirm: "Je bestanden zijn verstuurd via PostGuard",
     confirm: "Je kunt nog steeds bij je bestanden",
-    files_from: "De bestanden komen van",
+    on_behalf_of: "PostGuard stuurt je versleutelde bestanden namens",
+    subject_neutral: "Je hebt versleutelde bestanden ontvangen via PostGuard",
 };
 
 const EN_STRINGS: MailStrings = MailStrings {
-    subject_str: "sent you files",
-    sender_str: "sent you files",
     expires_str: "Expires on",
     download_str: "Download your files",
     link_str: "Download link",
     header_confirm: "You sent files to",
     subject_confirm: "Your files have been sent via PostGuard",
     confirm: "You can still access your files",
-    files_from: "The files come from",
+    on_behalf_of: "PostGuard is sending you encrypted files on behalf of",
+    subject_neutral: "You have received encrypted files via PostGuard",
 };
 
-#[derive(Template)]
-#[template(path = "email/subject.txt")]
-struct SubjectTemplate<'a> {
-    subject_str: &'a str,
-    sender: &'a str,
+fn strings_for(lang: &Language) -> MailStrings<'static> {
+    match lang {
+        Language::En => EN_STRINGS,
+        Language::Nl => NL_STRINGS,
+    }
 }
 
+/// The neutral rendering: what an upload gets when nothing about its sender
+/// was proven. `email.html` carries no attribution block, and this struct
+/// carries no address to put in one.
 #[derive(Template)]
 #[template(path = "email/email.html")]
-struct EmailTemplate<'a> {
+struct NeutralEmailTemplate<'a> {
     header: &'a str,
-    subheader: &'a str,
     expires_str: &'a str,
     download_str: &'a str,
     link_str: &'a str,
@@ -207,16 +167,37 @@ struct EmailTemplate<'a> {
     html_content: &'a str,
     url: &'a str,
     confirm: &'a str,
-    files_from: &'a str,
+}
+
+/// The attributed rendering: the neutral body plus the tick, the attribution
+/// line and the proven attributes as chips.
+///
+/// The arms are two structs and two templates rather than one of each with
+/// optional fields, and deliberately so (postguard#365): the tick lives in a
+/// template only this struct can render, so no expression in the program can
+/// put one on an upload that proved nothing — a render site added later
+/// cannot forget a flag that does not exist.
+#[derive(Template)]
+#[template(path = "email/email_attributed.html")]
+struct AttributedEmailTemplate<'a> {
+    header: &'a str,
+    expires_str: &'a str,
+    download_str: &'a str,
+    link_str: &'a str,
+    file_size: &'a str,
+    expiry_date: &'a str,
+    html_content: &'a str,
+    url: &'a str,
+    confirm: &'a str,
+    on_behalf_of: &'a str,
     sender_email: &'a str,
     sender_attributes: &'a [(String, String)],
 }
 
 #[derive(Template)]
 #[template(path = "email/email.txt", escape = "none")]
-struct EmailTextTemplate<'a> {
+struct NeutralEmailTextTemplate<'a> {
     header: &'a str,
-    subheader: &'a str,
     expires_str: &'a str,
     download_str: &'a str,
     link_str: &'a str,
@@ -225,7 +206,21 @@ struct EmailTextTemplate<'a> {
     html_content: &'a str,
     url: &'a str,
     confirm: &'a str,
-    files_from: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "email/email_attributed.txt", escape = "none")]
+struct AttributedEmailTextTemplate<'a> {
+    header: &'a str,
+    expires_str: &'a str,
+    download_str: &'a str,
+    link_str: &'a str,
+    file_size: &'a str,
+    expiry_date: &'a str,
+    html_content: &'a str,
+    url: &'a str,
+    confirm: &'a str,
+    on_behalf_of: &'a str,
     sender_email: &'a str,
     sender_attributes: &'a [(String, String)],
 }
@@ -235,42 +230,33 @@ struct EmailTextTemplate<'a> {
 /// logo as an inline image referenced via `cid:pg-logo`. This shape avoids
 /// the HTML-only + remote-image spam signal flagged in postguard#197 while
 /// keeping graceful degradation for text-only clients.
-fn build_body(html: String, text: String) -> Result<MultiPart, Box<dyn std::error::Error>> {
+///
+/// `attributed` says whether the HTML references `cid:pg-check`, and the
+/// tick image is attached only then. A neutral body naming no sender must
+/// not ship a checkmark: an inline part nothing references is one some
+/// clients offer as an attachment.
+fn build_body(
+    html: String,
+    text: String,
+    attributed: bool,
+) -> Result<MultiPart, Box<dyn std::error::Error>> {
     let logo = Attachment::new_inline("pg-logo".to_string())
         .body(LOGO_PNG.to_vec(), "image/png".parse::<ContentType>()?);
-    let check = Attachment::new_inline("pg-check".to_string())
-        .body(CHECK_PNG.to_vec(), "image/png".parse::<ContentType>()?);
 
-    let related = MultiPart::related()
+    let mut related = MultiPart::related()
         .singlepart(SinglePart::html(html))
-        .singlepart(logo)
-        .singlepart(check);
+        .singlepart(logo);
+
+    if attributed {
+        related = related.singlepart(
+            Attachment::new_inline("pg-check".to_string())
+                .body(CHECK_PNG.to_vec(), "image/png".parse::<ContentType>()?),
+        );
+    }
 
     Ok(MultiPart::alternative()
         .singlepart(SinglePart::plain(text))
         .multipart(related))
-}
-
-/// Resolve the display string and remaining attribute pills for the
-/// sender. When the signer disclosed a name it is used as the display;
-/// the name attribute is removed from the pill list so it doesn't render
-/// twice. An empty disclosed value is treated as not disclosed. When no
-/// name is available the display falls back to "PostGuard".
-fn sender_display(state: &FileState) -> (String, Vec<(String, String)>) {
-    let mut attrs = state.sender_attributes.clone();
-
-    // 1. Prefer gemeente.personalData.fullname (Dutch municipality credential).
-    let name = attrs
-        .iter()
-        .position(|(t, _)| is_fullname_atype(t))
-        .map(|i| attrs.remove(i).1)
-        .filter(|n| !n.is_empty())
-        // 2. Otherwise concatenate firstName + lastName from passport / id /
-        //    driving licence (postguard#239 follow-up).
-        .or_else(|| take_firstname_lastname_pair(&mut attrs));
-
-    let display = name.unwrap_or_else(|| "PostGuard".to_string());
-    (display, attrs)
 }
 
 fn format_file_size(size: u64) -> String {
@@ -310,9 +296,15 @@ pub struct RenderedEmail {
     pub subject: String,
     /// Formatted `Name <email>` form of the configured `email_from`.
     pub from: String,
-    /// Set on per-recipient notifications (so replies go to the sender);
-    /// `None` on the sender's own confirmation copy.
+    /// The *proven* sender's address on a per-recipient notification, so
+    /// replies reach them. `None` when the upload proved nothing, when the
+    /// kill switch is off, and on the sender's own confirmation copy.
     pub reply_to: Option<String>,
+    /// True when this rendering carries the attribution block and so
+    /// references `cid:pg-check`. `build_body` attaches the tick image only
+    /// then; the staging preview reports it so a developer can see which
+    /// rendering an upload got without reading the HTML.
+    pub attributed: bool,
     pub html: String,
     pub text: String,
 }
@@ -343,14 +335,20 @@ pub fn render_recipient_email(
     uuid: &str,
 ) -> Result<RenderedEmail, url::ParseError> {
     let url = build_download_url(config, uuid, recipient_email)?;
-    let (html, text, subject) = email_templates(state, &url);
+    let body = email_templates(state, config, &url);
+    let attributed = body.attributed_to.is_some();
     Ok(RenderedEmail {
         recipient: recipient_email.to_owned(),
-        subject,
+        subject: body.subject,
         from: config.email_from().to_string(),
-        reply_to: state.sender.clone(),
-        html,
-        text,
+        // Replies go to the proven address or nowhere. `state.sender` is the
+        // uploader's own spelling of an identity nobody checked, so pointing
+        // a reply at it is the same unverified assertion the body no longer
+        // makes.
+        reply_to: body.attributed_to,
+        attributed,
+        html: body.html,
+        text: body.text,
     })
 }
 
@@ -366,112 +364,160 @@ pub fn render_confirmation_email(
         return Ok(None);
     };
     let url = build_download_url(config, uuid, &sender_email)?;
-    let (html, text, subject) = email_confirm(state, &url);
+    let body = email_confirm(state, config, &url);
     Ok(Some(RenderedEmail {
         recipient: sender_email,
-        subject,
+        subject: body.subject,
         from: config.email_from().to_string(),
         reply_to: None,
-        html,
-        text,
+        attributed: body.attributed_to.is_some(),
+        html: body.html,
+        text: body.text,
     }))
 }
 
-fn email_templates(state: &FileState, url: &str) -> (String, String, String) {
-    let strings = match state.mail_lang {
-        Language::En => EN_STRINGS,
-        Language::Nl => NL_STRINGS,
-    };
-
-    let (display, attrs) = sender_display(state);
-    let file_size = format_file_size(state.uploaded);
-    let expiry_date = format_date(state.expires, &state.mail_lang);
-
-    let html = EmailTemplate {
-        header: &display,
-        subheader: strings.sender_str,
-        expires_str: strings.expires_str,
-        download_str: strings.download_str,
-        link_str: strings.link_str,
-        file_size: &file_size,
-        expiry_date: &expiry_date,
-        html_content: &state.mail_content,
-        confirm: "",
-        files_from: strings.files_from,
-        sender_email: &display,
-        sender_attributes: &attrs,
-        url,
-    };
-    let text = EmailTextTemplate {
-        header: &display,
-        subheader: strings.sender_str,
-        expires_str: strings.expires_str,
-        download_str: strings.download_str,
-        link_str: strings.link_str,
-        file_size: &file_size,
-        expiry_date: &expiry_date,
-        html_content: &state.mail_content,
-        confirm: "",
-        files_from: strings.files_from,
-        sender_email: &display,
-        sender_attributes: &attrs,
-        url,
-    };
-    let subject = SubjectTemplate {
-        subject_str: strings.subject_str,
-        sender: &display,
-    };
-    (html.to_string(), text.to_string(), subject.to_string())
+/// One mail's rendered bodies, its subject, and the address the attributed
+/// arm put in them.
+///
+/// `attributed_to` is read back off the arm that ran rather than handed to
+/// it. The `Reply-To` and the `cid:pg-check` MIME part are both keyed off
+/// this one value, so neither can drift from the body that was actually
+/// rendered.
+struct RenderedBody {
+    html: String,
+    text: String,
+    subject: String,
+    attributed_to: Option<String>,
 }
 
-fn email_confirm(state: &FileState, url: &str) -> (String, String, String) {
-    let strings = match state.mail_lang {
-        Language::En => EN_STRINGS,
-        Language::Nl => NL_STRINGS,
-    };
+/// What a mail may attribute this upload to, once the config kill switch has
+/// had its say.
+///
+/// The switch is a one-way valve: it is applied *after* the claim resolves and
+/// can only discard it, so no configuration turns an upload that proved
+/// nothing into an attributed mail. `None` — finalize has not run — renders
+/// exactly as `Unproven` does, because only a verified proof may produce a
+/// tick.
+fn attributable_claim<'a>(
+    state: &'a FileState,
+    config: &CryptifyConfig,
+) -> Option<&'a SenderClaim> {
+    if config.attributed_email() {
+        state.sender_claim.as_ref()
+    } else {
+        None
+    }
+}
 
-    let (display, attrs) = sender_display(state);
+/// Render one mail's two bodies and pick its subject, splitting on what the
+/// upload proved. Both the recipient notification and the sender's
+/// confirmation copy come through here, so an attribution the one loses
+/// cannot survive on the other.
+fn render_body(
+    state: &FileState,
+    config: &CryptifyConfig,
+    strings: &MailStrings<'_>,
+    url: &str,
+    header: &str,
+    confirm: &str,
+    subject: &str,
+) -> RenderedBody {
     let file_size = format_file_size(state.uploaded);
     let expiry_date = format_date(state.expires, &state.mail_lang);
-    let recipients = state.recipients.to_string();
 
-    let html = EmailTemplate {
-        header: strings.header_confirm,
-        subheader: &recipients,
-        expires_str: strings.expires_str,
-        link_str: strings.link_str,
-        file_size: &file_size,
-        expiry_date: &expiry_date,
-        html_content: &state.mail_content,
-        download_str: strings.download_str,
-        confirm: strings.confirm,
-        files_from: strings.files_from,
-        sender_email: &display,
-        sender_attributes: &attrs,
+    match attributable_claim(state, config) {
+        Some(SenderClaim::Proven { email, attrs }) => RenderedBody {
+            html: AttributedEmailTemplate {
+                header,
+                expires_str: strings.expires_str,
+                download_str: strings.download_str,
+                link_str: strings.link_str,
+                file_size: &file_size,
+                expiry_date: &expiry_date,
+                html_content: &state.mail_content,
+                url,
+                confirm,
+                on_behalf_of: strings.on_behalf_of,
+                sender_email: email,
+                sender_attributes: attrs,
+            }
+            .to_string(),
+            text: AttributedEmailTextTemplate {
+                header,
+                expires_str: strings.expires_str,
+                download_str: strings.download_str,
+                link_str: strings.link_str,
+                file_size: &file_size,
+                expiry_date: &expiry_date,
+                html_content: &state.mail_content,
+                url,
+                confirm,
+                on_behalf_of: strings.on_behalf_of,
+                sender_email: email,
+                sender_attributes: attrs,
+            }
+            .to_string(),
+            subject: subject.to_owned(),
+            attributed_to: Some(email.clone()),
+        },
+        Some(SenderClaim::Unproven) | None => RenderedBody {
+            html: NeutralEmailTemplate {
+                header,
+                expires_str: strings.expires_str,
+                download_str: strings.download_str,
+                link_str: strings.link_str,
+                file_size: &file_size,
+                expiry_date: &expiry_date,
+                html_content: &state.mail_content,
+                url,
+                confirm,
+            }
+            .to_string(),
+            text: NeutralEmailTextTemplate {
+                header,
+                expires_str: strings.expires_str,
+                download_str: strings.download_str,
+                link_str: strings.link_str,
+                file_size: &file_size,
+                expiry_date: &expiry_date,
+                html_content: &state.mail_content,
+                url,
+                confirm,
+            }
+            .to_string(),
+            subject: subject.to_owned(),
+            attributed_to: None,
+        },
+    }
+}
+
+fn email_templates(state: &FileState, config: &CryptifyConfig, url: &str) -> RenderedBody {
+    let strings = strings_for(&state.mail_lang);
+    render_body(
+        state,
+        config,
+        &strings,
         url,
-    };
-    let text = EmailTextTemplate {
-        header: strings.header_confirm,
-        subheader: &recipients,
-        expires_str: strings.expires_str,
-        link_str: strings.link_str,
-        file_size: &file_size,
-        expiry_date: &expiry_date,
-        html_content: &state.mail_content,
-        download_str: strings.download_str,
-        confirm: strings.confirm,
-        files_from: strings.files_from,
-        sender_email: &display,
-        sender_attributes: &attrs,
+        // The headline says only that encrypted files arrived. Who they came
+        // from is the attribution block's business, and only once proven.
+        strings.subject_neutral,
+        "",
+        strings.subject_neutral,
+    )
+}
+
+fn email_confirm(state: &FileState, config: &CryptifyConfig, url: &str) -> RenderedBody {
+    let strings = strings_for(&state.mail_lang);
+    let header = format!("{} {}", strings.header_confirm, state.recipients);
+    render_body(
+        state,
+        config,
+        &strings,
         url,
-    };
-
-    let subject = SubjectTemplate {
-        subject_str: strings.subject_confirm,
-        sender: "",
-    };
-
-    (html.to_string(), text.to_string(), subject.to_string())
+        &header,
+        strings.confirm,
+        strings.subject_confirm,
+    )
 }
 
 pub async fn send_email(
@@ -526,7 +572,11 @@ pub async fn send_email(
                     ),
                 }
             }
-            let email = builder.multipart(build_body(rendered.html, rendered.text)?)?;
+            let email = builder.multipart(build_body(
+                rendered.html,
+                rendered.text,
+                rendered.attributed,
+            )?)?;
 
             // send email
             log::info!("Sending email to {}", recipient.email);
@@ -563,7 +613,11 @@ pub async fn send_email(
                     .from(config.email_from())
                     .to(to_mailbox)
                     .subject(&rendered.subject)
-                    .multipart(build_body(rendered.html, rendered.text)?)?;
+                    .multipart(build_body(
+                        rendered.html,
+                        rendered.text,
+                        rendered.attributed,
+                    )?)?;
 
                 log::info!("Sending confirmation email to {}", rendered.recipient);
                 let mailer = mailer_builder.build();
@@ -662,168 +716,6 @@ mod tests {
     }
 
     #[test]
-    fn sender_display_promotes_disclosed_name() {
-        let state = filestate_with_attrs(vec![
-            (
-                "pbdf.gemeente.personalData.fullname".to_owned(),
-                "Jan Jansen".to_owned(),
-            ),
-            ("orgName".to_owned(), "Acme".to_owned()),
-        ]);
-        let (display, remaining) = sender_display(&state);
-        assert_eq!(display, "Jan Jansen");
-        assert_eq!(remaining, vec![("orgName".to_owned(), "Acme".to_owned())]);
-    }
-
-    #[test]
-    fn sender_display_promotes_disclosed_name_from_demo_scheme() {
-        let state = filestate_with_attrs(vec![(
-            "irma-demo.gemeente.personalData.fullname".to_owned(),
-            "Jan Jansen".to_owned(),
-        )]);
-        let (display, _) = sender_display(&state);
-        assert_eq!(display, "Jan Jansen");
-    }
-
-    #[test]
-    fn sender_display_treats_empty_disclosed_name_as_not_disclosed() {
-        let state = filestate_with_attrs(vec![(
-            "pbdf.gemeente.personalData.fullname".to_owned(),
-            String::new(),
-        )]);
-        let (display, _) = sender_display(&state);
-        assert_eq!(display, "PostGuard");
-    }
-
-    #[test]
-    fn sender_display_falls_back_to_postguard_when_no_name_disclosed() {
-        let state = filestate_with_attrs(vec![("orgName".to_owned(), "Acme".to_owned())]);
-        let (display, remaining) = sender_display(&state);
-        assert_eq!(display, "PostGuard");
-        assert_eq!(remaining, vec![("orgName".to_owned(), "Acme".to_owned())]);
-    }
-
-    #[test]
-    fn sender_display_concatenates_firstname_lastname_from_passport() {
-        let state = filestate_with_attrs(vec![
-            ("pbdf.pbdf.passport.firstName".to_owned(), "Jan".to_owned()),
-            (
-                "pbdf.pbdf.passport.lastName".to_owned(),
-                "Jansen".to_owned(),
-            ),
-            ("orgName".to_owned(), "Acme".to_owned()),
-        ]);
-        let (display, remaining) = sender_display(&state);
-        assert_eq!(display, "Jan Jansen");
-        assert_eq!(
-            remaining,
-            vec![("orgName".to_owned(), "Acme".to_owned())],
-            "both name attrs consumed; unrelated attrs kept"
-        );
-    }
-
-    #[test]
-    fn sender_display_concatenates_firstname_lastname_from_idcard() {
-        let state = filestate_with_attrs(vec![
-            ("pbdf.pbdf.idcard.firstName".to_owned(), "Jan".to_owned()),
-            ("pbdf.pbdf.idcard.lastName".to_owned(), "Jansen".to_owned()),
-        ]);
-        let (display, remaining) = sender_display(&state);
-        assert_eq!(display, "Jan Jansen");
-        assert!(remaining.is_empty());
-    }
-
-    #[test]
-    fn sender_display_concatenates_firstname_lastname_from_drivinglicence() {
-        let state = filestate_with_attrs(vec![
-            (
-                "pbdf.pbdf.drivinglicence.firstName".to_owned(),
-                "Jan".to_owned(),
-            ),
-            (
-                "pbdf.pbdf.drivinglicence.lastName".to_owned(),
-                "Jansen".to_owned(),
-            ),
-        ]);
-        let (display, _) = sender_display(&state);
-        assert_eq!(display, "Jan Jansen");
-    }
-
-    #[test]
-    fn sender_display_concatenates_firstname_lastname_from_demo_scheme() {
-        let state = filestate_with_attrs(vec![
-            (
-                "irma-demo.pbdf.passport.firstName".to_owned(),
-                "Jan".to_owned(),
-            ),
-            (
-                "irma-demo.pbdf.passport.lastName".to_owned(),
-                "Jansen".to_owned(),
-            ),
-        ]);
-        let (display, _) = sender_display(&state);
-        assert_eq!(display, "Jan Jansen");
-    }
-
-    #[test]
-    fn sender_display_prefers_gemeente_fullname_over_passport_pair() {
-        // If both are disclosed (unlikely in practice), gemeente wins
-        // because that path runs first.
-        let state = filestate_with_attrs(vec![
-            (
-                "pbdf.gemeente.personalData.fullname".to_owned(),
-                "Marie Smit".to_owned(),
-            ),
-            ("pbdf.pbdf.passport.firstName".to_owned(), "Jan".to_owned()),
-            (
-                "pbdf.pbdf.passport.lastName".to_owned(),
-                "Jansen".to_owned(),
-            ),
-        ]);
-        let (display, _) = sender_display(&state);
-        assert_eq!(display, "Marie Smit");
-    }
-
-    #[test]
-    fn sender_display_falls_through_when_firstname_present_without_lastname() {
-        let state = filestate_with_attrs(vec![(
-            "pbdf.pbdf.passport.firstName".to_owned(),
-            "Jan".to_owned(),
-        )]);
-        let (display, remaining) = sender_display(&state);
-        // No lastName → no concatenation; the orphan firstName stays as a
-        // pill so the recipient at least sees it instead of having it
-        // silently dropped.
-        assert_eq!(display, "PostGuard");
-        assert_eq!(
-            remaining,
-            vec![("pbdf.pbdf.passport.firstName".to_owned(), "Jan".to_owned())]
-        );
-    }
-
-    #[test]
-    fn sender_display_treats_empty_firstname_lastname_as_not_disclosed() {
-        let state = filestate_with_attrs(vec![
-            ("pbdf.pbdf.passport.firstName".to_owned(), String::new()),
-            (
-                "pbdf.pbdf.passport.lastName".to_owned(),
-                "Jansen".to_owned(),
-            ),
-        ]);
-        let (display, _) = sender_display(&state);
-        assert_eq!(display, "PostGuard");
-    }
-
-    #[test]
-    fn sender_display_uses_postguard_when_no_name_disclosed() {
-        let mut state = filestate_with_attrs(vec![]);
-        state.sender = None;
-        let (display, remaining) = sender_display(&state);
-        assert_eq!(display, "PostGuard");
-        assert!(remaining.is_empty());
-    }
-
-    #[test]
     fn x_postguard_header_round_trips() {
         let parsed = XPostGuard::parse(X_POSTGUARD_VERSION).expect("parse");
         assert_eq!(parsed.0, X_POSTGUARD_VERSION);
@@ -879,12 +771,6 @@ mod tests {
     #[test]
     fn format_file_size_tebibytes() {
         assert_eq!(format_file_size(1024_u64.pow(4)), "1.0 TB");
-    }
-
-    fn filestate_with_attrs(attrs: Vec<(String, String)>) -> FileState {
-        let mut state = staging_filestate();
-        state.sender_attributes = attrs;
-        state
     }
 
     fn staging_filestate() -> FileState {
@@ -945,10 +831,9 @@ mod tests {
         let rendered = render_recipient_email(&state, &config, "alice@example.com", "uuid-abc")
             .expect("render");
         assert_eq!(rendered.recipient, "alice@example.com");
-        assert_eq!(
-            rendered.reply_to.as_deref(),
-            Some("sender@example.com"),
-            "reply_to should mirror state.sender"
+        assert!(
+            rendered.reply_to.is_none(),
+            "the fixture proves nothing, so there is no address to reply to"
         );
         // HTML escapes `&` to `&amp;`; the plain-text branch is the
         // cleanest place to assert URL composition.
@@ -959,11 +844,7 @@ mod tests {
             "text missing download URL: {}",
             rendered.text
         );
-        assert!(
-            rendered.subject.contains("sent you files"),
-            "subject: {}",
-            rendered.subject
-        );
+        assert_eq!(rendered.subject, EN_STRINGS.subject_neutral);
         // The download-link block must render as a prominent, selectable
         // monospace code block that is not smaller than the 16px primary
         // button (see issue #186). Pin a contiguous substring unique to the
@@ -1005,6 +886,214 @@ mod tests {
         state.sender = None;
         let rendered = render_confirmation_email(&state, &config, "uuid-xyz").expect("render");
         assert!(rendered.is_none());
+    }
+
+    /// A `Proven` claim whose address and attribute value appear nowhere else
+    /// in the fixtures, so a test that finds either in the output knows the
+    /// proof put it there and not the container's own claimed attributes.
+    fn proven_claim() -> SenderClaim {
+        SenderClaim::Proven {
+            email: "proven@example.com".to_owned(),
+            attrs: vec![(
+                "pbdf.sidn-pbdf.email.domain".to_owned(),
+                "example.org".to_owned(),
+            )],
+        }
+    }
+
+    fn state_with_claim(claim: Option<SenderClaim>) -> FileState {
+        let mut state = staging_filestate();
+        state.sender_claim = claim;
+        state
+    }
+
+    /// The whole 3x2: every claim a session can carry, against both positions
+    /// of the kill switch. Exactly one cell — a proven claim with the switch
+    /// on — may render attributed, and the other five must be byte-identical
+    /// neutral output.
+    ///
+    /// This is the guard that the switch is a one-way valve. Were it an input
+    /// to the verification instead of a downgrade applied after it, switch-on
+    /// could lift an `Unproven` upload into the attributed arm and those cells
+    /// would stop matching each other.
+    #[test]
+    fn only_a_proven_claim_with_the_switch_on_renders_attributed() {
+        let mut attributed: Vec<(String, String)> = Vec::new();
+        let mut neutral: Vec<(String, String)> = Vec::new();
+
+        for switch_on in [true, false] {
+            let config = CryptifyConfig::for_test("https://staging.example.com/", true)
+                .with_attributed_email(switch_on);
+            // `None` is not a fourth case to invent a rule for: it means
+            // finalize has not run, which proves exactly as much as
+            // `Unproven` does.
+            for claim in [Some(proven_claim()), Some(SenderClaim::Unproven), None] {
+                let proven = matches!(claim, Some(SenderClaim::Proven { .. }));
+                let state = state_with_claim(claim);
+                let rendered =
+                    render_recipient_email(&state, &config, "alice@example.com", "uuid-abc")
+                        .expect("render");
+                let cell = format!("(proven={proven}, switch_on={switch_on})");
+                let json = serde_json::to_string(&rendered).expect("serialize rendering");
+                if proven && switch_on {
+                    attributed.push((cell, json));
+                } else {
+                    neutral.push((cell, json));
+                }
+            }
+        }
+
+        assert_eq!(
+            attributed.len(),
+            1,
+            "exactly one cell of the 3x2 may be attributed"
+        );
+        assert_eq!(neutral.len(), 5);
+
+        let (first_cell, first_json) = &neutral[0];
+        for (cell, json) in &neutral[1..] {
+            assert_eq!(
+                json, first_json,
+                "{cell} must render byte-identically to {first_cell}"
+            );
+        }
+        assert_ne!(
+            &attributed[0].1, first_json,
+            "the attributed cell must actually differ from the neutral ones"
+        );
+    }
+
+    /// What a neutral notification must not contain: the tick, an address of
+    /// any kind, or a `Reply-To` pointing at one.
+    #[test]
+    fn a_neutral_notification_carries_no_tick_no_address_and_no_reply_to() {
+        let config = CryptifyConfig::for_test("https://staging.example.com/", true);
+        for claim in [Some(SenderClaim::Unproven), None] {
+            let state = state_with_claim(claim);
+            let rendered = render_recipient_email(&state, &config, "alice@example.com", "uuid-abc")
+                .expect("render");
+            assert!(!rendered.attributed);
+            assert!(
+                !rendered.html.contains("cid:pg-check"),
+                "html tick: {}",
+                rendered.html
+            );
+            // The download URL percent-encodes the recipient, so an `@` left
+            // anywhere in a neutral body is an address the mail asserts.
+            assert!(!rendered.html.contains('@'), "html: {}", rendered.html);
+            assert!(!rendered.text.contains('@'), "text: {}", rendered.text);
+            assert!(rendered.reply_to.is_none());
+        }
+    }
+
+    /// The attributed rendering shows the proven address, and shows it in the
+    /// body only: the subject stays the brand-only one, because a display name
+    /// resembling a known contact from an external domain is what Microsoft
+    /// 365 Defender's user-impersonation rule scores.
+    #[test]
+    fn a_proven_notification_carries_the_address_the_tick_and_a_neutral_subject() {
+        let config = CryptifyConfig::for_test("https://staging.example.com/", true);
+        let state = state_with_claim(Some(proven_claim()));
+        let rendered = render_recipient_email(&state, &config, "alice@example.com", "uuid-abc")
+            .expect("render");
+
+        assert!(rendered.attributed);
+        assert!(rendered.html.contains("cid:pg-check"), "{}", rendered.html);
+        assert!(rendered.html.contains(EN_STRINGS.on_behalf_of));
+        assert!(rendered.html.contains("proven@example.com"));
+        assert!(rendered.text.contains(EN_STRINGS.on_behalf_of));
+        assert!(rendered.text.contains("proven@example.com"));
+        assert_eq!(rendered.reply_to.as_deref(), Some("proven@example.com"));
+        assert_eq!(rendered.subject, EN_STRINGS.subject_neutral);
+
+        // The chips come off the proof. `staging_filestate`'s own
+        // `sender_attributes` are the container's word and stay out.
+        assert!(rendered.html.contains("example.org"), "{}", rendered.html);
+        assert!(
+            !rendered.html.contains("Acme"),
+            "claimed attributes must not render: {}",
+            rendered.html
+        );
+    }
+
+    /// A string missing from one locale ships that language an empty line, so
+    /// pin both new keys in both — and pin that a Dutch upload actually reads
+    /// the Dutch ones.
+    #[test]
+    fn both_locales_define_the_attribution_strings() {
+        for (code, strings) in [("EN", EN_STRINGS), ("NL", NL_STRINGS)] {
+            assert!(!strings.on_behalf_of.is_empty(), "{code}.on_behalf_of");
+            assert!(
+                !strings.subject_neutral.is_empty(),
+                "{code}.subject_neutral"
+            );
+        }
+
+        let config = CryptifyConfig::for_test("https://staging.example.com/", true);
+        let mut state = state_with_claim(Some(proven_claim()));
+        state.mail_lang = Language::Nl;
+        let rendered = render_recipient_email(&state, &config, "alice@example.com", "uuid-abc")
+            .expect("render");
+        assert_eq!(rendered.subject, NL_STRINGS.subject_neutral);
+        assert!(
+            rendered.html.contains(NL_STRINGS.on_behalf_of),
+            "{}",
+            rendered.html
+        );
+    }
+
+    /// The sender's own confirmation copy goes through the same split, so it
+    /// cannot keep an unconditional tick after the notification lost one.
+    #[test]
+    fn the_confirmation_copy_splits_the_same_way() {
+        let config = CryptifyConfig::for_test("https://staging.example.com/", true);
+
+        let neutral = render_confirmation_email(&state_with_claim(None), &config, "uuid-xyz")
+            .expect("render")
+            .expect("confirmation present when state.sender is Some");
+        assert!(!neutral.attributed);
+        assert!(
+            !neutral.html.contains("cid:pg-check"),
+            "html tick: {}",
+            neutral.html
+        );
+        assert!(!neutral.html.contains(EN_STRINGS.on_behalf_of));
+
+        let attributed =
+            render_confirmation_email(&state_with_claim(Some(proven_claim())), &config, "uuid-xyz")
+                .expect("render")
+                .expect("confirmation present when state.sender is Some");
+        assert!(attributed.attributed);
+        assert!(attributed.html.contains("cid:pg-check"));
+        assert!(attributed.html.contains("proven@example.com"));
+        // Still the sender's own copy: no Reply-To, and the subject is the
+        // confirmation one, address-free either way.
+        assert!(attributed.reply_to.is_none());
+        assert_eq!(attributed.subject, EN_STRINGS.subject_confirm);
+    }
+
+    /// The tick is a MIME part as much as a line of HTML. A neutral body
+    /// references no checkmark, and an inline image nothing references is one
+    /// some clients offer to the reader as an attachment.
+    #[test]
+    fn the_tick_image_is_attached_only_to_an_attributed_body() {
+        for attributed in [true, false] {
+            let body = build_body("<p>hi</p>".to_owned(), "hi".to_owned(), attributed)
+                .expect("build body");
+            let msg = Message::builder()
+                .from("noreply@example.com".parse::<Mailbox>().unwrap())
+                .to("to@example.com".parse::<Mailbox>().unwrap())
+                .subject("t")
+                .multipart(body)
+                .expect("build message");
+            let raw = String::from_utf8(msg.formatted()).expect("utf8");
+            assert_eq!(
+                raw.contains("pg-check"),
+                attributed,
+                "attributed={attributed}: {raw}"
+            );
+            assert!(raw.contains("pg-logo"), "the logo is on both renderings");
+        }
     }
 
     /// `Language::code` is what `store.rs` persists in the `mail_lang`
