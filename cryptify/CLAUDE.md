@@ -162,7 +162,8 @@ Release-plz automation.
   canonicalize the policy before writing it, but that is the honest client's
   courtesy, not a gate — a client that skips it produces a container that
   verifies just the same. `state.sender` is deliberately left raw: it is the
-  confirmation-mail recipient and `Reply-To`, a different concern.
+  confirmation-mail recipient, a different concern. It is no longer the
+  `Reply-To` — see the notification-email bullet below.
 - **The uploader is not the sender until they prove it** (postguard#364).
   `upload_init` mints a 32-byte challenge, hands it to the client hex-encoded in
   the init response, and stores it on the session; `upload_finalize` reads an
@@ -191,6 +192,27 @@ Release-plz automation.
   `store.record_upload` further down the same handler still run on every
   finalize, so a retry notifies the recipient twice and spends the sender's
   rolling quota twice (#375).
+- **The notification email has two renderings, and only a proof gets the tick**
+  (postguard#365). `render_body` matches on the claim and constructs a
+  *different template struct* per arm: `AttributedEmailTemplate` (tick,
+  `on_behalf_of`, the proven address, the proven attributes as chips) or
+  `NeutralEmailTemplate`, which has no field an address could go in. That is
+  why it is not one template behind an `if proven`: a flag survives until a new
+  render site forgets it, a missing field does not compile. `Some(Unproven)` and
+  `None` render the same bytes, `None` meaning only that finalize has not run.
+  Four things that are easy to undo by accident: the address stays out of the
+  subject and `From`, because Microsoft 365 Defender's user-impersonation rule
+  scores a display name resembling a known contact from an external domain, so
+  both arms send `subject_neutral`; `Reply-To` is the proven address or nothing,
+  never `state.sender`; `build_body` attaches `cid:pg-check` only for the
+  attributed arm, so a neutral mail ships no checkmark for a client to offer as
+  an attachment; and the confirmation copy goes through the same `render_body`,
+  so it cannot keep a tick the notification lost. `config.attributed_email`
+  (default true) is the kill switch, applied in `attributable_claim` as a
+  downgrade *after* the claim resolves, so it can only ever take an attribution
+  away — `only_a_proven_claim_with_the_switch_on_renders_attributed` renders the
+  whole 3×2 to hold that. Expect every current deployment to send neutral: no
+  released client answers the challenge yet.
 - Upload sessions: `Store::persist_session(id, &FileState)` writes one upsert, and
   it is called at each of the three transitions **before the handler responds** —
   `Store::create` (init), `upload_chunk` after the rolling token advances, and
@@ -432,7 +454,8 @@ audit, unauthenticated `/usage` enumeration, was fixed and merged in PR #183):
   `{{html_content}}` without `|safe`, so it's auto-HTML-escaped. The `.txt`
   template uses `escape="none"` correctly for plaintext.
 - **Email header injection**: `recipient` is parsed via lettre `Mailboxes`;
-  `reply_to` comes from the signed IRMA email attribute. lettre validates both.
+  `reply_to` is the address of a verified `SenderClaim::Proven` or nothing at
+  all. lettre validates both.
 - **Upload/finalize auth**: chunk PUT and finalize are gated by the rolling
   `cryptify_token` (`SHA256(prev||chunk)`); finalize checks it too. The status
   endpoint is gated by a constant-time `X-Recovery-Token` comparison, with

@@ -19,6 +19,7 @@ pub struct RawCryptifyConfig {
     metrics_token: Option<String>,
     usage_db: Option<String>,
     email_attribute: Option<String>,
+    attributed_email: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +50,9 @@ pub struct CryptifyConfig {
     /// Test environments override it with a test-scheme type (e.g.
     /// `irma-demo.sidn-pbdf.email.email`); production keeps the default.
     email_attribute: String,
+    /// Whether a notification email may attribute the upload to the proven
+    /// sender at all. See [`CryptifyConfig::attributed_email`].
+    attributed_email: bool,
 }
 
 impl From<RawCryptifyConfig> for CryptifyConfig {
@@ -76,6 +80,7 @@ impl From<RawCryptifyConfig> for CryptifyConfig {
             email_attribute: config
                 .email_attribute
                 .unwrap_or_else(|| "pbdf.sidn-pbdf.email.email".to_owned()),
+            attributed_email: config.attributed_email.unwrap_or(true),
         }
     }
 }
@@ -156,6 +161,16 @@ impl CryptifyConfig {
         &self.email_attribute
     }
 
+    /// The kill switch for the attributed notification email (postguard#365).
+    /// Off sends every notification in the neutral rendering, for a deployment
+    /// whose mail filters object to the attribution line. It is applied as a
+    /// downgrade *after* the claim resolves, so it can only ever take an
+    /// attribution away: no value of it makes an unproven upload render
+    /// attributed.
+    pub fn attributed_email(&self) -> bool {
+        self.attributed_email
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test(server_url: &str, staging_mode: bool) -> Self {
         CryptifyConfig {
@@ -176,7 +191,14 @@ impl CryptifyConfig {
             metrics_token: None,
             usage_db: None,
             email_attribute: "pbdf.sidn-pbdf.email.email".to_owned(),
+            attributed_email: true,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_attributed_email(mut self, attributed_email: bool) -> Self {
+        self.attributed_email = attributed_email;
+        self
     }
 }
 
@@ -219,6 +241,25 @@ mod tests {
             .extract()
             .unwrap();
         assert_eq!(config.email_attribute(), "pbdf.sidn-pbdf.email.email");
+    }
+
+    #[test]
+    fn attributed_email_defaults_to_on() {
+        let config: CryptifyConfig = Figment::from(Serialized::defaults(base_config()))
+            .extract()
+            .unwrap();
+        assert!(
+            config.attributed_email(),
+            "a deployment that says nothing gets the attribution it earned"
+        );
+    }
+
+    #[test]
+    fn attributed_email_is_overridable() {
+        let mut raw = base_config();
+        raw["attributed_email"] = serde_json::json!(false);
+        let config: CryptifyConfig = Figment::from(Serialized::defaults(raw)).extract().unwrap();
+        assert!(!config.attributed_email());
     }
 
     #[test]
