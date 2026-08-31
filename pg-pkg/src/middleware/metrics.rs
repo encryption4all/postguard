@@ -73,6 +73,11 @@ const MAX_CLIENT_VERSIONS: usize = 64;
 /// second sender's real releases then miss, and `other` is only alertable while
 /// nothing legitimate lands there.
 ///
+/// A bucket still holds only because a process sees the versions in live use
+/// rather than every version ever released — 55 published `@e4a/pg-js` versions
+/// leave it 9 slots of headroom — and once one does fill, that client's later
+/// real releases read as `other` until a restart.
+///
 /// Keyed on the allowlisted `client` value, which is a closed set, so the worst
 /// case is bounded at 8 × 64. Keying it on the raw header field would hand out
 /// a fresh budget for every client name an attacker invents.
@@ -606,5 +611,27 @@ mod tests {
         assert!(body.contains(
             "postguard_clients{client=\"pg-dotnet\",client_version=\"0.6.0\",host=\"node\",path=\"/v2/parameters\",status=\"200\"} 1\n"
         ));
+    }
+
+    #[actix_web::test]
+    async fn test_invented_client_names_share_one_budget() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        // The budget is keyed on the allowlisted value, so one more invented
+        // name than the cap spends one `other` bucket, not a fresh one each.
+        for i in 0..=MAX_CLIENT_VERSIONS {
+            assert_eq!(
+                get(
+                    &app,
+                    "/v2/parameters",
+                    Some(&format!("node,22.1.0,evil-{i},9.9.{i}"))
+                )
+                .await,
+                StatusCode::OK
+            );
+        }
+
+        assert!(client_versions(&scrape(&app).await, OTHER).contains(OTHER));
     }
 }
