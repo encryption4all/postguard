@@ -16,7 +16,7 @@ import test from 'node:test';
 import { artifactsDir, readManifest } from '../src/manifest.mjs';
 import { runCase } from '../src/run-case.mjs';
 
-const WASM_READER = '@e4a/pg-wasm@0.6.1';
+const WASM_READER = '@e4a/pg-wasm@0.6.5';
 
 /** A throwaway copy of the sample set, for `damage` to break. */
 async function withDamagedSet(damage, body) {

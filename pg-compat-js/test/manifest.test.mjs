@@ -89,5 +89,5 @@ test('every reader is labelled with the package npm installed for it', async () 
 });
 
 test('an unknown reader id names the ones there are', () => {
-  assert.throws(() => reader('@e4a/pg-js@9.9.9'), /the support window holds @e4a\/pg-wasm@0\.6\.1/);
+  assert.throws(() => reader('@e4a/pg-js@9.9.9'), /the support window holds @e4a\/pg-wasm@0\.6\.5/);
 });

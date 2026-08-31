@@ -330,12 +330,12 @@ macro_rules! reader {
             use pg_core::client::rust::UnsealerMemoryConfig;
             use pg_core::client::{Unsealer, VerificationResult};
             // `VERSION_V3` is a deprecated alias for `VERSION_2` in this tree
-            // from #339 onwards. Neither pinned release carries that
-            // deprecation yet — 0.6.3 and 0.5.10 contain no `#[deprecated]` at
-            // all — so these two allows are inert today and are here for the
-            // pin that first ships it, where `pg-compat-lint`'s clippy
-            // `-D warnings` would make the lint a hard error on both the
-            // import and the use below.
+            // from #339 onwards. 0.6.5 is the first pinned release that ships
+            // that deprecation, so for that module these two allows are load
+            // bearing: without them `pg-compat-lint`'s clippy `-D warnings`
+            // makes the lint a hard error on both the import and the use
+            // below. 0.5.10 predates it and contains no `#[deprecated]` at
+            // all, so there they stay inert.
             #[allow(deprecated)]
             use pg_core::consts::VERSION_V3;
             use pg_core::kem::cgw_kv::CGWKV;
@@ -504,16 +504,16 @@ macro_rules! reader {
     };
 }
 
-reader!(v0_6_3, pg_core_0_6_3, "0.6.3");
+reader!(v0_6_5, pg_core_0_6_5, "0.6.5");
 reader!(v0_5_10, pg_core_0_5_10, "0.5.10");
 
 /// Every published reader in the support window.
 pub fn readers() -> Vec<Reader> {
     vec![
         Reader {
-            version: v0_6_3::VERSION,
-            wire_version: v0_6_3::WIRE_VERSION,
-            verify_case: v0_6_3::verify_case,
+            version: v0_6_5::VERSION,
+            wire_version: v0_6_5::WIRE_VERSION,
+            verify_case: v0_6_5::verify_case,
         },
         Reader {
             version: v0_5_10::VERSION,

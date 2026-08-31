@@ -1083,7 +1083,7 @@ version = "0.0.0"
 dependencies = [
  "futures",
  "pg-core 0.5.10",
- "pg-core 0.6.3",
+ "pg-core 0.6.5",
  "serde",
  "serde_json",
 ]
@@ -1111,9 +1111,9 @@ dependencies = [
 
 [[package]]
 name = "pg-core"
-version = "0.6.3"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "def9131160ca5afc05351523464e810b12515f0efd59968452aadbe5cdbbe0bc"
+checksum = "48a467626b1764d47d6380861dec89c420b95fae037b94ef579546e0e12b7259"
 dependencies = [
  "aead",
  "aes-gcm",

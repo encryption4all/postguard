@@ -124,12 +124,12 @@ in either direction.
 
 ```
 # <registry> <package> <versions...>
-crates.io pg-core 0.6.3 0.5.10
-npm @e4a/pg-wasm 0.6.1
-npm @e4a/pg-js 2.3.3 1.11.0
+crates.io pg-core 0.6.5 0.5.10
+npm @e4a/pg-wasm 0.6.5
+npm @e4a/pg-js 2.4.0 1.11.0
 ```
 
-Checked against the registries on 2026-08-06. A producer publishing a new
+Checked against the registries on 2026-08-31. A producer publishing a new
 version moves a pin; a line leaves the list only through the deprecation
 process below. The npm version of `@e4a/pg-wasm` tracks the released `pg-core`
 version rather than `pg-wasm/Cargo.toml`, so read that pin from npm and not
