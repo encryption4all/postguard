@@ -7,7 +7,7 @@ use actix_web::{
 };
 use futures::Future;
 use futures_util::future::FutureExt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, PoisonError, RwLock};
 
 /// Label value for a field the request did not identify: the client header
@@ -56,10 +56,10 @@ const KNOWN_CLIENTS: &[&str] = &[
 /// Longest `client_version` emitted verbatim.
 const MAX_CLIENT_VERSION_LEN: usize = 32;
 
-/// How many distinct `client_version` values may create a series.
+/// How many distinct `client_version` values one client may create a series for.
 const MAX_CLIENT_VERSIONS: usize = 64;
 
-/// The distinct `client_version` values emitted so far.
+/// The distinct `client_version` values emitted so far, one set per `client`.
 ///
 /// The label is kept exact rather than bucketed. `IntCounterVec` never evicts,
 /// so a series created once lives until the process restarts, and the field is
@@ -67,13 +67,17 @@ const MAX_CLIENT_VERSIONS: usize = 64;
 /// so take the slots first; an attacker minting distinct values meets the
 /// ceiling and lands in `other`.
 ///
-/// The cap is one budget shared by every client, not one per client, and 64 is
+/// The budget is per client rather than one shared by the fleet, because 64 is
 /// under what the two SDKs have published between them (55 `@e4a/pg-js`, 9
-/// `E4A.PostGuard`). It holds only because a process sees the versions in live
-/// use rather than every version ever released; once it does fill, later real
-/// releases read as `other` until a restart.
-static SEEN_CLIENT_VERSIONS: LazyLock<RwLock<HashSet<String>>> =
-    LazyLock::new(|| RwLock::new(HashSet::new()));
+/// `E4A.PostGuard`): sharing it lets one sender's releases spend the slots a
+/// second sender's real releases then miss, and `other` is only alertable while
+/// nothing legitimate lands there.
+///
+/// Keyed on the allowlisted `client` value, which is a closed set, so the worst
+/// case is bounded at 8 × 64. Keying it on the raw header field would hand out
+/// a fresh budget for every client name an attacker invents.
+static SEEN_CLIENT_VERSIONS: LazyLock<RwLock<HashMap<String, HashSet<String>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 fn allowlisted(field: &str, allowed: &[&str]) -> String {
     if allowed.contains(&field) {
@@ -83,7 +87,9 @@ fn allowlisted(field: &str, allowed: &[&str]) -> String {
     }
 }
 
-fn client_version_label(field: &str) -> String {
+/// `client` is the allowlisted value, not the raw header field: it picks which
+/// budget this version spends.
+fn client_version_label(client: &str, field: &str) -> String {
     let well_shaped = !field.is_empty()
         && field.len() <= MAX_CLIENT_VERSION_LEN
         && field
@@ -94,7 +100,7 @@ fn client_version_label(field: &str) -> String {
         return OTHER.to_string();
     }
 
-    // Neither reserved value consumes a slot of the cap.
+    // Neither reserved value consumes a slot of the cap, in any bucket.
     if field == UNKNOWN || field == OTHER {
         return field.to_string();
     }
@@ -102,14 +108,16 @@ fn client_version_label(field: &str) -> String {
     if SEEN_CLIENT_VERSIONS
         .read()
         .unwrap_or_else(PoisonError::into_inner)
-        .contains(field)
+        .get(client)
+        .is_some_and(|seen| seen.contains(field))
     {
         return field.to_string();
     }
 
-    let mut seen = SEEN_CLIENT_VERSIONS
+    let mut buckets = SEEN_CLIENT_VERSIONS
         .write()
         .unwrap_or_else(PoisonError::into_inner);
+    let seen = buckets.entry(client.to_string()).or_default();
 
     if !seen.contains(field) {
         if seen.len() >= MAX_CLIENT_VERSIONS {
@@ -143,11 +151,11 @@ pub(crate) fn collect_metrics<
     let fields =
         header.and_then(
             |header| match header.split(',').map(str::trim).collect::<Vec<&str>>()[..] {
-                [host, _host_version, client, client_version] => Some([
-                    allowlisted(host, KNOWN_HOSTS),
-                    allowlisted(client, KNOWN_CLIENTS),
-                    client_version_label(client_version),
-                ]),
+                [host, _host_version, client, client_version] => {
+                    let client = allowlisted(client, KNOWN_CLIENTS);
+                    let client_version = client_version_label(&client, client_version);
+                    Some([allowlisted(host, KNOWN_HOSTS), client, client_version])
+                }
                 _ => None,
             },
         );
@@ -256,9 +264,12 @@ mod tests {
         String::from_utf8(test::read_body(res).await.to_vec()).unwrap()
     }
 
-    fn client_versions(exposition: &str) -> BTreeSet<&str> {
+    /// The distinct `client_version` label values one client emitted.
+    fn client_versions<'a>(exposition: &'a str, client: &str) -> BTreeSet<&'a str> {
+        let label = format!("client=\"{client}\"");
         exposition
             .lines()
+            .filter(|line| line.contains(&label))
             .filter_map(|line| line.split("client_version=\"").nth(1))
             .filter_map(|rest| rest.split('"').next())
             .collect()
@@ -533,33 +544,67 @@ mod tests {
         assert_eq!(expected, scrape(&app).await);
     }
 
+    /// Spends `count` of one client's budget on distinct well-shaped versions.
+    async fn mint_versions<S>(app: &S, client: &str, count: usize)
+    where
+        S: Service<Request, Response = ServiceResponse, Error = actix_web::Error>,
+    {
+        for i in 0..count {
+            assert_eq!(
+                get(
+                    app,
+                    "/v2/parameters",
+                    Some(&format!("node,22.1.0,{client},9.9.{i}"))
+                )
+                .await,
+                StatusCode::OK
+            );
+        }
+    }
+
     #[actix_web::test]
     async fn test_client_version_cap_holds() {
         let _guard = exclusive();
         let (app, _, _, _, _) = setup(true).await;
 
         let minted = 70;
-        for i in 0..minted {
-            assert_eq!(
-                get(
-                    &app,
-                    "/v2/parameters",
-                    Some(&format!("node,22.1.0,pg-js,9.9.{i}"))
-                )
-                .await,
-                StatusCode::OK
-            );
-        }
+        mint_versions(&app, "pg-js", minted).await;
 
         let body = scrape(&app).await;
-        let versions = client_versions(&body);
+        let versions = client_versions(&body, "pg-js");
 
         // 64 versions, plus everything after the cap folded into one `other`.
         assert!(versions.contains(OTHER));
-        assert_eq!(versions.len(), 65);
+        assert_eq!(versions.len(), MAX_CLIENT_VERSIONS + 1);
         assert!(body.contains(&format!(
             "postguard_clients{{client=\"pg-js\",client_version=\"other\",host=\"node\",path=\"/v2/parameters\",status=\"200\"}} {}\n",
-            minted - 64
+            minted - MAX_CLIENT_VERSIONS
         )));
+    }
+
+    #[actix_web::test]
+    async fn test_a_full_client_does_not_spend_another_clients_budget() {
+        let _guard = exclusive();
+        let (app, _, _, _, _) = setup(true).await;
+
+        mint_versions(&app, "pg-js", MAX_CLIENT_VERSIONS).await;
+
+        // pg-js has spent its budget to the slot; pg-dotnet has spent none of
+        // its own, so its first release is still a series of its own.
+        assert_eq!(
+            get(&app, "/v2/parameters", Some("node,22.1.0,pg-dotnet,0.6.0")).await,
+            StatusCode::OK
+        );
+
+        let body = scrape(&app).await;
+
+        assert_eq!(client_versions(&body, "pg-js").len(), MAX_CLIENT_VERSIONS);
+        assert_eq!(
+            client_versions(&body, "pg-dotnet"),
+            BTreeSet::from(["0.6.0"])
+        );
+        assert!(body.contains(
+            "postguard_clients{client=\"pg-dotnet\",client_version=\"0.6.0\",host=\"node\",path=\"/v2/parameters\",status=\"200\"} 1\n"
+        ));
     }
 }
