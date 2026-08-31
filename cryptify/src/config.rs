@@ -223,8 +223,16 @@ impl CryptifyConfig {
 
     /// The same window in seconds, which is the unit the store compares
     /// timestamps in.
+    ///
+    /// Saturating, not wrapping: the product of an absurd `rolling_window_days`
+    /// would overflow `i64` silently in release, and a *negative* window makes
+    /// `prune_records` drop every record it sees, quietly disabling the rolling
+    /// quota. Clamping keeps a misconfiguration at "window far too long"
+    /// instead.
     pub fn rolling_window_secs(&self) -> i64 {
-        self.rolling_window_days as i64 * 24 * 60 * 60
+        i64::try_from(self.rolling_window_days)
+            .unwrap_or(i64::MAX)
+            .saturating_mul(24 * 60 * 60)
     }
 
     #[cfg(test)]
@@ -394,5 +402,21 @@ mod tests {
             3 * 24 * 60 * 60,
             "the seconds accessor must follow the configured days, not the default"
         );
+    }
+
+    #[test]
+    fn an_absurd_rolling_window_saturates_instead_of_going_negative() {
+        // A wrapped product would be negative, and a negative window makes
+        // `prune_records` drop every record it sees -- switching the quota off
+        // rather than widening it.
+        for days in [u64::MAX, i64::MAX as u64, 1_000_000_000_000_000_000] {
+            let secs = config_from("rolling_window_days", days).rolling_window_secs();
+            assert!(
+                secs > 0,
+                "rolling_window_days = {} produced a window of {} seconds",
+                days,
+                secs
+            );
+        }
     }
 }

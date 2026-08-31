@@ -1874,6 +1874,18 @@ async fn rocket() -> _ {
         );
     }
 
+    // A zero window makes every recorded upload expire immediately, which
+    // switches the rolling quota off without any other symptom — on a path
+    // whose init and chunk PUT take no credential. Loud at startup rather
+    // than silent for the life of the deployment.
+    if config.rolling_window_days() == 0 {
+        log::warn!(
+            "rolling_window_days is 0 — the rolling upload quota is effectively disabled, \
+             since every recorded upload falls outside the window at once. Set a positive \
+             value to enforce it."
+        );
+    }
+
     let pkg_params_url = format!(
         "{}/v2/sign/parameters",
         config.pkg_url().trim_end_matches('/')
