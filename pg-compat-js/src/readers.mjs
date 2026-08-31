@@ -58,7 +58,7 @@ export function readers() {
  * makes the gate run one package or version while labelling every message with
  * another, which is a support window that is quietly wrong rather than a red
  * run. Both halves are returned because either one alone leaves the other open:
- * `npm:@e4a/pg-wasm@2.4.0` under a `pg-js-2-4-0` alias has the version the
+ * `npm:@e4a/pg-wasm@2.5.0` under a `pg-js-2-5-0` alias has the version the
  * entry declares and not the package. `test/manifest.test.mjs` compares them.
  *
  * Read off disk rather than imported: neither published package lists
