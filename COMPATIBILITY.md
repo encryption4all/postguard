@@ -189,18 +189,24 @@ what can read.
      not carry `X-POSTGUARD-CLIENT-VERSION`. The request is still counted, as
      `client="unknown"`, so the traffic is visible while its sender is not.
      `@e4a/pg-js` `1.x` never sends the header, and shares that bucket with
-     `E4A.PostGuard`, probes, scanners and every direct HTTP caller. A header
+     probes, scanners, every direct HTTP caller and `E4A.PostGuard` below
+     `0.5.0`. The .NET SDK has sent the header since `0.5.0` and lands as
+     `client="pg-dotnet"`; the releases below that are unidentifiable and still
+     supported, because the window above counts `0.x` as one line. A header
      that is sent can hide a version too: an embedding host overrides it
      wholesale, so an add-in reports its own identity and the `pg-js` version
      underneath it is invisible.
 
    Scraping the metric is [postguard-ops#71]; while that is not running there
    is no field data, and nothing gets removed.
-3. Remove. Only once the window has expired, and — where what is being removed
-   is observable — telemetry shows no traffic for it. A route or a field is
-   observable, so the telemetry condition holds there. A client version is not:
-   nothing separates it from the rest of the `unknown` bucket, so for a client
-   version the expired window and step 1's announcement are the whole condition.
+3. Remove. Only once the window has expired, and, for anything observable, only
+   once telemetry shows no traffic for it. A route or a field is observable, so
+   the telemetry condition holds there. For a client version it turns on
+   whether that client sends the header. One that does is counted under its own
+   `client_version`, and the condition holds for it unchanged. One that does
+   not (`@e4a/pg-js` `1.x`, `E4A.PostGuard` below `0.5.0`) has nothing to
+   separate it from the rest of the `unknown` bucket, so there the expired
+   window and step 1's announcement are the whole condition.
 
 Skipping step 2 is how you break the consumers you cannot see.
 
