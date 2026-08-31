@@ -179,11 +179,10 @@ what can read.
    file, with the date the clock starts. The next release of the affected
    component repeats it in its changelog entry. The date is what step 3 counts
    from, so an announcement without one does not start the window.
-2. Observe. `pg-pkg` counts every `/v2` request that gets past the rate
-   limiter in `postguard_clients{path,host,client,client_version,status}`
-   (an over-limit request is rejected with 429 before it reaches the
-   counter). What that
-   metric settles, and what it cannot:
+2. Observe. `pg-pkg` counts every `/v2` request that gets past the rate limiter
+   in `postguard_clients{path,host,client,client_version,status}` (an over-limit
+   request is rejected with 429 before it reaches the counter). What that metric
+   settles, and what it cannot:
    - Measurable: which routes are called, and which *identified* clients call
      them. `path` is the route pattern the server matched against its own route
      table, so route-level traffic is reliable whoever sent it.
@@ -205,10 +204,17 @@ what can read.
    once telemetry shows no traffic for it. A route or a field is observable, so
    the telemetry condition holds there. For a client version it turns on
    whether that client sends the header. One that does is counted under its own
-   `client_version`, and the condition holds for it unchanged. One that does
-   not (`@e4a/pg-js` `1.x`, `E4A.PostGuard` below `0.5.0`) has nothing to
-   separate it from the rest of the `unknown` bucket, so there the expired
-   window and step 1's announcement are the whole condition.
+   `client_version`, so the condition holds for it, read together with `other`:
+   `pg-pkg` labels a version `client_version="other"` when it is misshapen, and
+   when that client has already created 64 series (`MAX_CLIENT_VERSIONS` in
+   `pg-pkg/src/middleware/metrics.rs`), a cap only a restart releases. 55
+   published `@e4a/pg-js` versions leave 9 slots of headroom under it, and the
+   field is attacker-controlled, so it can be reached. An empty series for one
+   version is absence only while that client's `other` is zero too; a non-zero
+   `other` means the version may be inside it and the metric has not answered.
+   One that does not (`@e4a/pg-js` `1.x`, `E4A.PostGuard` below `0.5.0`) has
+   nothing to separate it from the rest of the `unknown` bucket, so there the
+   expired window and step 1's announcement are the whole condition.
 
 Skipping step 2 is how you break the consumers you cannot see.
 
