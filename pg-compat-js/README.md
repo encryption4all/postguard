@@ -37,7 +37,7 @@ a single case by hand:
 
 ```sh
 node pg-compat-js/bin/pg-compat-case.mjs \
-  "$PWD/target/wire-compat/artifacts" '@e4a/pg-wasm@0.6.1' mem
+  "$PWD/target/wire-compat/artifacts" '@e4a/pg-wasm@0.6.5' mem
 ```
 
 `npm test` runs three things besides the gate itself: the reporting logic
@@ -52,8 +52,8 @@ broken harness also satisfies.
 
 | reader | opens | notes |
 | --- | --- | --- |
-| `@e4a/pg-wasm` 0.6.1 | every case | both unsealers, so the only reader that covers memory mode |
-| `@e4a/pg-js` 2.3.3 | the `stream*` cases | through `PostGuard#open`, the path consumers use |
+| `@e4a/pg-wasm` 0.6.5 | every case | both unsealers, so the only reader that covers memory mode |
+| `@e4a/pg-js` 2.4.0 | the `stream*` cases | through `PostGuard#open`, the path consumers use |
 | `@e4a/pg-js` 1.11.0 | the `stream*` cases | same, one major back |
 
 Two things about that table are worth knowing before reading a green run.
@@ -88,7 +88,7 @@ version lands first:
 1. [`COMPATIBILITY.md`](../COMPATIBILITY.md): the version on that package's `npm`
    row in the `Reader list` block. It decides; the rest of this list is the gate
    catching up.
-2. `package.json`: `"pg-js-2-4-0": "npm:@e4a/pg-js@2.4.0"`. An alias, because
+2. `package.json`: `"pg-js-2-5-0": "npm:@e4a/pg-js@2.5.0"`. An alias, because
    several versions of one package have to coexist in one `node_modules`.
 3. `src/readers.mjs`: one more entry in `readers()`.
 4. `npm install`, and commit the lockfile it moves. CI installs with `npm ci`.

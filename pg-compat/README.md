@@ -34,7 +34,7 @@ a single case by hand:
 
 ```sh
 cargo run --manifest-path pg-compat/Cargo.toml --locked --bin pg-compat-case -- \
-  "$PWD/target/wire-compat/artifacts" 0.6.3 mem
+  "$PWD/target/wire-compat/artifacts" 0.6.5 mem
 ```
 
 ## Adding a version to the support window
@@ -194,11 +194,11 @@ artifact's name. `pg-core/tests/sample_sealer.rs` holds the sealer to that.
 
 Read a green run carefully. The header is a length-prefixed region and `bincode`
 ignores trailing bytes, so a field appended at the *end* of `Header` really does
-still open with 0.6.3. A field inserted anywhere else, a changed field type, or
+still open with 0.6.5. A field inserted anywhere else, a changed field type, or
 a reordering shifts every following byte and the set stops opening.
 
 How it stops opening is worth knowing, because it is not a decode error. The
-shifted bytes make 0.6.3 read a garbage length prefix and attempt a
+shifted bytes make 0.6.5 read a garbage length prefix and attempt a
 multi-gigabyte allocation, which aborts the process rather than returning
 `Err`. That is why each case runs in its own child: the gate reports the
 aborted case by name and carries on with the rest, so the failure list still
@@ -206,7 +206,7 @@ tells you whether the break is in the header, the payload, or one mode only.
 Expect lines like:
 
 ```text
-pg-core 0.6.3: mem: reader died on signal 6 before it could report: memory allocation of 21474836480 bytes failed
+pg-core 0.6.5: mem: reader died on signal 6 before it could report: memory allocation of 21474836480 bytes failed
 ```
 
 A `VERSION_V3` bump is the one break reported before any ciphertext is touched,
