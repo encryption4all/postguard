@@ -179,8 +179,10 @@ what can read.
    file, with the date the clock starts. The next release of the affected
    component repeats it in its changelog entry. The date is what step 3 counts
    from, so an announcement without one does not start the window.
-2. Observe. `pg-pkg` counts every `/v2` request in
-   `postguard_clients{path,host,client,client_version,status}`. What that
+2. Observe. `pg-pkg` counts every `/v2` request that gets past the rate
+   limiter in `postguard_clients{path,host,client,client_version,status}`
+   (an over-limit request is rejected with 429 before it reaches the
+   counter). What that
    metric settles, and what it cannot:
    - Measurable: which routes are called, and which *identified* clients call
      them. `path` is the route pattern the server matched against its own route
