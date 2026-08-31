@@ -189,14 +189,15 @@ what can read.
    - Not measurable: which client, and which version, sent a request that does
      not carry `X-POSTGUARD-CLIENT-VERSION`. The request is still counted, as
      `client="unknown"`, so the traffic is visible while its sender is not.
-     `@e4a/pg-js` `1.x` never sends the header, and shares that bucket with
-     probes, scanners, every direct HTTP caller and `E4A.PostGuard` below
-     `0.5.0`. The .NET SDK has sent the header since `0.5.0` and lands as
-     `client="pg-dotnet"`; the releases below that are unidentifiable and still
-     supported, because the window above counts `0.x` as one line. A header
-     that is sent can hide a version too: an embedding host overrides it
-     wholesale, so an add-in reports its own identity and the `pg-js` version
-     underneath it is invisible.
+     `@e4a/pg-js` sends the header from `2.1.0` on. `1.x` and `2.0.x` do not,
+     so both share that bucket with probes, scanners, every direct HTTP caller
+     and `E4A.PostGuard` below `0.5.0`, and `2.0.x` is inside the current
+     window rather than on its way out of it. The .NET SDK has sent the header
+     since `0.5.0` and lands as `client="pg-dotnet"`; the releases below that
+     are unidentifiable and still supported, because the window above counts
+     `0.x` as one line. A header that is sent can hide a version too: an
+     embedding host overrides it wholesale, so an add-in reports its own
+     identity and the `pg-js` version underneath it is invisible.
 
    Scraping the metric is [postguard-ops#71]; while that is not running there
    is no field data, and nothing gets removed.
@@ -212,9 +213,9 @@ what can read.
    field is attacker-controlled, so it can be reached. An empty series for one
    version is absence only while that client's `other` is zero too; a non-zero
    `other` means the version may be inside it and the metric has not answered.
-   One that does not (`@e4a/pg-js` `1.x`, `E4A.PostGuard` below `0.5.0`) has
-   nothing to separate it from the rest of the `unknown` bucket, so there the
-   expired window and step 1's announcement are the whole condition.
+   One that does not (`@e4a/pg-js` below `2.1.0`, `E4A.PostGuard` below
+   `0.5.0`) has nothing to separate it from the rest of the `unknown` bucket, so
+   there the expired window and step 1's announcement are the whole condition.
 
 Skipping step 2 is how you break the consumers you cannot see.
 
