@@ -409,10 +409,6 @@ pub fn hash_recovery_token(token: &str) -> String {
 /// task via an `Arc`.
 struct StateDb {
     conn: std::sync::Mutex<rusqlite::Connection>,
-    /// The rolling window this database prunes usage rows against. Passed in
-    /// from config at startup; `store.rs` takes the value, it never fetches
-    /// it, so there is one authority for the window and it is not here.
-    rolling_window_secs: i64,
 }
 
 /// Column list of `upload_sessions`, in the order [`session_from_row`] reads
@@ -479,7 +475,7 @@ impl StateDb {
     /// before upload-session persistence simply gains the new table, and one
     /// whose table predates a column gains the column
     /// ([`StateDb::migrate_sessions`]).
-    fn open(path: &str, rolling_window_secs: i64) -> rusqlite::Result<Self> {
+    fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = rusqlite::Connection::open(path)?;
         // WAL keeps writes from blocking the (rare) concurrent reads and
         // survives an unclean pod kill better than the default rollback
@@ -529,7 +525,6 @@ impl StateDb {
         Self::migrate_sessions(&conn)?;
         Ok(StateDb {
             conn: std::sync::Mutex::new(conn),
-            rolling_window_secs,
         })
     }
 
@@ -716,7 +711,7 @@ impl StateDb {
     /// active senders. Errors are logged rather than propagated: a database
     /// hiccup must not fail an otherwise-successful upload, and the in-memory
     /// cache still reflects the record for the lifetime of the process.
-    fn record_usage(&self, email: &str, bytes: u64, now: i64) {
+    fn record_usage(&self, email: &str, bytes: u64, now: i64, rolling_window_secs: i64) {
         let conn = self.conn.lock().unwrap();
         if let Err(e) = conn.execute(
             "INSERT INTO usage (email, timestamp, bytes) VALUES (?1, ?2, ?3)",
@@ -725,7 +720,7 @@ impl StateDb {
             log::error!("Failed to persist usage record for {}: {}", email, e);
             return;
         }
-        let cutoff = now - self.rolling_window_secs;
+        let cutoff = now - rolling_window_secs;
         if let Err(e) = conn.execute(
             "DELETE FROM usage WHERE email = ?1 AND timestamp < ?2",
             rusqlite::params![email, cutoff],
@@ -801,7 +796,7 @@ impl Store {
     ) -> Self {
         let (db, usage) = match db_path {
             Some(path) => {
-                let db = StateDb::open(path, rolling_window_secs)
+                let db = StateDb::open(path)
                     .unwrap_or_else(|e| panic!("Failed to open state database at {}: {}", path, e));
                 let usage = db.load_all_usage().unwrap_or_else(|e| {
                     panic!("Failed to load usage records from {}: {}", path, e)
@@ -1032,7 +1027,7 @@ impl Store {
         // updates loses nothing: the cache is rebuilt from the database on
         // the next startup anyway.
         if let Some(db) = &self.shared.db {
-            db.record_usage(&email, bytes, now);
+            db.record_usage(&email, bytes, now, self.shared.rolling_window_secs);
         }
         let mut state = self.shared.state.lock().unwrap();
         let entry = state.usage.entry(email).or_default();
@@ -1513,7 +1508,7 @@ mod tests {
 
     /// Open a second connection to the same database file and read one row.
     fn read_back(path: &str, uuid: &str) -> Option<PersistedSession> {
-        StateDb::open(path, 14 * 24 * 60 * 60)
+        StateDb::open(path)
             .expect("reopen state database")
             .load_session(uuid)
     }
@@ -1620,9 +1615,7 @@ mod tests {
         );
         // Still exactly one row: the transition is an update, not an insert.
         assert_eq!(
-            StateDb::open(db.as_str(), 14 * 24 * 60 * 60)
-                .unwrap()
-                .session_count(),
+            StateDb::open(db.as_str()).unwrap().session_count(),
             1,
             "a transition must upsert, not append"
         );
