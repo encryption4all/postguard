@@ -14,10 +14,6 @@ use crate::metrics::{
     detect_channel, parse_client_version, storage_sampler, Metrics, CHANNEL_UNKNOWN,
     CLIENT_VERSION_HEADER,
 };
-use crate::store::{
-    API_KEY_PER_UPLOAD_LIMIT, API_KEY_ROLLING_LIMIT, PER_UPLOAD_LIMIT, ROLLING_LIMIT,
-    ROLLING_WINDOW_SECS,
-};
 
 use std::path::Path;
 use std::str::FromStr;
@@ -776,9 +772,9 @@ async fn upload_chunk(
     }
 
     let per_upload_limit = if state.api_key_tenant.is_some() {
-        API_KEY_PER_UPLOAD_LIMIT
+        config.api_key_per_upload_limit()
     } else {
-        PER_UPLOAD_LIMIT
+        config.per_upload_limit()
     };
     if end > per_upload_limit {
         // If the caller presented an API key but pg-pkg was unreachable at
@@ -1163,9 +1159,9 @@ async fn upload_finalize(
         .collect();
 
     let rolling_limit = if state.api_key_tenant.is_some() {
-        API_KEY_ROLLING_LIMIT
+        config.api_key_rolling_limit()
     } else {
-        ROLLING_LIMIT
+        config.rolling_limit()
     };
     let now_secs = chrono::offset::Utc::now().timestamp();
     let accounting_key = accounting_key(
@@ -1194,7 +1190,7 @@ async fn upload_finalize(
             return Err(Error::PayloadTooLarge(PayloadTooLargeBody {
                 error: format!(
                     "Sender has exceeded the {}-day rolling limit of {} bytes",
-                    ROLLING_WINDOW_SECS / 86_400,
+                    config.rolling_window_days(),
                     rolling_limit
                 ),
                 limit: "rolling_window",
@@ -1373,6 +1369,7 @@ struct UsageResponse {
 
 #[get("/usage?<email>")]
 fn usage(
+    config: &State<CryptifyConfig>,
     store: &State<Store>,
     api_key: ValidatedApiKey,
     email: Option<String>,
@@ -1394,10 +1391,44 @@ fn usage(
     Json(UsageResponse {
         email: email.unwrap_or_default(),
         used_bytes: usage.used_bytes,
-        limit_bytes: API_KEY_ROLLING_LIMIT,
-        window_days: (ROLLING_WINDOW_SECS / 86_400) as u64,
-        per_upload_limit_bytes: API_KEY_PER_UPLOAD_LIMIT,
+        limit_bytes: config.api_key_rolling_limit(),
+        window_days: config.rolling_window_days(),
+        per_upload_limit_bytes: config.api_key_per_upload_limit(),
         resets_at,
+    })
+}
+
+/// Body of `GET /limits`: the default tier's upload limits.
+///
+/// `per_upload_limit_bytes` and `window_days` are spelled as
+/// [`UsageResponse`] spells them. `rolling_limit_bytes` deliberately is not
+/// `/usage`'s `limit_bytes`: the two responses report different tiers, and one
+/// name for two tiers' numbers is how a client ends up displaying the wrong
+/// one.
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+struct LimitsResponse {
+    per_upload_limit_bytes: u64,
+    rolling_limit_bytes: u64,
+    window_days: u64,
+}
+
+/// The default tier's upload limits, served to every caller alike.
+///
+/// Unauthenticated on purpose: both 413 bodies already state these numbers to
+/// a caller holding no credentials, and a client needs them before it starts
+/// an upload rather than after it has been rejected.
+///
+/// The response takes no credential guard and carries nothing per-tenant — no
+/// `used_bytes`, no `resets_at`, no email — so it cannot vary by
+/// `Authorization`. An endpoint whose contents depend on auth is how
+/// GHSA-5rhx-xgvv-h78h happened; usage stays behind `/usage`'s guard.
+#[get("/limits")]
+fn limits(config: &State<CryptifyConfig>) -> Json<LimitsResponse> {
+    Json(LimitsResponse {
+        per_upload_limit_bytes: config.per_upload_limit(),
+        rolling_limit_bytes: config.rolling_limit(),
+        window_days: config.rolling_window_days(),
     })
 }
 
@@ -1724,6 +1755,7 @@ fn api_routes() -> Vec<rocket::Route> {
         upload_finalize,
         upload_status,
         usage,
+        limits,
         email_template,
         download,
         staging_preview
@@ -1773,6 +1805,7 @@ pub fn build_rocket(figment: Figment, vk: Parameters<VerifyingKey>) -> Rocket<Bu
             metrics.clone(),
             config.usage_db(),
             Path::new(config.data_dir()),
+            config.rolling_window_secs(),
         ))
         .manage(vk)
         .manage(pkg_client)
@@ -1838,6 +1871,18 @@ async fn rocket() -> _ {
         log::warn!(
             "metrics_token is not set — /metrics is publicly accessible without authentication. \
              Set `metrics_token` in config (or ROCKET_METRICS_TOKEN) to require a Bearer token."
+        );
+    }
+
+    // A zero window makes every recorded upload expire immediately, which
+    // switches the rolling quota off without any other symptom — on a path
+    // whose init and chunk PUT take no credential. Loud at startup rather
+    // than silent for the life of the deployment.
+    if config.rolling_window_days() == 0 {
+        log::warn!(
+            "rolling_window_days is 0 — the rolling upload quota is effectively disabled, \
+             since every recorded upload falls outside the window at once. Set a positive \
+             value to enforce it."
         );
     }
 
@@ -2019,13 +2064,28 @@ mod tests {
     }
 
     // Mounts only the `/usage` route with the state its guard depends on
-    // (`Store` + `PkgClient`). The `PkgClient` url is never contacted for the
-    // unauthenticated case: `PkgClient::validate(None)` short-circuits to
-    // `NoCredentials` before any network call.
+    // (`CryptifyConfig` + `Store` + `PkgClient`). The `PkgClient` url is never
+    // contacted for the unauthenticated case: `PkgClient::validate(None)`
+    // short-circuits to `NoCredentials` before any network call.
     async fn usage_client() -> Client {
-        let rocket = rocket::build()
+        use rocket::figment::{providers::Serialized, Figment};
+
+        let figment = Figment::from(rocket::Config::default()).merge(Serialized::defaults(
+            serde_json::json!({
+                "server_url": "http://localhost",
+                "data_dir": "/tmp",
+                "email_from": "Test <test@example.com>",
+                "smtp_url": "localhost",
+                "smtp_port": 1025u16,
+                "allowed_origins": ".*",
+                "pkg_url": "http://localhost",
+            }),
+        ));
+
+        let rocket = rocket::custom(figment)
             .mount("/", routes![usage])
-            .manage(Store::new(Arc::new(Metrics::new())))
+            .attach(AdHoc::config::<CryptifyConfig>())
+            .manage(Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60))
             .manage(PkgClient::new("http://localhost:1".to_string()));
         Client::tracked(rocket).await.expect("valid rocket")
     }
@@ -2071,7 +2131,7 @@ mod tests {
         let rocket = rocket::custom(figment)
             .mount("/", routes![upload_init])
             .attach(AdHoc::config::<CryptifyConfig>())
-            .manage(Store::new(Arc::new(Metrics::new())));
+            .manage(Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60));
 
         Client::tracked(rocket).await.expect("valid rocket")
     }
@@ -2160,7 +2220,7 @@ mod tests {
         let rocket = rocket::custom(figment)
             .mount("/", routes![upload_init, upload_status])
             .attach(AdHoc::config::<CryptifyConfig>())
-            .manage(Store::new(Arc::new(Metrics::new())));
+            .manage(Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60));
 
         Client::tracked(rocket).await.expect("valid rocket")
     }
@@ -2191,7 +2251,7 @@ mod tests {
             .attach(cors)
             .mount("/", routes![upload_init, upload_status])
             .attach(AdHoc::config::<CryptifyConfig>())
-            .manage(Store::new(Arc::new(Metrics::new())));
+            .manage(Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60));
 
         Client::tracked(rocket).await.expect("valid rocket")
     }
@@ -3095,7 +3155,7 @@ mod tests {
             }),
         ));
 
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         if let Some(uuid) = seed_uuid {
             let mut mboxes = lettre::message::Mailboxes::new();
             mboxes.push("alice@example.com".parse().unwrap());
@@ -3298,6 +3358,44 @@ mod integration {
         (client, dir)
     }
 
+    /// Boot Rocket like [`test_client`] but with caller-supplied numeric
+    /// config keys, so the limit checks can be driven without moving
+    /// gigabytes.
+    async fn limits_client(
+        setup: &TestSetup,
+        overrides: &[(&str, u64)],
+    ) -> (Client, std::path::PathBuf) {
+        let (figment, dir) = test_figment();
+        let figment = overrides.iter().fold(figment, |figment, (key, value)| {
+            figment.merge((*key, *value))
+        });
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        let client = Client::tracked(build_rocket(figment, vk))
+            .await
+            .expect("valid rocket");
+        (client, dir)
+    }
+
+    /// `GET /limits`, optionally with an `Authorization` header, as status and
+    /// raw body. Raw rather than parsed because the invariance test compares
+    /// the bytes.
+    async fn get_limits(client: &Client, authorization: Option<&str>) -> (Status, String) {
+        let mut req = client.get("/limits");
+        if let Some(value) = authorization {
+            req = req.header(Header::new("Authorization", value.to_owned()));
+        }
+        let res = req.dispatch().await;
+        let status = res.status();
+        (status, res.into_string().await.unwrap_or_default())
+    }
+
+    fn limits_json(body: &str) -> serde_json::Value {
+        serde_json::from_str(body).expect("/limits returns a JSON body")
+    }
+
     // A copy of the production CORS regex from `conf/config.toml`, used to
     // assert the preflight shape (allowed origins, methods, headers) of the
     // regex we actually ship for the Office add-in (encryption4all/postguard#154).
@@ -3423,14 +3521,17 @@ mod integration {
         (uuid, token, status)
     }
 
-    /// PUT one chunk and return the response status plus the advanced token.
-    async fn do_chunk(
+    /// PUT one chunk and return the response status, the advanced token and
+    /// the raw body. The body is what the rejection paths are about; the token
+    /// is what the success path needs, so both come back and the callers take
+    /// what they came for.
+    async fn chunk_response(
         client: &Client,
         uuid: &str,
         token: &str,
         chunk: &[u8],
         start: u64,
-    ) -> (Status, String) {
+    ) -> (Status, String, String) {
         let end = start + chunk.len() as u64;
         let res = client
             .put(format!("/fileupload/{}", uuid))
@@ -3448,17 +3549,41 @@ mod integration {
             .get_one("cryptifytoken")
             .map(|s| s.to_string())
             .unwrap_or_default();
+        let body = res.into_string().await.unwrap_or_default();
+        (status, next, body)
+    }
+
+    /// PUT one chunk and return the response status plus the advanced token.
+    async fn do_chunk(
+        client: &Client,
+        uuid: &str,
+        token: &str,
+        chunk: &[u8],
+        start: u64,
+    ) -> (Status, String) {
+        let (status, next, _body) = chunk_response(client, uuid, token, chunk, start).await;
         (status, next)
     }
 
-    async fn do_finalize(client: &Client, uuid: &str, token: &str, total: u64) -> Status {
-        client
+    /// Finalize and return the response status with its raw body.
+    async fn finalize_response(
+        client: &Client,
+        uuid: &str,
+        token: &str,
+        total: u64,
+    ) -> (Status, String) {
+        let res = client
             .post(format!("/fileupload/finalize/{}", uuid))
             .header(Header::new("CryptifyToken", token.to_string()))
             .header(Header::new("Content-Range", format!("bytes */{}", total)))
             .dispatch()
-            .await
-            .status()
+            .await;
+        let status = res.status();
+        (status, res.into_string().await.unwrap_or_default())
+    }
+
+    async fn do_finalize(client: &Client, uuid: &str, token: &str, total: u64) -> Status {
+        finalize_response(client, uuid, token, total).await.0
     }
 
     /// Boot Rocket through the same [`build_rocket`] seam as [`test_client`],
@@ -4085,11 +4210,19 @@ mod integration {
 
         let (client, dir) = test_client(&setup).await;
         let store = client.rocket().state::<Store>().expect("Store managed");
+        // The limit the server is enforcing, read where the handler reads it,
+        // so seeding the bucket to "room for exactly one container" cannot
+        // drift from what the rolling check compares against.
+        let rolling_limit = client
+            .rocket()
+            .state::<CryptifyConfig>()
+            .expect("CryptifyConfig managed")
+            .rolling_limit();
 
         let now = chrono::offset::Utc::now().timestamp();
         store.record_upload(
             SENDER_EMAIL.to_owned(),
-            ROLLING_LIMIT - capitalized.len() as u64,
+            rolling_limit - capitalized.len() as u64,
             now,
         );
 
@@ -4100,13 +4233,204 @@ mod integration {
         );
         assert_eq!(
             store.get_usage(SENDER_EMAIL, now).used_bytes,
-            ROLLING_LIMIT,
+            rolling_limit,
             "the capitalized upload must accrue against the canonical bucket"
         );
         assert_eq!(
             upload_sealed(&client, &canonical).await,
             Status::PayloadTooLarge,
             "the second spelling must not get a bucket of its own"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The per-upload limit `GET /limits` serves is the one the chunk PUT
+    /// enforces. Asserted against each other rather than against a literal:
+    /// two numbers for one policy is the defect this route exists to remove,
+    /// and only a comparison between them can catch it coming back.
+    #[rocket::async_test]
+    async fn served_per_upload_limit_is_the_enforced_one() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir) = limits_client(&setup, &[("per_upload_limit", 512)]).await;
+
+        let (status, body) = get_limits(&client, None).await;
+        assert_eq!(status, Status::Ok);
+        let per_upload = limits_json(&body)["per_upload_limit_bytes"]
+            .as_u64()
+            .expect("per_upload_limit_bytes is a number");
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let oversized = vec![0u8; per_upload as usize + 1];
+        let (status, _token, body) = chunk_response(&client, &uuid, &token, &oversized, 0).await;
+
+        assert_eq!(status, Status::PayloadTooLarge);
+        let rejection: serde_json::Value =
+            serde_json::from_str(&body).expect("the 413 carries a JSON body");
+        assert_eq!(rejection["limit"].as_str(), Some("per_upload"));
+        assert_eq!(
+            rejection["limit_bytes"].as_u64(),
+            Some(per_upload),
+            "the limit the 413 names must be the one /limits served"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The same, against the rolling check at finalize.
+    #[rocket::async_test]
+    async fn served_rolling_limit_is_the_enforced_one() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"one byte over").await;
+        let (client, dir) = limits_client(&setup, &[("rolling_limit", 4_096)]).await;
+
+        let (status, body) = get_limits(&client, None).await;
+        assert_eq!(status, Status::Ok);
+        let rolling = limits_json(&body)["rolling_limit_bytes"]
+            .as_u64()
+            .expect("rolling_limit_bytes is a number");
+
+        // Bucket seeded to exactly the limit, so any upload at all crosses it.
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let now = chrono::offset::Utc::now().timestamp();
+        store.record_upload(SENDER_EMAIL.to_owned(), rolling, now);
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(status, Status::Ok);
+        let (status, body) = finalize_response(&client, &uuid, &token, sealed.len() as u64).await;
+
+        assert_eq!(status, Status::PayloadTooLarge);
+        let rejection: serde_json::Value =
+            serde_json::from_str(&body).expect("the 413 carries a JSON body");
+        assert_eq!(rejection["limit"].as_str(), Some("rolling_window"));
+        assert_eq!(
+            rejection["limit_bytes"].as_u64(),
+            Some(rolling),
+            "the limit the 413 names must be the one /limits served"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `GET /limits` answers every caller with the same bytes.
+    ///
+    /// An endpoint whose contents depend on `Authorization` is how
+    /// GHSA-5rhx-xgvv-h78h happened. The route takes no credential guard, so
+    /// today it is structurally incapable of varying -- this is what goes red
+    /// the day someone gives it one.
+    #[rocket::async_test]
+    async fn limits_are_byte_identical_for_every_caller() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let pkg_url = crate::email_template_tests::spawn_mock_pkg().await;
+
+        let (figment, dir) = test_figment();
+        let figment = figment.merge(("pkg_url", pkg_url));
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        let client = Client::tracked(build_rocket(figment, vk))
+            .await
+            .expect("valid rocket");
+
+        const KEY: &str = "Bearer PG-key-no-template";
+        // The key has to be one the server really accepts, or the comparison
+        // below is between two rejected callers and proves nothing.
+        assert_eq!(
+            client
+                .get("/usage")
+                .header(Header::new("Authorization", KEY))
+                .dispatch()
+                .await
+                .status(),
+            Status::Ok,
+            "the mock pg-pkg must validate the key this test authenticates with"
+        );
+
+        let anonymous = get_limits(&client, None).await;
+        let authenticated = get_limits(&client, Some(KEY)).await;
+        assert_eq!(
+            anonymous, authenticated,
+            "/limits must not vary by Authorization, in status or in body"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `/limits` reports the default tier and nothing per-tenant: the API-key
+    /// tier's numbers belong to a caller who proved they hold the key, and
+    /// `used_bytes`/`resets_at` stay behind `/usage`'s guard.
+    #[rocket::async_test]
+    async fn limits_serve_the_default_tier_only() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (client, dir) = limits_client(
+            &setup,
+            &[
+                ("per_upload_limit", 111),
+                ("rolling_limit", 222),
+                ("api_key_per_upload_limit", 333),
+                ("api_key_rolling_limit", 444),
+            ],
+        )
+        .await;
+
+        let (status, body) = get_limits(&client, None).await;
+        assert_eq!(status, Status::Ok);
+        let served = limits_json(&body);
+        assert_eq!(served["per_upload_limit_bytes"].as_u64(), Some(111));
+        assert_eq!(served["rolling_limit_bytes"].as_u64(), Some(222));
+
+        let mut keys: Vec<&str> = served
+            .as_object()
+            .expect("a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "per_upload_limit_bytes",
+                "rolling_limit_bytes",
+                "window_days"
+            ],
+            "/limits carries limits and nothing else"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A configured window has to reach both the number `/limits` serves and
+    /// the expiry the store computes. One of the two moving without the other
+    /// is the disagreement this ticket removes, one layer down.
+    #[rocket::async_test]
+    async fn a_configured_rolling_window_reaches_limits_and_the_store() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let window_days = 3u64;
+        let (client, dir) = limits_client(&setup, &[("rolling_window_days", window_days)]).await;
+
+        let (status, body) = get_limits(&client, None).await;
+        assert_eq!(status, Status::Ok);
+        assert_eq!(
+            limits_json(&body)["window_days"].as_u64(),
+            Some(window_days)
+        );
+
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let now = chrono::offset::Utc::now().timestamp();
+        store.record_upload(SENDER_EMAIL.to_owned(), 1_000, now);
+        assert_eq!(
+            store.get_usage(SENDER_EMAIL, now).oldest_expires_at,
+            Some(now + window_days as i64 * 24 * 60 * 60),
+            "quota has to expire on the window /limits reports, not on the default"
         );
 
         let _ = std::fs::remove_dir_all(dir);
@@ -4976,7 +5300,7 @@ mod email_template_tests {
     /// Launch the mock pg-pkg on a real ephemeral port and return its base
     /// URL. A real listener is required because the `ApiKey` guard reaches
     /// it via reqwest over TCP, not Rocket's in-process local client.
-    async fn spawn_mock_pkg() -> String {
+    pub(crate) async fn spawn_mock_pkg() -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
         let port = listener.local_addr().expect("local addr").port();
         drop(listener);
@@ -5607,6 +5931,15 @@ mod api_gate_tests {
           format: "email"
 "##;
 
+    /// `/usage`'s `window_days`, taken together with the property that follows
+    /// it. `/limits` declares a `window_days` of its own and its first two
+    /// lines are byte-identical to these, so the shorter anchor names both.
+    const USAGE_WINDOW_DAYS: &str = r##"                  window_days:
+                    type: "integer"
+                    description: "Length of the rolling window in days."
+                  per_upload_limit_bytes:
+"##;
+
     const EMAIL_TEMPLATE_503: &str =
         "        \"503\":\n          description: \"pg-pkg was unreachable while validating the API key.\"\n";
 
@@ -5862,8 +6195,8 @@ mod api_gate_tests {
     fn narrow_a_response_property_type(spec: &str) -> String {
         once(
             spec,
-            "                  window_days:\n                    type: \"integer\"\n",
-            "                  window_days:\n                    type: \"string\"\n",
+            USAGE_WINDOW_DAYS,
+            &USAGE_WINDOW_DAYS.replace("type: \"integer\"", "type: \"string\""),
         )
     }
 

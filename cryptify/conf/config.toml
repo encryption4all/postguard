@@ -23,3 +23,20 @@ pkg_url = "https://pkg.postguard.eu/"
 # via the ROCKET_METRICS_TOKEN env var rather than committing it here. When
 # unset, /metrics is publicly accessible (a startup warning is logged).
 # metrics_token = "change-me"
+
+# Upload limits, in bytes, per tier. A caller presenting an API key that
+# pg-pkg validates gets the `api_key_*` pair; everyone else gets the default
+# pair, which `GET /limits` serves unauthenticated. Defaults are the values
+# these were as constants: 5 GB default tier, 100 GB API-key tier.
+# per_upload_limit = 5000000000
+# rolling_limit = 5000000000
+# api_key_per_upload_limit = 100000000000
+# api_key_rolling_limit = 100000000000
+
+# Length of the rolling-quota window, in days. Defaults to 14. Unlike the four
+# byte limits, changing this reinterprets usage that was already recorded:
+# shrinking it forgives usage that was counted, growing it resurrects usage
+# that had expired, and either invalidates the `resets_at` timestamps already
+# handed to callers. 0 disables the rolling quota entirely (every record falls
+# outside the window at once) and logs a startup warning.
+# rolling_window_days = 14

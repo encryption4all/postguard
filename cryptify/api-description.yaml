@@ -94,9 +94,10 @@ paths:
           description:
             "Optional `Bearer PG-…` API key. When present and validated by
             pg-pkg, the upload is accounted against that tenant and gets the
-            API-key limits (100 GB); without it the upload runs on the default
-            tier (5 GB). An invalid key is not rejected here, it degrades to
-            the default tier."
+            API-key tier's limits; without it the upload runs on the default
+            tier, whose limits `GET /limits` serves. Both tiers' limits are
+            deployment configuration, not fixed values. An invalid key is not
+            rejected here, it degrades to the default tier."
           schema:
             type: "string"
           required: false
@@ -327,7 +328,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UploadSessionNotFound"
         "413":
-          description: "The upload exceeds the per-upload size limit (5 GB for non-API-key uploads, 100 GB for API-key uploads)."
+          description: "The upload exceeds the configured per-upload size limit for its tier. The default tier's limit is served by `GET /limits`; the body names the limit that was hit."
           content:
             application/json:
               schema:
@@ -422,7 +423,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UploadSessionNotFound"
         "413":
-          description: "The sender has exceeded the rolling 14-day upload limit (5 GB for non-API-key uploads, 100 GB for API-key uploads)."
+          description: "The sender has exceeded the configured rolling-window upload limit for its tier. The default tier's limit and the window length are served by `GET /limits`; the body names the limit that was hit."
           content:
             application/json:
               schema:
@@ -504,14 +505,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/UploadSessionNotFound"
 
+  /limits:
+    get:
+      tags:
+      - "Usage"
+      summary: "Get the default tier's upload limits"
+      description:
+        "Returns the per-upload and rolling-window limits that apply to a
+        caller on the default tier, together with the length of the rolling
+        window. **No authentication.** The body is the same bytes for every
+        caller: it never reports the API-key tier's limits, and it carries no
+        per-tenant value — no used bytes, no reset timestamp, no email address.
+        Those stay behind `/usage`, which requires an API key. The numbers here
+        are the ones the 413 bodies of `PUT /fileupload/{uuid}` and
+        `POST /fileupload/finalize/{uuid}` already state to an unauthenticated
+        caller.
+
+        The maximum chunk size is deliberately absent:
+        `POST /fileupload/init` serves it, and a client needs it only once it
+        is uploading."
+      operationId: "getLimits"
+      responses:
+        "200":
+          description: "The default tier's upload limits."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - per_upload_limit_bytes
+                  - rolling_limit_bytes
+                  - window_days
+                properties:
+                  per_upload_limit_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description: "Maximum size of a single upload in bytes on the default tier."
+                    example: 5000000000
+                  rolling_limit_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description:
+                      "Bytes one sender may upload within the rolling window on
+                      the default tier. Named apart from `/usage`'s
+                      `limit_bytes` because that field reports the API-key
+                      tier's number."
+                    example: 5000000000
+                  window_days:
+                    type: "integer"
+                    description: "Length of the rolling window in days."
+                    example: 14
+
   /usage:
     get:
       tags:
       - "Usage"
       summary: "Get rolling upload usage for the authenticated tenant"
       description:
-        "Returns the bytes uploaded by the authenticated API-key tenant in the
-        last 14 days, together with the applicable limits. **Requires a valid
+        "Returns the bytes uploaded by the authenticated API-key tenant within
+        the configured rolling window, together with the applicable limits. The
+        window length is reported as `window_days`. **Requires a valid
         `Authorization: Bearer PG-…` API key**: usage is accounted per validated
         tenant and is never looked up by a caller-supplied email, so an
         unauthenticated caller cannot query an arbitrary address. Requests
@@ -560,14 +613,14 @@ paths:
                   limit_bytes:
                     type: "integer"
                     format: "int64"
-                    description: "Rolling-window upload limit in bytes for the authenticated API-key tenant (100 GB)."
+                    description: "Rolling-window upload limit in bytes for the authenticated API-key tenant, as configured for this deployment."
                   window_days:
                     type: "integer"
                     description: "Length of the rolling window in days."
                   per_upload_limit_bytes:
                     type: "integer"
                     format: "int64"
-                    description: "Maximum size of a single upload in bytes for the authenticated API-key tenant (100 GB)."
+                    description: "Maximum size of a single upload in bytes for the authenticated API-key tenant, as configured for this deployment."
                   resets_at:
                     type: "string"
                     format: "date-time"

@@ -10,12 +10,6 @@ use std::{
 
 use rocket::tokio::{sync::Notify, time::Instant};
 
-pub const PER_UPLOAD_LIMIT: u64 = 5_000_000_000;
-pub const ROLLING_LIMIT: u64 = 5_000_000_000;
-pub const API_KEY_PER_UPLOAD_LIMIT: u64 = 100_000_000_000;
-pub const API_KEY_ROLLING_LIMIT: u64 = 100_000_000_000;
-pub const ROLLING_WINDOW_SECS: i64 = 14 * 24 * 60 * 60;
-
 /// Default idle window for an in-memory upload session when no value is
 /// provided in config. Each successful chunk PUT resets it; if no activity
 /// is seen for this long the session is evicted (the on-disk file is left
@@ -717,7 +711,7 @@ impl StateDb {
     /// active senders. Errors are logged rather than propagated: a database
     /// hiccup must not fail an otherwise-successful upload, and the in-memory
     /// cache still reflects the record for the lifetime of the process.
-    fn record_usage(&self, email: &str, bytes: u64, now: i64) {
+    fn record_usage(&self, email: &str, bytes: u64, now: i64, rolling_window_secs: i64) {
         let conn = self.conn.lock().unwrap();
         if let Err(e) = conn.execute(
             "INSERT INTO usage (email, timestamp, bytes) VALUES (?1, ?2, ?3)",
@@ -726,7 +720,7 @@ impl StateDb {
             log::error!("Failed to persist usage record for {}: {}", email, e);
             return;
         }
-        let cutoff = now - ROLLING_WINDOW_SECS;
+        let cutoff = now - rolling_window_secs;
         if let Err(e) = conn.execute(
             "DELETE FROM usage WHERE email = ?1 AND timestamp < ?2",
             rusqlite::params![email, cutoff],
@@ -751,6 +745,7 @@ struct SharedState {
     state: std::sync::Mutex<StoreState>,
     notify: Notify,
     idle_ttl: Duration,
+    rolling_window_secs: i64,
     metrics: Arc<Metrics>,
     /// SQLite handle backing rolling-quota usage and upload-session state.
     /// `None` keeps both in memory only (the pre-persistence behaviour, used
@@ -764,12 +759,13 @@ pub struct Store {
 
 impl Store {
     #[cfg(test)]
-    pub fn new(metrics: Arc<Metrics>) -> Self {
+    pub fn new(metrics: Arc<Metrics>, rolling_window_secs: i64) -> Self {
         Self::with_idle_ttl(
             Duration::from_secs(DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS),
             metrics,
             None,
             Path::new(""),
+            rolling_window_secs,
         )
     }
 
@@ -796,6 +792,7 @@ impl Store {
         metrics: Arc<Metrics>,
         db_path: Option<&str>,
         data_dir: &Path,
+        rolling_window_secs: i64,
     ) -> Self {
         let (db, usage) = match db_path {
             Some(path) => {
@@ -828,6 +825,7 @@ impl Store {
                 }),
                 notify: Notify::new(),
                 idle_ttl,
+                rolling_window_secs,
                 metrics,
                 db,
             }),
@@ -1029,11 +1027,11 @@ impl Store {
         // updates loses nothing: the cache is rebuilt from the database on
         // the next startup anyway.
         if let Some(db) = &self.shared.db {
-            db.record_usage(&email, bytes, now);
+            db.record_usage(&email, bytes, now, self.shared.rolling_window_secs);
         }
         let mut state = self.shared.state.lock().unwrap();
         let entry = state.usage.entry(email).or_default();
-        prune_records(entry, now);
+        prune_records(entry, now, self.shared.rolling_window_secs);
         entry.push_back(UploadRecord {
             timestamp: now,
             bytes,
@@ -1041,12 +1039,13 @@ impl Store {
     }
 
     pub fn get_usage(&self, email: &str, now: i64) -> UsageSnapshot {
+        let window = self.shared.rolling_window_secs;
         let mut state = self.shared.state.lock().unwrap();
         match state.usage.get_mut(email) {
             Some(entry) => {
-                prune_records(entry, now);
+                prune_records(entry, now, window);
                 let used_bytes = entry.iter().map(|r| r.bytes).sum();
-                let oldest_expires_at = entry.front().map(|r| r.timestamp + ROLLING_WINDOW_SECS);
+                let oldest_expires_at = entry.front().map(|r| r.timestamp + window);
                 UsageSnapshot {
                     used_bytes,
                     oldest_expires_at,
@@ -1081,8 +1080,8 @@ fn insert_session(state: &mut StoreState, id: String, filestate: FileState, dead
     state.expiration_keys.insert(id, (deadline, removal_id));
 }
 
-fn prune_records(records: &mut VecDeque<UploadRecord>, now: i64) {
-    let cutoff = now - ROLLING_WINDOW_SECS;
+fn prune_records(records: &mut VecDeque<UploadRecord>, now: i64, rolling_window_secs: i64) {
+    let cutoff = now - rolling_window_secs;
     while let Some(front) = records.front() {
         if front.timestamp < cutoff {
             records.pop_front();
@@ -1178,7 +1177,7 @@ mod tests {
 
     #[rocket::async_test]
     async fn usage_is_zero_for_unknown_email() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         assert_eq!(
             store.get_usage("unknown@example.com", 1_000_000).used_bytes,
             0
@@ -1187,27 +1186,22 @@ mod tests {
 
     #[rocket::async_test]
     async fn usage_sums_records_in_window() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let window = 14 * 24 * 60 * 60;
+        let store = Store::new(Arc::new(Metrics::new()), window);
         let now: i64 = 2_000_000;
         store.record_upload("a@example.com".into(), 1_000_000_000, now - 3600);
         store.record_upload("a@example.com".into(), 2_000_000_000, now - 60);
         let snap = store.get_usage("a@example.com", now);
         assert_eq!(snap.used_bytes, 3_000_000_000);
-        assert_eq!(
-            snap.oldest_expires_at,
-            Some(now - 3600 + ROLLING_WINDOW_SECS)
-        );
+        assert_eq!(snap.oldest_expires_at, Some(now - 3600 + window));
     }
 
     #[rocket::async_test]
     async fn usage_excludes_records_outside_window() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let window = 14 * 24 * 60 * 60;
+        let store = Store::new(Arc::new(Metrics::new()), window);
         let now: i64 = 2_000_000;
-        store.record_upload(
-            "b@example.com".into(),
-            5_000_000_000,
-            now - ROLLING_WINDOW_SECS - 1,
-        );
+        store.record_upload("b@example.com".into(), 5_000_000_000, now - window - 1);
         store.record_upload("b@example.com".into(), 1_000_000_000, now - 60);
         assert_eq!(
             store.get_usage("b@example.com", now).used_bytes,
@@ -1217,7 +1211,7 @@ mod tests {
 
     #[rocket::async_test]
     async fn usage_is_isolated_per_email() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         let now: i64 = 2_000_000;
         store.record_upload("a@example.com".into(), 1_000, now);
         store.record_upload("b@example.com".into(), 2_000, now);
@@ -1251,7 +1245,7 @@ mod tests {
 
     #[rocket::async_test]
     async fn touch_extends_eviction_deadline() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         store.create("u1".into(), dummy_filestate());
 
         let original = {
@@ -1282,7 +1276,7 @@ mod tests {
 
     #[rocket::async_test]
     async fn touch_on_unknown_id_is_noop() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         store.touch("nope");
         let s = store.shared.state.lock().unwrap();
         assert!(s.expirations.is_empty());
@@ -1291,7 +1285,7 @@ mod tests {
 
     #[rocket::async_test]
     async fn remove_cleans_up_expirations() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         store.create("u2".into(), dummy_filestate());
         store.remove("u2");
         let s = store.shared.state.lock().unwrap();
@@ -1337,18 +1331,31 @@ mod tests {
     }
 
     fn store_with_db(db: &TempDbPath) -> Store {
+        store_with_db_and_window(db, 14 * 24 * 60 * 60)
+    }
+
+    /// [`store_with_db`] with the rolling window spelled out. The usage tests
+    /// assert against the same binding they pass here, so the window they
+    /// enforce and the window they expect cannot disagree.
+    fn store_with_db_and_window(db: &TempDbPath, rolling_window_secs: i64) -> Store {
         store_with_db_and_ttl(
             db,
             Duration::from_secs(DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS),
+            rolling_window_secs,
         )
     }
 
-    fn store_with_db_and_ttl(db: &TempDbPath, idle_ttl: Duration) -> Store {
+    fn store_with_db_and_ttl(
+        db: &TempDbPath,
+        idle_ttl: Duration,
+        rolling_window_secs: i64,
+    ) -> Store {
         Store::with_idle_ttl(
             idle_ttl,
             Arc::new(Metrics::new()),
             Some(db.as_str()),
             db.data_dir(),
+            rolling_window_secs,
         )
     }
 
@@ -1356,9 +1363,10 @@ mod tests {
     async fn usage_survives_simulated_restart() {
         let db = TempDbPath::new();
         let now: i64 = 2_000_000;
+        let window = 14 * 24 * 60 * 60;
 
         {
-            let store = store_with_db(&db);
+            let store = store_with_db_and_window(&db, window);
             store.record_upload("a@example.com".into(), 1_000_000_000, now - 3600);
             store.record_upload("a@example.com".into(), 2_000_000_000, now - 60);
             store.record_upload("b@example.com".into(), 500, now - 10);
@@ -1366,16 +1374,13 @@ mod tests {
         }
 
         // Fresh Store opening the same database file — simulates restart.
-        let store = store_with_db(&db);
+        let store = store_with_db_and_window(&db, window);
         let snap = store.get_usage("a@example.com", now);
         assert_eq!(
             snap.used_bytes, 3_000_000_000,
             "usage for a@ must be reloaded from the database after restart"
         );
-        assert_eq!(
-            snap.oldest_expires_at,
-            Some(now - 3600 + ROLLING_WINDOW_SECS)
-        );
+        assert_eq!(snap.oldest_expires_at, Some(now - 3600 + window));
         assert_eq!(
             store.get_usage("b@example.com", now).used_bytes,
             500,
@@ -1403,15 +1408,12 @@ mod tests {
     async fn rolling_window_eviction_persists_across_restart() {
         let db = TempDbPath::new();
         let now: i64 = 2_000_000;
+        let window = 14 * 24 * 60 * 60;
 
         {
-            let store = store_with_db(&db);
+            let store = store_with_db_and_window(&db, window);
             // One record well outside the window, one inside.
-            store.record_upload(
-                "c@example.com".into(),
-                9_000,
-                now - ROLLING_WINDOW_SECS - 10,
-            );
+            store.record_upload("c@example.com".into(), 9_000, now - window - 10);
             store.record_upload("c@example.com".into(), 1_000, now - 60);
             // A later record at `now` triggers the database-side prune of the
             // stale row (DELETE WHERE timestamp < now - window).
@@ -1421,7 +1423,7 @@ mod tests {
         // After restart only the two in-window records should remain — the
         // expired one must have been evicted from the database, not just the
         // in-memory cache.
-        let store = store_with_db(&db);
+        let store = store_with_db_and_window(&db, window);
         assert_eq!(
             store.get_usage("c@example.com", now).used_bytes,
             3_000,
@@ -1433,30 +1435,28 @@ mod tests {
     async fn rolling_window_evicts_in_memory_after_reload() {
         let db = TempDbPath::new();
         let now: i64 = 2_000_000;
+        let window = 14 * 24 * 60 * 60;
 
         {
-            let store = store_with_db(&db);
+            let store = store_with_db_and_window(&db, window);
             // Record that is in-window now but will fall out by `later`.
             store.record_upload("d@example.com".into(), 4_000, now);
         }
 
-        let store = store_with_db(&db);
+        let store = store_with_db_and_window(&db, window);
         // Immediately after reload the record counts.
         assert_eq!(store.get_usage("d@example.com", now).used_bytes, 4_000);
         // Far in the future it has rolled out of the window.
-        let later = now + ROLLING_WINDOW_SECS + 1;
+        let later = now + window + 1;
         assert_eq!(store.get_usage("d@example.com", later).used_bytes, 0);
     }
 
     #[rocket::async_test]
     async fn pruning_removes_only_expired_records() {
-        let store = Store::new(Arc::new(Metrics::new()));
+        let window = 14 * 24 * 60 * 60;
+        let store = Store::new(Arc::new(Metrics::new()), window);
         let now: i64 = 2_000_000;
-        store.record_upload(
-            "c@example.com".into(),
-            1_000,
-            now - ROLLING_WINDOW_SECS - 10,
-        );
+        store.record_upload("c@example.com".into(), 1_000, now - window - 10);
         store.record_upload("c@example.com".into(), 2_000, now - 10);
         assert_eq!(store.get_usage("c@example.com", now).used_bytes, 2_000);
         store.record_upload("c@example.com".into(), 3_000, now);
@@ -1666,7 +1666,7 @@ mod tests {
     async fn eviction_deletes_the_persisted_row() {
         let db = TempDbPath::new();
         // Idle window short enough that the purge task fires during the test.
-        let store = store_with_db_and_ttl(&db, Duration::from_millis(20));
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
         store.create("session-5".into(), populated_filestate());
         assert!(read_back(db.as_str(), "session-5").is_some());
 
@@ -1694,7 +1694,7 @@ mod tests {
     async fn persistence_is_a_noop_without_a_configured_database() {
         // The `usage_db`-unset deployment keeps the old in-memory behaviour;
         // every persistence call has to degrade to nothing rather than panic.
-        let store = Store::new(Arc::new(Metrics::new()));
+        let store = Store::new(Arc::new(Metrics::new()), 14 * 24 * 60 * 60);
         store.create("session-6".into(), populated_filestate());
         let handle = store.get("session-6").expect("live session");
         {
