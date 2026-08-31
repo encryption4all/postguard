@@ -147,8 +147,16 @@ Release-plz automation.
   rather than something verified here.
 - Per-sender usage: the map in `StoreState.usage` is a cache, the table is the
   source of truth, loaded on startup (`load_all_usage`) and written through on each
-  `record_upload` (`record_usage`, which also prunes rows outside the 14d rolling
+  `record_upload` (`record_usage`, which also prunes rows outside the rolling
   window).
+- **The four upload limits and the rolling window are config, not constants**
+  (postguard#386): `per_upload_limit`, `rolling_limit`,
+  `api_key_per_upload_limit`, `api_key_rolling_limit` and `rolling_window_days`,
+  defaulting to 5 GB / 5 GB / 100 GB / 100 GB / 14 days. `store.rs` takes the
+  window as a parameter (`Store::with_idle_ttl`, `prune_records`) and never
+  fetches it, so config is read in `main.rs` only. Changing the window is not
+  like changing a byte limit: it retroactively reinterprets usage already
+  recorded, and invalidates `resets_at` timestamps already returned.
 - **The accounting key is not the sender value on the wire.** `upload_finalize`
   routes the rolling limit through the `accounting_key` helper: an API key
   accounts per `api-key:<tenant>` (a tenant id is not an identity attribute and

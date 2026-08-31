@@ -504,6 +504,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/UploadSessionNotFound"
 
+  /limits:
+    get:
+      tags:
+      - "Usage"
+      summary: "Get the default tier's upload limits"
+      description:
+        "Returns the per-upload and rolling-window limits that apply to a
+        caller on the default tier, together with the length of the rolling
+        window. **No authentication.** The body is the same bytes for every
+        caller: it never reports the API-key tier's limits, and it carries no
+        per-tenant value — no used bytes, no reset timestamp, no email address.
+        Those stay behind `/usage`, which requires an API key. The numbers here
+        are the ones the 413 bodies of `PUT /fileupload/{uuid}` and
+        `POST /fileupload/finalize/{uuid}` already state to an unauthenticated
+        caller.
+
+        The maximum chunk size is deliberately absent:
+        `POST /fileupload/init` serves it, and a client needs it only once it
+        is uploading."
+      operationId: "getLimits"
+      responses:
+        "200":
+          description: "The default tier's upload limits."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - per_upload_limit_bytes
+                  - rolling_limit_bytes
+                  - window_days
+                properties:
+                  per_upload_limit_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description: "Maximum size of a single upload in bytes on the default tier."
+                    example: 5000000000
+                  rolling_limit_bytes:
+                    type: "integer"
+                    format: "int64"
+                    description:
+                      "Bytes one sender may upload within the rolling window on
+                      the default tier. Named apart from `/usage`'s
+                      `limit_bytes` because that field reports the API-key
+                      tier's number."
+                    example: 5000000000
+                  window_days:
+                    type: "integer"
+                    description: "Length of the rolling window in days."
+                    example: 14
+
   /usage:
     get:
       tags:
