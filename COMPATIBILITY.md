@@ -87,21 +87,22 @@ envelope tier, tested in both directions.
 The window is the set of published SDK versions kept working against the
 current server and the current wire format.
 
-- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window when
-  telemetry shows no `1.x` traffic. The other half of that condition, the
-  Outlook add-in's v1 → v2 migration, **has landed**: the add-in lives at
-  `apps/outlook-addon` in [postguard-js] on `@e4a/pg-js": "workspace:*"` (2.x)
-  and released as `outlook-addin-v1.0.0`. [postguard-outlook-addon#125] is
-  closed and stayed in that now-archived repo, so treat it as a historical
-  record rather than a tracker.
+- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window on the
+  calendar rule below, at least 12 months after its successor shipped: `2.0.0`
+  published 2026-06-02, so `1.x` stays in the window until 2027-06-02 at the
+  earliest. The Outlook add-in's v1 → v2 migration, which retirement also used
+  to wait on, **has landed**: the add-in lives at `apps/outlook-addon` in
+  [postguard-js] on `@e4a/pg-js": "workspace:*"` (2.x) and released as
+  `outlook-addin-v1.0.0`. [postguard-outlook-addon#125] is closed and stayed in
+  that now-archived repo, so treat it as a historical record rather than a
+  tracker.
 - `@e4a/pg-wasm` (npm): every version a supported `pg-js` resolves.
 - `E4A.PostGuard` (NuGet): the last major. `0.x` counts as one line until
   `1.0`.
 - `pg-core` (crates.io): the last two minors.
 
 A version stays in the window for at least 12 months after its successor
-ships, and longer while live client-version telemetry still shows it
-([postguard-ops#64]).
+ships.
 
 Read support for stored artifacts is not part of this window. It never drops,
 whatever happens to the SDK version that wrote the bytes.
@@ -178,12 +179,28 @@ what can read.
    file, with the date the clock starts. The next release of the affected
    component repeats it in its changelog entry. The date is what step 3 counts
    from, so an announcement without one does not start the window.
-2. Observe. `pg-pkg` exports `postguard_clients{client,client_version,host,...}`
-   per request, so the versions in the field are measurable. Scraping it is
-   [postguard-ops#64]; while that is not running there is no field data, and
-   nothing gets removed.
-3. Remove. Only once the window has expired and telemetry shows no traffic for
-   what is being removed.
+2. Observe. `pg-pkg` counts every `/v2` request in
+   `postguard_clients{path,host,client,client_version,status}`. What that
+   metric settles, and what it cannot:
+   - Measurable: which routes are called, and which *identified* clients call
+     them. `path` is the route pattern the server matched against its own route
+     table, so route-level traffic is reliable whoever sent it.
+   - Not measurable: which client, and which version, sent a request that does
+     not carry `X-POSTGUARD-CLIENT-VERSION`. The request is still counted, as
+     `client="unknown"`, so the traffic is visible while its sender is not.
+     `@e4a/pg-js` `1.x` never sends the header, and shares that bucket with
+     `E4A.PostGuard`, probes, scanners and every direct HTTP caller. A header
+     that is sent can hide a version too: an embedding host overrides it
+     wholesale, so an add-in reports its own identity and the `pg-js` version
+     underneath it is invisible.
+
+   Scraping the metric is [postguard-ops#71]; while that is not running there
+   is no field data, and nothing gets removed.
+3. Remove. Only once the window has expired, and — where what is being removed
+   is observable — telemetry shows no traffic for it. A route or a field is
+   observable, so the telemetry condition holds there. A client version is not:
+   nothing separates it from the rest of the `unknown` bucket, so for a client
+   version the expired window and step 1's announcement are the whole condition.
 
 Skipping step 2 is how you break the consumers you cannot see.
 
@@ -204,4 +221,4 @@ Skipping step 2 is how you break the consumers you cannot see.
 [postguard-e2e#41]: https://github.com/encryption4all/postguard-e2e/pull/41
 [postguard-dotnet#50]: https://github.com/encryption4all/postguard-dotnet/issues/50
 [postguard-outlook-addon#125]: https://github.com/encryption4all/postguard-outlook-addon/issues/125
-[postguard-ops#64]: https://github.com/privacybydesign/postguard-ops/issues/64
+[postguard-ops#71]: https://github.com/privacybydesign/postguard-ops/issues/71
