@@ -87,8 +87,8 @@ envelope tier, tested in both directions.
 The window is the set of published SDK versions kept working against the
 current server and the current wire format.
 
-- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window on the
-  calendar rule below, at least 12 months after its successor shipped: `2.0.0`
+- `@e4a/pg-js` (npm): the last two majors, so `1.x` leaves the window when
+  `3.0.0` ships. The calendar rule below sets the floor either way: `2.0.0`
   published 2026-06-02, so `1.x` stays in the window until 2027-06-02 at the
   earliest. The Outlook add-in's v1 → v2 migration, which retirement also used
   to wait on, **has landed**: the add-in lives at `apps/outlook-addon` in
