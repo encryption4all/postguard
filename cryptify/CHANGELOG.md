@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.33](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.32...cryptify-v0.1.33) - 2026-09-01
+
+### Added
+
+- *(cryptify)* move the upload limits and rolling window into config, and serve the default tier's on GET /limits ([#392](https://github.com/encryption4all/postguard/pull/392))
+- *(cryptify)* split the notification email into attributed and neutral renderings ([#383](https://github.com/encryption4all/postguard/pull/383))
+
+### Fixed
+
+- *(docker)* upgrade inherited base packages, and stop caching the layer that decides currency ([#395](https://github.com/encryption4all/postguard/pull/395))
+
 ## [0.1.32](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.31...cryptify-v0.1.32) - 2026-08-25
 
 ### Added

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.6.3...pg-pkg-v0.6.4) - 2026-09-01
+
+### Added
+
+- *(pg-pkg)* count every /v2 request in postguard_clients and bound its labels ([#384](https://github.com/encryption4all/postguard/pull/384))
+
+### Fixed
+
+- *(pg-pkg)* give each client its own client_version budget ([#390](https://github.com/encryption4all/postguard/pull/390))
+
 ## [0.6.3](https://github.com/encryption4all/postguard/compare/pg-pkg-v0.6.2...pg-pkg-v0.6.3) - 2026-08-24
 
 ### Other
