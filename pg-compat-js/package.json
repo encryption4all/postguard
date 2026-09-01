@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "pg-js-1-11-0": "npm:@e4a/pg-js@1.11.0",
-    "pg-js-2-4-0": "npm:@e4a/pg-js@2.4.0",
+    "pg-js-2-5-0": "npm:@e4a/pg-js@2.5.0",
     "pg-wasm-0-6-5": "npm:@e4a/pg-wasm@0.6.5"
   }
 }
