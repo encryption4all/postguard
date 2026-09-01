@@ -44,7 +44,7 @@ import { pgWasmReader } from './readers/pg-wasm.mjs';
 export function readers() {
   return [
     pgWasmReader({ version: '0.6.5', specifier: 'pg-wasm-0-6-5' }),
-    pgJsReader({ version: '2.4.0', specifier: 'pg-js-2-4-0', surfacesUnsealResult: true }),
+    pgJsReader({ version: '2.5.0', specifier: 'pg-js-2-5-0', surfacesUnsealResult: true }),
     pgJsReader({ version: '1.11.0', specifier: 'pg-js-1-11-0', surfacesUnsealResult: false }),
   ].map((reader) => ({ wireVersion: WIRE_VERSION, ...reader }));
 }
