@@ -87,21 +87,22 @@ envelope tier, tested in both directions.
 The window is the set of published SDK versions kept working against the
 current server and the current wire format.
 
-- `@e4a/pg-js` (npm): the last two majors. `1.x` leaves the window when
-  telemetry shows no `1.x` traffic. The other half of that condition, the
-  Outlook add-in's v1 → v2 migration, **has landed**: the add-in lives at
-  `apps/outlook-addon` in [postguard-js] on `@e4a/pg-js": "workspace:*"` (2.x)
-  and released as `outlook-addin-v1.0.0`. [postguard-outlook-addon#125] is
-  closed and stayed in that now-archived repo, so treat it as a historical
-  record rather than a tracker.
+- `@e4a/pg-js` (npm): the last two majors, so `1.x` leaves the window when
+  `3.0.0` ships. The calendar rule below sets the floor either way: `2.0.0`
+  published 2026-06-02, so `1.x` stays in the window until 2027-06-02 at the
+  earliest. The Outlook add-in's v1 → v2 migration, which retirement also used
+  to wait on, **has landed**: the add-in lives at `apps/outlook-addon` in
+  [postguard-js] on `@e4a/pg-js": "workspace:*"` (2.x) and released as
+  `outlook-addin-v1.0.0`. [postguard-outlook-addon#125] is closed and stayed in
+  that now-archived repo, so treat it as a historical record rather than a
+  tracker.
 - `@e4a/pg-wasm` (npm): every version a supported `pg-js` resolves.
 - `E4A.PostGuard` (NuGet): the last major. `0.x` counts as one line until
   `1.0`.
 - `pg-core` (crates.io): the last two minors.
 
 A version stays in the window for at least 12 months after its successor
-ships, and longer while live client-version telemetry still shows it
-([postguard-ops#64]).
+ships.
 
 Read support for stored artifacts is not part of this window. It never drops,
 whatever happens to the SDK version that wrote the bytes.
@@ -178,12 +179,46 @@ what can read.
    file, with the date the clock starts. The next release of the affected
    component repeats it in its changelog entry. The date is what step 3 counts
    from, so an announcement without one does not start the window.
-2. Observe. `pg-pkg` exports `postguard_clients{client,client_version,host,...}`
-   per request, so the versions in the field are measurable. Scraping it is
-   [postguard-ops#64]; while that is not running there is no field data, and
-   nothing gets removed.
-3. Remove. Only once the window has expired and telemetry shows no traffic for
-   what is being removed.
+2. Observe. `pg-pkg` counts every `/v2` request that gets past the rate limiter
+   in `postguard_clients{path,host,client,client_version,status}` (an over-limit
+   request is rejected with 429 before it reaches the counter). What that metric
+   settles, and what it cannot:
+   - Measurable: which routes are called, and which *identified* clients call
+     them. `path` is the route pattern the server matched against its own route
+     table, so route-level traffic is reliable whoever sent it.
+   - Not measurable: which client, and which version, sent a request that does
+     not carry `X-POSTGUARD-CLIENT-VERSION`. The request is still counted, as
+     `client="unknown"`, so the traffic is visible while its sender is not.
+     `@e4a/pg-js` sends the header from `2.1.0` on. `1.x` and `2.0.x` do not,
+     so both share that bucket with probes, scanners, every direct HTTP caller
+     and `E4A.PostGuard` below `0.5.0`, and `2.0.x` is inside the current
+     window rather than on its way out of it. The .NET SDK has sent the header
+     since `0.5.0` and lands as `client="pg-dotnet"`; the releases below that
+     are unidentifiable and still supported, because the window above counts
+     `0.x` as one line. A header that is sent can hide a version too: an
+     embedding host overrides it wholesale, so an add-in reports its own
+     identity and the `pg-js` version underneath it is invisible.
+
+   Scraping the metric is [postguard-ops#71]; while that is not running there
+   is no field data, and nothing gets removed.
+3. Remove. Only once the window has expired, and, for anything observable, only
+   once telemetry shows no traffic for it. A route or a field is observable, so
+   the telemetry condition holds there. For a client version it turns on
+   whether that client sends the header. One that does is counted under its own
+   `client_version`, so the condition holds for it, but a zero on that series
+   is absence only when two further readings agree. That client's
+   `client_version="other"` has to be zero too: `pg-pkg` labels a version
+   `other` when the field is misshapen, and also when that client's budget of
+   `MAX_CLIENT_VERSIONS` series is full (`pg-pkg/src/middleware/metrics.rs`, a
+   cap only a restart releases), so a non-zero `other` means the version may be
+   inside it and the metric has not answered. The client an embedding host
+   reports in its place has to be read as well: the add-ins override the header
+   wholesale, and `pg-pkg` allowlists `pg4ol` and `pg4tb` as clients of their
+   own, so the `pg-js` version an add-in ships lands under neither
+   `client="pg-js"` nor its `other`. One that does not send the header
+   (`@e4a/pg-js` below `2.1.0`, `E4A.PostGuard` below `0.5.0`) has nothing to
+   separate it from the rest of the `unknown` bucket, so there the expired
+   window and step 1's announcement are the whole condition.
 
 Skipping step 2 is how you break the consumers you cannot see.
 
@@ -204,4 +239,4 @@ Skipping step 2 is how you break the consumers you cannot see.
 [postguard-e2e#41]: https://github.com/encryption4all/postguard-e2e/pull/41
 [postguard-dotnet#50]: https://github.com/encryption4all/postguard-dotnet/issues/50
 [postguard-outlook-addon#125]: https://github.com/encryption4all/postguard-outlook-addon/issues/125
-[postguard-ops#64]: https://github.com/privacybydesign/postguard-ops/issues/64
+[postguard-ops#71]: https://github.com/privacybydesign/postguard-ops/issues/71

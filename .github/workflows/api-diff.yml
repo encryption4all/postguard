@@ -19,7 +19,7 @@ name: API diff
 # Escape hatch, not a wall: pg-pkg's routes are versioned (unlike cryptify's,
 # whose gate this mirrors), so a change /v2 cannot take additively goes under a
 # new prefix (/v3/...) with /v2 left running, and /v2 is retired later through
-# the deprecation process in COMPATIBILITY.md, once postguard-ops#64 telemetry
+# the deprecation process in COMPATIBILITY.md, once postguard-ops#71 telemetry
 # shows nobody calls it. A /v3 route added next to /v2 reads as additive, so
 # this gate passes it. Reach for that before reaching for err-ignore.
 #
