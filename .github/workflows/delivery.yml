@@ -139,6 +139,15 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=build-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=build-${{ matrix.name }}
+          # The `runtime` stage is exempt from the cache on purpose (#394).
+          # Its `apt-get update && upgrade` layer is reused until the Dockerfile
+          # text changes, so with it cached the image's package versions are
+          # frozen at whenever that layer was first built — and the scan below
+          # then reports the truth about a layer of unknown age. That is how a
+          # 2026-09-01 build shipped a package a security update had already
+          # fixed. Re-running apt on a slim image costs seconds; the cargo-chef
+          # stages, which are what this cache is for, stay cached.
+          no-cache-filters: runtime
       - name: Export digest
         run: |
           mkdir -p /tmp/digests
@@ -298,6 +307,8 @@ jobs:
           outputs: type=image,name=${{ env.CRYPTIFY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=cryptify-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=cryptify-${{ matrix.name }}
+          # See the same exemption on the pg-pkg build above (#394).
+          no-cache-filters: runtime
       - name: Export digest
         run: |
           mkdir -p /tmp/digests

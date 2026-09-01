@@ -44,11 +44,25 @@ RUN cargo build --profile ${CARGO_PROFILE} --bin pg-pkg
 
 # ── Stage 4: minimal runtime image ───────────────────────────────────────────
 # Use a Debian-based runtime that provides glibc so the builder's binary can run.
-FROM debian:trixie-slim
+# Named so `delivery.yml` can exempt this stage from the build cache with
+# `no-cache-filters`. The Rust stages above are what the cache exists for and
+# stay cached; this one is where package currency lives (see the upgrade below).
+FROM debian:trixie-slim AS runtime
 ARG CARGO_PROFILE=release
 RUN groupadd -r nonroot \
     && useradd -r -g nonroot nonroot
-RUN apt-get update && apt-get --no-install-recommends install -y ca-certificates libssl3 curl \
+# `upgrade` before `install`, and both are load-bearing (#394).
+#
+# The base image ships `libssl3t64` and `openssl-provider-legacy` already
+# installed, and `apt-get install` does not upgrade a package that is already
+# present and satisfying — so installing `libssl3` leaves those two at whatever
+# version the base snapshot froze. That is how DSA-6465-1 (CVE-2026-63073,
+# critical) rode into both published images: the fix was in `trixie-security`,
+# which the base's own sources already enable, and nothing here ever asked for
+# it. `upgrade`, not `dist-upgrade`: a runtime image should not be adding or
+# removing packages to satisfy changed dependencies during a release build.
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get --no-install-recommends install -y ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/${CARGO_PROFILE}/pg-pkg /usr/local/bin/pg-pkg
 COPY entrypoint.sh /entrypoint.sh
