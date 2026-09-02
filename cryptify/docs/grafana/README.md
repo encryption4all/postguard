@@ -26,36 +26,36 @@ as a zero line instead of vanishing from the legend.
 The counters are per process. A cryptify restart resets them to 0, which is why
 every panel goes through `increase()` rather than reading the raw counter.
 
-## The `env` label is supplied by Prometheus, not by cryptify
+## The `env` label is supplied by Alloy, not by cryptify
 
 Nothing in the exporter knows which deployment it is running in. Splitting
-staging from Procolix production is the scrape config's job: attach a static
-`env` label per job, and the dashboard's `Environment` variable picks it up.
+staging from Procolix production is the collector's job, and the two
+environments get there by different paths; Cockpit cannot reach into the
+Procolix network, so neither one is a Prometheus job pulling over HTTPS.
 
-```yaml
-scrape_configs:
-  - job_name: cryptify
-    metrics_path: /metrics
-    scheme: https
-    authorization:
-      type: Bearer
-      credentials_file: /etc/prometheus/cryptify-metrics-token
-    static_configs:
-      - targets: ["cryptify.staging.postguard.eu"]
-        labels:
-          env: staging
-      - targets: ["cryptify.postguard.eu"]
-        labels:
-          env: production
-```
+- **prod** — the `storage.postguard.eu` deployment. Grafana Alloy runs on the
+  Procolix host, installed from apt, and scrapes cryptify locally at
+  `127.0.0.1:8002/metrics` every 60s as `job="cryptify"`, then `remote_write`s
+  to Scaleway Cockpit. Because the scrape is loopback, Alloy needs no bearer
+  token and no TLS. `env` is an Alloy `external_labels` entry, `prod`,
+  alongside `cluster = "procolix-prod"` and `host`.
+- **staging** — the `storage.staging.postguard.eu` deployment. cryptify runs
+  in the Kapsule namespace `postguard-dev`, discovered by the
+  `k8s.grafana.com/*` pod annotations. The `env` label is not attached on
+  this side yet; tracked in
+  [postguard-ops#70](https://github.com/privacybydesign/postguard-ops/issues/70).
+  Do not treat staging as working in this dashboard until that lands.
 
 Set the same token as `metrics_token` in each deployment's `conf/config.toml`
 (or `ROCKET_METRICS_TOKEN` in its environment). With no token configured the
-endpoint answers unauthenticated and logs a warning at startup, so keep it
-restricted to the Prometheus segment at the firewall as well.
+endpoint answers unauthenticated and logs a warning at startup. This is the
+endpoint's own auth, owned separately by #372 — it is not part of either
+collection path above, since both scrape `/metrics` locally rather than
+presenting the token over the network.
 
-Adjust the target hostnames to whatever the two deployments actually resolve to.
-The dashboard does not care about the hostnames, only that `env` is present.
+One trap worth keeping in mind if credentials come up here: Cockpit push
+tokens are not Grafana service-account tokens. The former pushes data in, the
+latter queries it back out.
 
 The two gauges carry no labels of their own, so a raw select distinguishes series
 only by `instance` and `job`. The storage and file-count panels therefore go
