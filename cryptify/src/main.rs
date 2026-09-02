@@ -790,16 +790,10 @@ async fn upload_chunk(
                 GENERIC_INTERNAL_ERROR_MSG.to_owned(),
             )));
         }
-        return Err(Error::PayloadTooLarge(PayloadTooLargeBody {
-            error: format!(
-                "Upload exceeds the per-upload limit of {} bytes",
-                per_upload_limit
-            ),
-            limit: "per_upload",
-            used_bytes: state.uploaded,
-            limit_bytes: per_upload_limit,
-            resets_at: None,
-        }));
+        return Err(Error::PayloadTooLarge(PayloadTooLargeBody::per_upload(
+            per_upload_limit,
+            state.uploaded,
+        )));
     }
 
     let mut file = match OpenOptions::new()
@@ -1180,24 +1174,19 @@ async fn upload_finalize(
             rolling_limit
         );
         if usage.used_bytes.saturating_add(state.uploaded) > rolling_limit {
+            let uploaded = state.uploaded;
             drop(state);
             store.remove(uuid);
             let _ = rocket::tokio::fs::remove_file(Path::new(config.data_dir()).join(uuid)).await;
-            let resets_at = usage
-                .oldest_expires_at
-                .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-            return Err(Error::PayloadTooLarge(PayloadTooLargeBody {
-                error: format!(
+            return Err(Error::PayloadTooLarge(PayloadTooLargeBody::rolling_window(
+                format!(
                     "Sender has exceeded the {}-day rolling limit of {} bytes",
                     config.rolling_window_days(),
                     rolling_limit
                 ),
-                limit: "rolling_window",
-                used_bytes: usage.used_bytes,
-                limit_bytes: rolling_limit,
-                resets_at,
-            }));
+                rolling_limit,
+                uploaded,
+            )));
         }
     }
 
@@ -4312,6 +4301,71 @@ mod integration {
             rejection["limit_bytes"].as_u64(),
             Some(rolling),
             "the limit the 413 names must be the one /limits served"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The rolling 413 must not carry the claimed sender's history: `used_bytes`
+    /// is the rejected upload's own byte count, and `resets_at` is absent.
+    /// Before postguard#387 both fields reported the claimed sender's
+    /// rolling-window usage, an unauthenticated caller's own claim at
+    /// finalize turning the 413 into a usage oracle for any address. Recorded
+    /// usage is deliberately a different number from the rejected upload's
+    /// size: if the two collided, a body that (wrongly) echoed the recorded
+    /// usage back would pass the `used_bytes` assertion below vacuously.
+    #[rocket::async_test]
+    async fn rolling_413_does_not_carry_the_sender_history() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"the rejected upload's own bytes").await;
+        let rolling_limit = sealed.len() as u64 + 10;
+        let (client, dir) = limits_client(&setup, &[("rolling_limit", rolling_limit)]).await;
+
+        let recorded_usage = rolling_limit - 1;
+        assert_ne!(recorded_usage, sealed.len() as u64);
+
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let now = chrono::offset::Utc::now().timestamp();
+        store.record_upload(SENDER_EMAIL.to_owned(), recorded_usage, now);
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(status, Status::Ok);
+        let (status, body) = finalize_response(&client, &uuid, &token, sealed.len() as u64).await;
+
+        assert_eq!(status, Status::PayloadTooLarge);
+        let rejection: serde_json::Value =
+            serde_json::from_str(&body).expect("the 413 carries a JSON body");
+        assert_eq!(rejection["limit"].as_str(), Some("rolling_window"));
+
+        let mut keys: Vec<&str> = rejection
+            .as_object()
+            .expect("a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["error", "limit", "limit_bytes", "used_bytes"],
+            "the rolling 413 must carry no per-tenant history"
+        );
+
+        assert_eq!(
+            rejection["used_bytes"].as_u64(),
+            Some(sealed.len() as u64),
+            "used_bytes must be the rejected upload's own size"
+        );
+        assert_ne!(
+            rejection["used_bytes"].as_u64(),
+            Some(recorded_usage),
+            "used_bytes must not be the sender's recorded usage"
+        );
+        assert!(
+            rejection.get("resets_at").is_none(),
+            "resets_at must be absent from the rolling 413"
         );
 
         let _ = std::fs::remove_dir_all(dir);

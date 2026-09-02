@@ -841,9 +841,12 @@ components:
           type: "integer"
           format: "int64"
           description:
-            "Bytes already attributed to the sender in the relevant window.
-            For per_upload, this is the bytes already written for the current
-            upload before the rejected chunk."
+            "Bytes attributed to *this* rejected upload — never the claimed
+            sender's history. True on both the `per_upload` 413 from a chunk
+            PUT and the `rolling_window` 413 from finalize; the latter used
+            to report the sender's rolling-window total, which let an
+            unauthenticated caller read back another address's usage by
+            claiming it (postguard#387)."
         limit_bytes:
           type: "integer"
           format: "int64"
@@ -852,11 +855,9 @@ components:
           type: "string"
           format: "date-time"
           description:
-            "RFC-3339 timestamp at which the oldest recorded upload falls out
-            of the rolling window, partially freeing quota. Set on the
-            `rolling_window` 413 from finalize; omitted on the `per_upload`
-            413 from a chunk PUT, and when the sender has no recorded
-            uploads."
+            "Unused: no 413 response sets this field. It is never set,
+            because it would disclose the claimed sender's recorded-upload
+            history to an unauthenticated caller (postguard#387)."
     UploadSessionNotFound:
       type: "object"
       required:
