@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.34](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.33...cryptify-v0.1.34) - 2026-09-02
+
+### Other
+
+- *(cryptify)* correct Grafana README to the push-based Alloy pipeline ([#400](https://github.com/encryption4all/postguard/pull/400))
+
 ## [0.1.33](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.32...cryptify-v0.1.33) - 2026-09-01
 
 ### Added
