@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.36](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.35...cryptify-v0.1.36) - 2026-09-03
+
+### Fixed
+
+- *(cryptify)* flush a chunk to disk before its PUT is acknowledged ([#408](https://github.com/encryption4all/postguard/pull/408))
+- *(cryptify)* namespace the rolling-limit accounting key by proof status ([#406](https://github.com/encryption4all/postguard/pull/406))
+
 ## [0.1.35](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.34...cryptify-v0.1.35) - 2026-09-03
 
 ### Fixed
