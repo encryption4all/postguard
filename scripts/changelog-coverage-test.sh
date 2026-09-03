@@ -144,6 +144,122 @@ fi
 rm -rf "$tmp"
 trap - EXIT
 
+# --- undetermined: too many arguments -----------------------------------------
+out=$("$gate" cryptify cryptify-v0.1.35 extra 2>&1) && got=0 || got=$?
+if [[ $got -eq 2 && $out == *usage* ]]; then
+  echo "ok: too many arguments is undetermined, not a pass (exit $got)"
+  pass=$((pass + 1))
+else
+  echo "FAIL: too many arguments -- wanted exit 2 with a usage message, got $got: $out"
+  fail=$((fail + 1))
+fi
+
+# --- identity: a direct-push commit (no PR number) missing from the entry ----
+#
+# Every real fixture above has a PR number on every commit, so the fallback
+# path -- match the (prefix-stripped) description against the entry text --
+# has never actually run. Same reasoning as the boundary case above: build a
+# tmp repo rather than wait for this repo to grow a direct push to a package
+# directory.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+(
+  cd "$tmp"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  mkdir pkg
+  printf '# Changelog\n' >pkg/CHANGELOG.md
+  git add -A
+  git commit -q -m "chore: init"
+  git tag pkg-v0.1.0
+
+  echo change >>pkg/file.txt
+  git add -A
+  git commit -q -m "fix(pkg): a direct push with no PR reference at all"
+  cat >>pkg/CHANGELOG.md <<'EOF'
+
+## [0.2.0]
+
+- *(pkg)* an entry that never mentions the direct push above
+EOF
+  git add -A
+  git commit -q -m "chore(pkg): release v0.2.0 (#2)"
+  git tag pkg-v0.2.0
+)
+out=$(cd "$tmp" && "$gate" pkg pkg-v0.2.0 2>&1) && got=0 || got=$?
+if [[ $got -eq 1 && $out == *"a direct push with no PR reference at all"* ]]; then
+  echo "ok: a direct-push commit absent from the entry is still caught (exit $got)"
+  pass=$((pass + 1))
+else
+  echo "FAIL: direct-push commit missing from the entry -- wanted exit 1 naming it, got $got: $out"
+  fail=$((fail + 1))
+fi
+rm -rf "$tmp"
+trap - EXIT
+
+# --- entry extraction: must stop at the *next* '## [', not run to EOF --------
+#
+# release-plz writes newest entries above older ones, so a tag's own entry
+# always has another '## [' below it once a second release exists. If entry
+# extraction stopped anchoring there, a commit missing from its own release
+# could read as accounted for by unrelated text several releases back. #7 is
+# deliberately reused as a PR number across two entries below -- an
+# impossible collision in this repo's real history, but the only way to make
+# the boundary bug observable without waiting for a coincidence.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+(
+  cd "$tmp"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  mkdir pkg
+  printf '# Changelog\n' >pkg/CHANGELOG.md
+  git add -A
+  git commit -q -m "chore: init"
+  git tag pkg-v0.1.0
+
+  echo change >>pkg/file.txt
+  git add -A
+  git commit -q -m "fix(pkg): first release work (#6)"
+  cat >>pkg/CHANGELOG.md <<'EOF'
+
+## [0.2.0]
+
+- *(pkg)* first release work ([#6](https://github.com/encryption4all/postguard/pull/6))
+- *(pkg)* a decoy mention of a later PR ([#7](https://github.com/encryption4all/postguard/pull/7))
+EOF
+  git add -A
+  git commit -q -m "chore(pkg): release v0.2.0 (#8)"
+  git tag pkg-v0.2.0
+
+  echo change >>pkg/file.txt
+  git add -A
+  git commit -q -m "fix(pkg): a change never actually named in its own entry (#7)"
+  # release-plz prepends the newest entry above the older ones -- insert
+  # 0.3.0's block right after the '# Changelog' heading, same as it would.
+  {
+    head -n1 pkg/CHANGELOG.md
+    printf '\n## [0.3.0]\n\n- *(pkg)* unrelated bullet, no PR reference\n'
+    tail -n +2 pkg/CHANGELOG.md
+  } >pkg/CHANGELOG.md.new
+  mv pkg/CHANGELOG.md.new pkg/CHANGELOG.md
+  git add -A
+  git commit -q -m "chore(pkg): release v0.3.0 (#9)"
+  git tag pkg-v0.3.0
+)
+out=$(cd "$tmp" && "$gate" pkg pkg-v0.3.0 2>&1) && got=0 || got=$?
+if [[ $got -eq 1 && $out == *"[#7]"* ]]; then
+  echo "ok: entry extraction stops at the next '## [' -- an older entry's #7 does not account for 0.3.0's (exit $got)"
+  pass=$((pass + 1))
+else
+  echo "FAIL: entry extraction ran past the next '## [' -- wanted exit 1 naming #7, got $got: $out"
+  fail=$((fail + 1))
+fi
+rm -rf "$tmp"
+trap - EXIT
+
 echo
 echo "changelog-coverage-test: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]
