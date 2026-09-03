@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.34...cryptify-v0.1.35) - 2026-09-03
+
+### Fixed
+
+- *(cryptify)* stop the finalize 413 from leaking a claimed sender's usage ([#404](https://github.com/encryption4all/postguard/pull/404))
+
 ## [0.1.34](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.33...cryptify-v0.1.34) - 2026-09-02
 
 ### Other
