@@ -146,6 +146,8 @@ while IFS= read -r subject; do
   accounted=0
   if [[ ${#prs[@]} -gt 0 ]]; then
     for pr in "${prs[@]}"; do
+      # Boundary-anchored: a plain substring match would count #4 as
+      # accounted for by an entry that only names #48, #400, etc.
       if grep -qE "#${pr}([^0-9]|$)" <<<"$entry"; then
         accounted=1
         break
