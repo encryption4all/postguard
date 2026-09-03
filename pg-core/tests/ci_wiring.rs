@@ -56,6 +56,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
+/// The two workflow files this suite reads. Named rather than hardcoded
+/// inside `workflow_path`/`workflow` (#412) so a second workflow -- first
+/// `delivery.yml`, and whatever comes after it -- gets the same reader
+/// instead of a copy of it.
+const BUILD_WORKFLOW: &str = "build.yml";
+const DELIVERY_WORKFLOW: &str = "delivery.yml";
+
 /// The context string the `main: required checks` ruleset pins (#299). It is
 /// the `name:` of the aggregator job, and the ruleset is the only thing on this
 /// repo that `gh pr merge --admin` cannot walk past, so this string is load
@@ -100,6 +107,16 @@ const SEMVER_FILTER: [&str; 7] = [
 /// was never committed.
 const SEAL_COMMAND: &str = "cargo run --locked -p pg-core --features stream --example seal-samples";
 
+/// The coverage script `delivery.yml`'s `changelog-coverage` job must call
+/// (#412). Pinned so a rename of the script disarms the job -- an empty step
+/// that still runs and still reports green -- rather than failing it.
+const CHANGELOG_COVERAGE_COMMAND: &str = "scripts/changelog-coverage.sh";
+
+/// The coverage script's own regression suite. `build.yml`'s `ruleset-drift`
+/// job must also run this (#412 review) -- see
+/// [`the_changelog_coverage_checkers_self_test_runs_in_ci`].
+const CHANGELOG_COVERAGE_TEST_COMMAND: &str = "scripts/changelog-coverage-test.sh";
+
 /// The Rust reader half: `pg-compat` builds against crates.io `pg-core`, which
 /// is what makes opening the sealed set mean anything. It has its own lockfile,
 /// hence `--locked` again.
@@ -126,13 +143,14 @@ const SEALED_OUTPUT: &str = "needs.wire-compat-rust.outputs.sealed == 'success'"
 /// [`a_retitled_or_retargeted_pr_still_re_runs_the_gates`].
 const PULL_REQUEST_TYPES: [&str; 4] = ["opened", "synchronize", "reopened", "edited"];
 
-fn workflow_path() -> PathBuf {
+fn workflow_path(file: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join(".github/workflows/build.yml")
+        .join(".github/workflows")
+        .join(file)
 }
 
-/// The workflow, with line endings normalised.
+/// The named workflow, with line endings normalised.
 ///
 /// `read_to_string` keeps whatever git wrote, and `core.autocrlf=true` is the
 /// Git for Windows default, so on a Windows checkout the `\njobs:\n` anchor
@@ -142,8 +160,8 @@ fn workflow_path() -> PathBuf {
 /// the tree was checked out. (`pg-pkg/api-description.yaml` needs the
 /// `.gitattributes` route because its anchors are multi-line *content*, which
 /// cannot be normalised away without changing what is being matched.)
-fn workflow() -> String {
-    let path = workflow_path();
+fn workflow(file: &str) -> String {
+    let path = workflow_path(file);
     fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
         .replace("\r\n", "\n")
@@ -156,10 +174,10 @@ fn workflow() -> String {
 /// `pull_request:`) sit at the same indent as a job id and would otherwise match.
 /// A missing job panics rather than returning an empty block, so a deleted job
 /// fails here instead of vacuously satisfying every assertion about it.
-fn job(workflow: &str, id: &str) -> String {
+fn job(workflow: &str, id: &str, file: &str) -> String {
     let body = workflow
         .split_once("\njobs:\n")
-        .unwrap_or_else(|| panic!("no top-level `jobs:` in {}", workflow_path().display()))
+        .unwrap_or_else(|| panic!("no top-level `jobs:` in {}", workflow_path(file).display()))
         .1;
 
     let needle = format!("  {id}:");
@@ -167,7 +185,7 @@ fn job(workflow: &str, id: &str) -> String {
     assert!(
         lines.next().is_some(),
         "{} has no job `{id}:`, so whatever this test asserts about it is vacuous",
-        workflow_path().display(),
+        workflow_path(file).display(),
     );
 
     lines
@@ -223,13 +241,13 @@ fn steps(job: &str) -> Vec<String> {
 /// The single step containing `needle`, or a panic naming what was looked for.
 /// Requiring exactly one match is what stops a duplicated step from letting one
 /// of two copies drift unchecked.
-fn step_with<'a>(steps: &'a [String], needle: &str) -> &'a str {
+fn step_with<'a>(steps: &'a [String], needle: &str, file: &str) -> &'a str {
     let found: Vec<&String> = steps.iter().filter(|step| step.contains(needle)).collect();
     assert_eq!(
         found.len(),
         1,
         "expected exactly one step containing {needle:?} in {}, found {}",
-        workflow_path().display(),
+        workflow_path(file).display(),
         found.len(),
     );
     found[0]
@@ -267,11 +285,13 @@ fn expected(paths: &[&str]) -> BTreeSet<String> {
 /// nothing.
 #[test]
 fn the_required_check_name_still_names_the_aggregator() {
-    let workflow = workflow();
+    let workflow = workflow(BUILD_WORKFLOW);
 
     let named: Vec<String> = job_ids(&workflow)
         .into_iter()
-        .filter(|id| field(&job(&workflow, id), "name").as_deref() == Some(REQUIRED_CHECK))
+        .filter(|id| {
+            field(&job(&workflow, id, BUILD_WORKFLOW), "name").as_deref() == Some(REQUIRED_CHECK)
+        })
         .collect();
 
     assert_eq!(
@@ -283,10 +303,10 @@ fn the_required_check_name_still_names_the_aggregator() {
          the gate instead of breaking it -- rename the ruleset's context in the same change \
          (`gh api repos/encryption4all/postguard/rules/branches/main`).",
         named.len(),
-        workflow_path().display(),
+        workflow_path(BUILD_WORKFLOW).display(),
     );
 
-    let aggregator = job(&workflow, &named[0]);
+    let aggregator = job(&workflow, &named[0], BUILD_WORKFLOW);
     let needs: BTreeSet<String> = field(&aggregator, "needs")
         .expect("the aggregator has no `needs:`")
         .trim_matches(['[', ']'].as_slice())
@@ -346,7 +366,7 @@ fn the_required_check_name_still_names_the_aggregator() {
 /// compared.
 #[test]
 fn a_retitled_or_retargeted_pr_still_re_runs_the_gates() {
-    let workflow = workflow();
+    let workflow = workflow(BUILD_WORKFLOW);
     let triggers = workflow
         .split_once("\njobs:\n")
         .expect("no top-level `jobs:`")
@@ -378,7 +398,11 @@ fn a_retitled_or_retargeted_pr_still_re_runs_the_gates() {
 /// that are the gate.
 #[test]
 fn the_rust_wire_gate_still_seals_and_opens_what_it_claims_to() {
-    let job = job(&workflow(), "wire-compat-rust");
+    let job = job(
+        &workflow(BUILD_WORKFLOW),
+        "wire-compat-rust",
+        BUILD_WORKFLOW,
+    );
     let steps = steps(&job);
 
     assert_eq!(
@@ -389,7 +413,7 @@ fn the_rust_wire_gate_still_seals_and_opens_what_it_claims_to() {
          firing; if the filter was widened on purpose, widen WIRE_FILTER with it",
     );
 
-    let gate = step_with(&steps, "id: gate");
+    let gate = step_with(&steps, "id: gate", BUILD_WORKFLOW);
     assert!(
         gate.contains(PUSH_OVERRIDE),
         "wire-compat-rust's gate step no longer bypasses the path filter on `push`. On a \
@@ -398,7 +422,7 @@ fn the_rust_wire_gate_still_seals_and_opens_what_it_claims_to() {
          green, because \"filter said no\" and \"gate passed\" are the same success (#299)",
     );
 
-    let seal = step_with(&steps, "id: seal");
+    let seal = step_with(&steps, "id: seal", BUILD_WORKFLOW);
     assert!(
         seal.contains(SEAL_COMMAND),
         "wire-compat-rust does not seal with `{SEAL_COMMAND}`, so the bytes the published \
@@ -411,7 +435,7 @@ fn the_rust_wire_gate_still_seals_and_opens_what_it_claims_to() {
          one and forgotten on the other",
     );
 
-    let open = step_with(&steps, OPEN_COMMAND);
+    let open = step_with(&steps, OPEN_COMMAND, BUILD_WORKFLOW);
     assert!(
         open.contains(GATE_CONDITION),
         "wire-compat-rust's open step is not behind `{GATE_CONDITION}`, so it no longer \
@@ -430,7 +454,7 @@ fn the_rust_wire_gate_still_seals_and_opens_what_it_claims_to() {
 /// non-deterministic sealer unable to hide between the two readers.
 #[test]
 fn the_js_wire_gate_still_opens_the_bytes_the_rust_half_sealed() {
-    let job = job(&workflow(), "wire-compat-js");
+    let job = job(&workflow(BUILD_WORKFLOW), "wire-compat-js", BUILD_WORKFLOW);
     let steps = steps(&job);
 
     assert_eq!(
@@ -447,7 +471,7 @@ fn the_js_wire_gate_still_opens_the_bytes_the_rust_half_sealed() {
          uploaded before that job's read step for this reason",
     );
 
-    let download = step_with(&steps, "actions/download-artifact");
+    let download = step_with(&steps, "actions/download-artifact", BUILD_WORKFLOW);
     assert!(
         download.contains(SEALED_OUTPUT),
         "wire-compat-js's download is not gated on `{SEALED_OUTPUT}`, so it no longer keys \
@@ -458,14 +482,14 @@ fn the_js_wire_gate_still_opens_the_bytes_the_rust_half_sealed() {
     // a gate that quietly resolved a different reader would still run, still
     // report, and be measuring a support window COMPATIBILITY.md never declared.
     // Same silent-narrowing class as a dropped filter path.
-    let install = step_with(&steps, "run: npm ci");
+    let install = step_with(&steps, "run: npm ci", BUILD_WORKFLOW);
     assert!(
         install.contains("working-directory: pg-compat-js"),
         "wire-compat-js no longer installs the pinned readers with `npm ci` in pg-compat-js, \
          so the gate measures whatever npm resolves rather than the declared support window",
     );
 
-    let open = step_with(&steps, "run: npm test");
+    let open = step_with(&steps, "run: npm test", BUILD_WORKFLOW);
     assert!(
         open.contains(SEALED_OUTPUT) && open.contains("working-directory: pg-compat-js"),
         "wire-compat-js does not run `npm test` in pg-compat-js behind `{SEALED_OUTPUT}`, so \
@@ -478,7 +502,7 @@ fn the_js_wire_gate_still_opens_the_bytes_the_rust_half_sealed() {
 /// whether the breaking-change declaration still comes off the PR title.
 #[test]
 fn the_semver_gate_still_calls_the_script_this_repo_pins() {
-    let job = job(&workflow(), "semver-checks");
+    let job = job(&workflow(BUILD_WORKFLOW), "semver-checks", BUILD_WORKFLOW);
     let steps = steps(&job);
 
     assert_eq!(
@@ -489,9 +513,9 @@ fn the_semver_gate_still_calls_the_script_this_repo_pins() {
          was widened on purpose, widen SEMVER_FILTER with it",
     );
 
-    step_with(&steps, "./scripts/semver-checks-test.sh");
+    step_with(&steps, "./scripts/semver-checks-test.sh", BUILD_WORKFLOW);
 
-    let check = step_with(&steps, "./scripts/semver-checks.sh");
+    let check = step_with(&steps, "./scripts/semver-checks.sh", BUILD_WORKFLOW);
     assert!(
         check.contains("SEMVER_RELEASE_TYPE: ${{ steps.declared.outputs.release_type }}"),
         "semver-checks no longer passes SEMVER_RELEASE_TYPE from the declaration step, so \
@@ -503,7 +527,7 @@ fn the_semver_gate_still_calls_the_script_this_repo_pins() {
     // be honoured: this repo squash-merges with COMMIT_MESSAGES, so the body
     // never reaches the commit release-plz reads, and a `fix(pg-core):` subject
     // would then cut a patch release of a break the gate had waved through.
-    let declared = step_with(&steps, "id: declared");
+    let declared = step_with(&steps, "id: declared", BUILD_WORKFLOW);
     assert!(
         declared.contains("PR_TITLE: ${{ github.event.pull_request.title }}"),
         "the breaking-change declaration is no longer read off the PR title. It cannot be \
@@ -531,11 +555,11 @@ fn the_semver_gate_still_calls_the_script_this_repo_pins() {
 /// same job runs. This asserts only that the job still calls both.
 #[test]
 fn the_registry_gate_still_reads_the_ruleset_back() {
-    let job = job(&workflow(), "ruleset-drift");
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
     let steps = steps(&job);
 
-    step_with(&steps, "scripts/ruleset-drift.sh");
-    step_with(&steps, "scripts/ruleset-drift-test.sh");
+    step_with(&steps, "scripts/ruleset-drift.sh", BUILD_WORKFLOW);
+    step_with(&steps, "scripts/ruleset-drift-test.sh", BUILD_WORKFLOW);
 
     // Without a checkout there is no script to run, and the job fails in a way
     // that reads like drift rather than like a broken job.
@@ -547,7 +571,7 @@ fn the_registry_gate_still_reads_the_ruleset_back() {
     // The gate reads a live third-party API. If it were ever aggregated into
     // `Wire compat` -- the one context the ruleset requires and `--admin`
     // cannot bypass -- a GitHub API outage would become an unmergeable repo.
-    let aggregator = self::job(&workflow(), "wire-compat");
+    let aggregator = self::job(&workflow(BUILD_WORKFLOW), "wire-compat", BUILD_WORKFLOW);
     assert!(
         !aggregator.contains("ruleset-drift"),
         "the registry gate has been wired into the sole required check. It reads a live API, \
@@ -561,7 +585,7 @@ fn the_registry_gate_still_reads_the_ruleset_back() {
 /// be found, distinct, and non-empty.
 #[test]
 fn every_job_this_test_reads_is_still_found() {
-    let workflow = workflow();
+    let workflow = workflow(BUILD_WORKFLOW);
     let ids = job_ids(&workflow);
 
     for id in [
@@ -574,15 +598,15 @@ fn every_job_this_test_reads_is_still_found() {
         assert!(
             ids.contains(&id.to_owned()),
             "{} has no job `{id}`, and this test is what was supposed to notice",
-            workflow_path().display(),
+            workflow_path(BUILD_WORKFLOW).display(),
         );
-        let body = job(&workflow, id);
+        let body = job(&workflow, id, BUILD_WORKFLOW);
         assert!(
             field(&body, "name").is_some() && !steps(&body).is_empty(),
             "job `{id}` read back as {} lines with no name or no steps, so the reader in \
              this file no longer understands {}",
             body.lines().count(),
-            workflow_path().display(),
+            workflow_path(BUILD_WORKFLOW).display(),
         );
     }
 
@@ -590,9 +614,71 @@ fn every_job_this_test_reads_is_still_found() {
     // distinguishing them, the aggregator test would read the seal job and pass
     // for the wrong reason.
     assert_ne!(
-        job(&workflow, "wire-compat"),
-        job(&workflow, "wire-compat-rust"),
+        job(&workflow, "wire-compat", BUILD_WORKFLOW),
+        job(&workflow, "wire-compat-rust", BUILD_WORKFLOW),
         "the job reader is matching on a prefix, so `wire-compat` and `wire-compat-rust` \
          read back as the same block",
+    );
+}
+
+/// The delivery workflow's coverage half (#412): a released tag's changelog
+/// entry has twice fallen silently short of the commits the tag actually
+/// contains (cryptify-v0.1.36, pg-core-v0.6.5), and nothing caught either time
+/// -- every check stayed green because nothing compared a tag's contents
+/// against its own entry. This is the same instrument the tests above point at
+/// `build.yml`, pointed at `delivery.yml` instead: read the job back and
+/// assert what it runs, rather than trust that a posted patch was applied.
+///
+/// This assertion is RED on this branch, and that is correct. The
+/// `dobby-coder` App has no `workflows: write`, so the `changelog-coverage`
+/// job it looks for is posted as a patch for a maintainer to apply, not pushed
+/// here. A workflow patch that is posted and never applied has already merged
+/// silently twice on this repo (#272, #324) -- do not weaken, `#[ignore]`, or
+/// delete this assertion to make CI green before that patch lands.
+#[test]
+fn the_delivery_workflow_still_checks_changelog_coverage() {
+    let job = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "changelog-coverage",
+        DELIVERY_WORKFLOW,
+    );
+    let steps = steps(&job);
+
+    step_with(&steps, CHANGELOG_COVERAGE_COMMAND, DELIVERY_WORKFLOW);
+}
+
+/// The checker's own regression suite (#412 review): until this step exists,
+/// `scripts/changelog-coverage-test.sh` -- which pins the 0/1/2 exit contract
+/// against fixtures already in this repo's tag history -- runs nowhere in CI.
+/// That is the same defect the gate itself exists to catch, one level up: a
+/// checker nobody runs is indistinguishable from a checker that passes.
+///
+/// Hosted in `ruleset-drift` rather than a new job: that job already pairs a
+/// drift check with an offline self-test of the script behind it
+/// (`scripts/ruleset-drift-test.sh`), so this is the established pattern, not
+/// a new one. Its fixtures are real tags, so the job needs full history and
+/// tags, not the default shallow checkout -- without `fetch-depth: 0` the
+/// checker reports exit 2 (undetermined) on every fixture, which
+/// `changelog-coverage-test.sh` reads as a failure, not a pass.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_delivery_workflow_still_checks_changelog_coverage`]: the
+/// `dobby-coder` App cannot push `.github/workflows/*.yml`, so the `build.yml`
+/// patch that adds this step is posted for a maintainer to apply, not pushed
+/// here.
+#[test]
+fn the_changelog_coverage_checkers_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, CHANGELOG_COVERAGE_TEST_COMMAND, BUILD_WORKFLOW);
+
+    let checkout = step_with(&steps, "actions/checkout", BUILD_WORKFLOW);
+    assert!(
+        checkout.contains("fetch-depth: 0"),
+        "ruleset-drift's checkout no longer fetches full history and tags, so \
+         changelog-coverage-test.sh's fixtures -- real tags in this repo's \
+         history -- make changelog-coverage.sh report exit 2 (undetermined) \
+         on every one of them instead of exercising the case",
     );
 }
