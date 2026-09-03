@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.5...pg-core-v0.6.6) - 2026-09-03
+
+### Added
+
+- assert a released tag's changelog entry lists every commit it contains ([#414](https://github.com/encryption4all/postguard/pull/414))
+
 ## [0.6.5](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.4...pg-core-v0.6.5) - 2026-08-24
 
 ### Added
