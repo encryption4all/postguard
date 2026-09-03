@@ -7,12 +7,43 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct PayloadTooLargeBody {
-    pub error: String,
-    pub limit: &'static str,
-    pub used_bytes: u64,
-    pub limit_bytes: u64,
+    error: String,
+    limit: &'static str,
+    used_bytes: u64,
+    limit_bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resets_at: Option<String>,
+    resets_at: Option<String>,
+}
+
+impl PayloadTooLargeBody {
+    /// `used_bytes` is this upload's own byte count; there is no reset time
+    /// to report for a per-upload rejection.
+    pub fn per_upload(limit_bytes: u64, uploaded: u64) -> Self {
+        PayloadTooLargeBody {
+            error: format!(
+                "Upload exceeds the per-upload limit of {} bytes",
+                limit_bytes
+            ),
+            limit: "per_upload",
+            used_bytes: uploaded,
+            limit_bytes,
+            resets_at: None,
+        }
+    }
+
+    /// `used_bytes` is deliberately the rejected upload's own byte count,
+    /// not the claimed sender's recorded usage, and `resets_at` is never
+    /// set: both would disclose a claimed (unproven) sender's history
+    /// through an unauthenticated finalize call (postguard#387).
+    pub fn rolling_window(error: String, limit_bytes: u64, uploaded: u64) -> Self {
+        PayloadTooLargeBody {
+            error,
+            limit: "rolling_window",
+            used_bytes: uploaded,
+            limit_bytes,
+            resets_at: None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
