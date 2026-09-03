@@ -96,6 +96,54 @@ else
   fail=$((fail + 1))
 fi
 
+# --- boundary: a PR number that is a numeric prefix of another --------------
+#
+# No two PR numbers in this repo's real tag history happen to collide as a
+# numeric prefix/suffix, so this case can't be pinned against a real tag the
+# way the ones above are. Build a two-tag repo in a tmpdir instead -- same
+# spirit as ruleset-drift-test.sh's curl stub: isolate the one input the gate
+# actually reads (git plumbing) so the case is reachable without waiting for
+# it to occur naturally.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+(
+  cd "$tmp"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  mkdir pkg
+  printf '# Changelog\n' >pkg/CHANGELOG.md
+  git add -A
+  git commit -q -m "chore: init"
+  git tag pkg-v0.1.0
+
+  echo change >>pkg/file.txt
+  git add -A
+  git commit -q -m "fix(pkg): unrelated change (#48)"
+  echo change >>pkg/file.txt
+  git add -A
+  git commit -q -m "fix(pkg): the missing change (#4)"
+  cat >>pkg/CHANGELOG.md <<'EOF'
+
+## [0.2.0]
+
+- *(pkg)* unrelated change ([#48](https://github.com/encryption4all/postguard/pull/48))
+EOF
+  git add -A
+  git commit -q -m "chore(pkg): release v0.2.0 (#49)"
+  git tag pkg-v0.2.0
+)
+out=$(cd "$tmp" && "$gate" pkg pkg-v0.2.0 2>&1) && got=0 || got=$?
+if [[ $got -eq 1 && $out == *"[#4]"* ]]; then
+  echo "ok: #4 is not accounted for by an entry that only names #48 (exit $got)"
+  pass=$((pass + 1))
+else
+  echo "FAIL: entry naming only #48 -- wanted exit 1 naming #4, got $got: $out"
+  fail=$((fail + 1))
+fi
+rm -rf "$tmp"
+trap - EXIT
+
 echo
 echo "changelog-coverage-test: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

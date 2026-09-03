@@ -146,7 +146,7 @@ while IFS= read -r subject; do
   accounted=0
   if [[ ${#prs[@]} -gt 0 ]]; then
     for pr in "${prs[@]}"; do
-      if grep -qF "#$pr" <<<"$entry"; then
+      if grep -qE "#${pr}([^0-9]|$)" <<<"$entry"; then
         accounted=1
         break
       fi
