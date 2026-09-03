@@ -817,6 +817,16 @@ async fn upload_chunk(
         Error::InternalServerError(Some(GENERIC_INTERNAL_ERROR_MSG.to_owned()))
     })?;
 
+    // rocket::tokio::fs::File is buffered: write_all only queues the bytes to
+    // the blocking pool and returns once they're copied in, it does not wait
+    // for the write syscall. Dropping the file does not wait either, so
+    // without this flush, upload_finalize can open the file and find the
+    // empty one upload_init created.
+    file.flush().await.map_err(|e| {
+        log::error!("could not flush chunk to upload file: {}", e);
+        Error::InternalServerError(Some(GENERIC_INTERNAL_ERROR_MSG.to_owned()))
+    })?;
+
     let prev_token = headers.cryptify_token;
     let shasum = compute_hash(prev_token.as_bytes(), &body);
     state.cryptify_token = shasum.clone();
@@ -5428,6 +5438,52 @@ mod integration {
 
         let (status, _) = do_chunk(&client, &uuid, &token, b"xxxx", 100).await;
         assert_eq!(status, Status::BadRequest);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `rocket::tokio::fs::File::write_all` queues the write to the blocking
+    /// pool and returns before the syscall completes, so a single chunk PUT
+    /// answering `200` with its bytes not yet on disk is the common case, not
+    /// the rare one — before the `upload_chunk` flush, measured at ~99.6% of
+    /// PUTs. A single check would be a flake in its own right; twenty
+    /// independent ones put a false green at 0.004^20.
+    #[rocket::async_test]
+    async fn a_chunk_is_on_disk_before_the_put_is_acknowledged() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let payload: Vec<u8> = (0..2_000u32).map(|i| (i % 251) as u8).collect();
+        let sealed = seal_payload(&setup, &payload).await;
+        let (client, dir) = test_client(&setup).await;
+
+        let (uuid, mut token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+
+        const CHUNKS: usize = 20;
+        let chunk_len = sealed.len() / CHUNKS;
+        let mut uploaded = 0u64;
+        for i in 0..CHUNKS {
+            let start = i * chunk_len;
+            let end = if i == CHUNKS - 1 {
+                sealed.len()
+            } else {
+                start + chunk_len
+            };
+            let chunk = &sealed[start..end];
+
+            let (status, next_token) = do_chunk(&client, &uuid, &token, chunk, uploaded).await;
+            assert_eq!(status, Status::Ok, "chunk {i} must be accepted");
+            uploaded += chunk.len() as u64;
+            token = next_token;
+
+            let on_disk = std::fs::metadata(dir.join(&uuid))
+                .expect("upload file must exist on disk")
+                .len();
+            assert_eq!(
+                on_disk, uploaded,
+                "chunk {i}: on-disk length must match the bytes the PUT just acknowledged"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(dir);
     }
