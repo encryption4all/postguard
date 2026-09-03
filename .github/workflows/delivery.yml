@@ -37,6 +37,7 @@ jobs:
       id-token: write
     outputs:
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      releases: ${{ steps.release-plz.outputs.releases }}
       pg_pkg_version: ${{ steps.parse.outputs.pg_pkg_version }}
       pg_core_version: ${{ steps.parse.outputs.pg_core_version }}
       pg_ffi_version: ${{ steps.parse.outputs.pg_ffi_version }}
@@ -69,6 +70,90 @@ jobs:
           echo "pg_ffi_version=$PG_FFI_VERSION" >> "$GITHUB_OUTPUT"
           CRYPTIFY_VERSION=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "cryptify") | .version // empty')
           echo "cryptify_version=$CRYPTIFY_VERSION" >> "$GITHUB_OUTPUT"
+
+  # Compares each newly-cut tag's changelog entry against the commits the tag
+  # actually contains (#411, #412): release-plz computes a release PR's
+  # changelog hunk when the PR is opened, so a commit that lands on `main`
+  # while it is still open ships inside the release but never reaches the
+  # entry, and the normal path can never add it after the fact. Deliberately
+  # its own job rather than a step inside release-plz-release, so a coverage
+  # failure is never confusable with a release failure -- finalize-docker and
+  # finalize-cryptify key off release-plz-release's result alone (both
+  # `if: always() && needs.build*.result == 'success'`), so this job cannot
+  # block the image publish even when it fails. The release still ships;
+  # only the record is corrected.
+  changelog-coverage:
+    name: Changelog coverage
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # The coverage checker below walks a commit range and reads a
+          # changelog at a tag, so it needs full history and tags, not just
+          # the commit that triggered this run -- the default shallow
+          # checkout makes it report exit 2 (undetermined) on everything.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check each newly-cut tag's changelog coverage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASES: ${{ needs.release-plz-release.outputs.releases }}
+        run: |
+          set -uo pipefail
+
+          existing_titles=$(gh issue list --state open --label bug --json title --jq '.[].title')
+
+          failed=0
+          while IFS=$'\t' read -r package tag; do
+            [[ -z $package ]] && continue
+
+            output=$(scripts/changelog-coverage.sh "$package" "$tag")
+            code=$?
+
+            if [[ $code -eq 0 ]]; then
+              echo "changelog-coverage: OK -- $tag"
+              continue
+            fi
+
+            if [[ $code -eq 2 ]]; then
+              # Undetermined is not the same failure as "the entry is missing
+              # a commit" -- the script's own contract keeps exit 1 (drift)
+              # and exit 2 (could not tell) apart, and that distinction has to
+              # survive here. Failing rather than warning matters because a
+              # shallow checkout makes the script report exit 2 on every
+              # package: dropping `fetch-depth: 0` above -- a plausible
+              # tidy-up, since most jobs in this file do not need full
+              # history -- would otherwise disable this gate entirely while
+              # it kept reporting green. No issue is filed: an unrunnable
+              # checker is not a changelog gap, and filing one would
+              # misreport it as one.
+              failed=1
+              echo "::error::changelog-coverage.sh could not determine coverage for $package $tag (exit $code) -- the checker did not run, this is not a changelog gap"
+              continue
+            fi
+
+            failed=1
+            echo "::error::$tag's changelog entry is missing commit(s) it contains"
+
+            title="changelog: $tag omits commits it contains"
+            if grep -qFx "$title" <<<"$existing_titles"; then
+              echo "an open issue already names \"$title\", not filing a duplicate"
+              continue
+            fi
+
+            body=$(printf 'The changelog entry for `%s` does not list every commit the tag contains.\n\nMissing, paste-ready:\n\n```\n%s\n```\n' \
+              "$tag" "$output")
+            gh issue create --title "$title" --body "$body" --label bug
+          done < <(jq -r '.[] | [.package_name, .tag] | @tsv' <<<"$RELEASES")
+
+          [[ $failed -eq 0 ]]
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:

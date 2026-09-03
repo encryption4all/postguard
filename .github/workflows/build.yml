@@ -456,6 +456,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The changelog-coverage checker's self-test below (#412) runs
+          # against fixtures that are real tags in this repo's history, so the
+          # job needs full history and tags -- the default shallow checkout
+          # makes the coverage script report exit 2 (undetermined) on every
+          # one of them instead of exercising the case.
+          fetch-depth: 0
 
       - name: Compare the live ruleset against the guard's constant
         shell: bash
@@ -469,3 +476,7 @@ jobs:
       - name: Exit codes still mean what the gate reports
         shell: bash
         run: scripts/ruleset-drift-test.sh
+
+      - name: Test the changelog-coverage checker
+        shell: bash
+        run: scripts/changelog-coverage-test.sh
