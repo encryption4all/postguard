@@ -964,14 +964,35 @@ impl<'r> FromRequest<'r> for FinalizeHeaders {
 /// `Bob@Example.COM`, and the raw spelling is what reaches us as `pub_id`.
 /// Canonicalizing here is what keeps those spellings in one bucket instead of
 /// minting a fresh 14-day quota per capitalization.
+///
+/// The sender arm is further namespaced by what stood behind the key
+/// (postguard#402). On the default tier the ledger is addressed by a value
+/// the caller chooses, so "how many bytes has this address sent" and "how
+/// many bytes has someone *claimed* this address sent" would otherwise be the
+/// same number: an upload could be charged to an identity its uploader never
+/// proved. `proven:<email>` is reached only via a verified [`SenderClaim`],
+/// `unproven:<email>` otherwise, and an unproven claim can therefore never
+/// reach a proven sender's bucket.
 fn accounting_key(
     api_key_tenant: Option<&str>,
     email_attribute: &str,
     sender: Option<&str>,
+    claim: Option<&SenderClaim>,
 ) -> Option<String> {
     match api_key_tenant {
         Some(tenant) => Some(format!("api-key:{}", tenant)),
-        None => sender.map(|s| pg_core::identity::canonicalize(email_attribute, s)),
+        None => match claim {
+            // Taken from the claim, not re-canonicalized from the raw
+            // sender: the point is that the key names the identity that was
+            // actually proved, and the claim already canonicalized it.
+            Some(SenderClaim::Proven { email, .. }) => Some(format!("proven:{}", email)),
+            _ => sender.map(|s| {
+                format!(
+                    "unproven:{}",
+                    pg_core::identity::canonicalize(email_attribute, s)
+                )
+            }),
+        },
     }
 }
 
@@ -1158,10 +1179,36 @@ async fn upload_finalize(
         config.rolling_limit()
     };
     let now_secs = chrono::offset::Utc::now().timestamp();
+
+    let claim = sender_claim(
+        &vk.public_key,
+        &pub_id,
+        uuid,
+        state.challenge.as_deref(),
+        headers.proof.as_deref(),
+        email_attribute,
+    );
+
+    state.sender = sender.clone();
+    state.sender_attributes = sender_attributes;
+    // A proof already established must survive a retried finalize: the client
+    // may repeat the request without the header, and that must not erase what
+    // was proved. Only the verification above produces a `Proven`, so this
+    // keeps the claim written once in the direction that matters.
+    if !matches!(state.sender_claim, Some(SenderClaim::Proven { .. })) {
+        state.sender_claim = Some(claim);
+    }
+
+    // Derived from the state's just-settled claim, never the freshly computed
+    // `claim` above: a retried finalize may repeat the request without the
+    // proof header, and the don't-downgrade rule above keeps an established
+    // `Proven` on the state, so the accounting key must agree with it rather
+    // than recomputing `unproven:` for the retry (postguard#402).
     let accounting_key = accounting_key(
         state.api_key_tenant.as_deref(),
         email_attribute,
         sender.as_deref(),
+        state.sender_claim.as_ref(),
     );
     if let Some(key) = accounting_key.as_deref() {
         let usage = store.get_usage(key, now_secs);
@@ -1188,25 +1235,6 @@ async fn upload_finalize(
                 uploaded,
             )));
         }
-    }
-
-    let claim = sender_claim(
-        &vk.public_key,
-        &pub_id,
-        uuid,
-        state.challenge.as_deref(),
-        headers.proof.as_deref(),
-        email_attribute,
-    );
-
-    state.sender = sender.clone();
-    state.sender_attributes = sender_attributes;
-    // A proof already established must survive a retried finalize: the client
-    // may repeat the request without the header, and that must not erase what
-    // was proved. Only the verification above produces a `Proven`, so this
-    // keeps the claim written once in the direction that matters.
-    if !matches!(state.sender_claim, Some(SenderClaim::Proven { .. })) {
-        state.sender_claim = Some(claim);
     }
 
     // Persist the finalize transition (the sender is only known now) before
@@ -3261,6 +3289,15 @@ mod integration {
     // for exactly this attribute type.
     const SENDER_EMAIL: &str = "bob@example.com";
 
+    /// The bucket an unproven upload from `SENDER_EMAIL` accrues to. The
+    /// integration tests below drive finalize with no proof header, so this
+    /// is the key their pre-seeded usage and their assertions must agree on
+    /// -- not the bare email, which is now a different, unused bucket
+    /// (postguard#402).
+    fn unproven_sender_key() -> String {
+        format!("unproven:{}", SENDER_EMAIL)
+    }
+
     /// Build a figment that points at a freshly-created temp `data_dir` and
     /// disables outgoing email. Each test gets its own directory so they can
     /// run in parallel without clobbering each other's files.
@@ -4210,7 +4247,7 @@ mod integration {
 
         let now = chrono::offset::Utc::now().timestamp();
         store.record_upload(
-            SENDER_EMAIL.to_owned(),
+            unproven_sender_key(),
             rolling_limit - capitalized.len() as u64,
             now,
         );
@@ -4221,7 +4258,7 @@ mod integration {
             "the first upload still fits inside the limit"
         );
         assert_eq!(
-            store.get_usage(SENDER_EMAIL, now).used_bytes,
+            store.get_usage(&unproven_sender_key(), now).used_bytes,
             rolling_limit,
             "the capitalized upload must accrue against the canonical bucket"
         );
@@ -4283,9 +4320,11 @@ mod integration {
             .expect("rolling_limit_bytes is a number");
 
         // Bucket seeded to exactly the limit, so any upload at all crosses it.
+        // Seeded under the unproven bucket: the finalize below sends no proof
+        // header, so that is the one it reads (postguard#402).
         let store = client.rocket().state::<Store>().expect("Store managed");
         let now = chrono::offset::Utc::now().timestamp();
-        store.record_upload(SENDER_EMAIL.to_owned(), rolling, now);
+        store.record_upload(unproven_sender_key(), rolling, now);
 
         let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
         assert_eq!(status, Status::Ok);
@@ -4327,7 +4366,11 @@ mod integration {
 
         let store = client.rocket().state::<Store>().expect("Store managed");
         let now = chrono::offset::Utc::now().timestamp();
-        store.record_upload(SENDER_EMAIL.to_owned(), recorded_usage, now);
+        // Seeded under the unproven bucket, not the bare email: the finalize
+        // below sends no proof header, so `unproven:` is the key it now reads
+        // (postguard#402). This is the only line this change touches -- every
+        // assertion below is unchanged.
+        store.record_upload(unproven_sender_key(), recorded_usage, now);
 
         let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
         assert_eq!(status, Status::Ok);
@@ -4493,57 +4536,95 @@ mod integration {
     /// The accounting key is a function of the *canonical* sender, never of the
     /// spelling the uploader chose. A regression here is silent -- every upload
     /// still succeeds -- so pin the property over a table rather than one case.
+    /// Unproven either way (no claim at all, or a claim that did not verify):
+    /// both must land in the same `unproven:` bucket for one sender.
     #[test]
     fn accounting_key_canonicalizes_the_sender_spelling() {
-        for atype in [
-            "pbdf.sidn-pbdf.email.email",
-            // Test deployments configure a test-scheme type (postguard#236);
-            // the rule is keyed on the tail, so it applies there too.
-            "irma-demo.sidn-pbdf.email.email",
-        ] {
-            for spelling in [
-                "bob@example.com",
-                "Bob@example.com",
-                "bob@Example.COM",
-                "BOB@EXAMPLE.COM",
-                "  bob@example.com  ",
-                "\tbob@example.com\n",
+        for claim in [None, Some(SenderClaim::Unproven)] {
+            for atype in [
+                "pbdf.sidn-pbdf.email.email",
+                // Test deployments configure a test-scheme type (postguard#236);
+                // the rule is keyed on the tail, so it applies there too.
+                "irma-demo.sidn-pbdf.email.email",
             ] {
-                let key = accounting_key(None, atype, Some(spelling));
-                assert_eq!(
-                    key.as_deref(),
-                    Some(SENDER_EMAIL),
-                    "{atype} / {spelling:?} must not get a bucket of its own"
-                );
-                assert_eq!(
-                    key,
-                    Some(pg_core::identity::canonicalize(atype, spelling)),
-                    "the accounting key must stay canonicalize() of the container value"
-                );
+                for spelling in [
+                    "bob@example.com",
+                    "Bob@example.com",
+                    "bob@Example.COM",
+                    "BOB@EXAMPLE.COM",
+                    "  bob@example.com  ",
+                    "\tbob@example.com\n",
+                ] {
+                    let key = accounting_key(None, atype, Some(spelling), claim.as_ref());
+                    let unproven_sender_email = format!("unproven:{}", SENDER_EMAIL);
+                    assert_eq!(
+                        key.as_deref(),
+                        Some(unproven_sender_email.as_str()),
+                        "{claim:?} / {atype} / {spelling:?} must not get a bucket of its own"
+                    );
+                    assert_eq!(
+                        key,
+                        Some(format!(
+                            "unproven:{}",
+                            pg_core::identity::canonicalize(atype, spelling)
+                        )),
+                        "the accounting key must stay canonicalize() of the container value"
+                    );
+                }
             }
         }
     }
 
+    /// A verified claim is charged to the proven bucket, taken from the
+    /// claim's own (already-canonicalized) email -- never re-canonicalized
+    /// from the raw sender spelling, since the point is to name the identity
+    /// the proof actually pinned rather than whatever the container claims.
+    #[test]
+    fn accounting_key_takes_the_proven_email_from_the_claim() {
+        let claim = SenderClaim::Proven {
+            email: SENDER_EMAIL.to_owned(),
+            attrs: vec![],
+        };
+        let key = accounting_key(
+            None,
+            "pbdf.sidn-pbdf.email.email",
+            // A raw sender spelling that disagrees with the claim's email --
+            // must be ignored in favor of the claim.
+            Some("BOB@EXAMPLE.COM"),
+            Some(&claim),
+        );
+        assert_eq!(key.as_deref(), Some("proven:bob@example.com"));
+    }
+
     /// A tenant id is not an identity attribute and has no rule, so it reaches
-    /// the store as the API key named it -- and it still wins over the sender.
+    /// the store as the API key named it -- and it still wins over the sender,
+    /// with no namespace prefix, whatever the proof status.
     #[test]
     fn accounting_key_leaves_the_api_key_tenant_alone() {
-        assert_eq!(
-            accounting_key(
-                Some("Acme-EU"),
-                "pbdf.sidn-pbdf.email.email",
-                Some("Bob@Example.COM")
-            )
-            .as_deref(),
-            Some("api-key:Acme-EU")
-        );
+        let proven = SenderClaim::Proven {
+            email: SENDER_EMAIL.to_owned(),
+            attrs: vec![],
+        };
+        for claim in [None, Some(SenderClaim::Unproven), Some(proven)] {
+            assert_eq!(
+                accounting_key(
+                    Some("Acme-EU"),
+                    "pbdf.sidn-pbdf.email.email",
+                    Some("Bob@Example.COM"),
+                    claim.as_ref(),
+                )
+                .as_deref(),
+                Some("api-key:Acme-EU"),
+                "{claim:?} must not add a namespace to the api-key arm"
+            );
+        }
     }
 
     /// No tenant and no sender is not accounted at all, as before.
     #[test]
     fn accounting_key_is_none_without_a_tenant_or_a_sender() {
         assert_eq!(
-            accounting_key(None, "pbdf.sidn-pbdf.email.email", None),
+            accounting_key(None, "pbdf.sidn-pbdf.email.email", None, None),
             None
         );
     }
@@ -4931,6 +5012,107 @@ mod integration {
             claim_after(uuid).await,
             proven,
             "a later finalize carrying a valid proof must still prove the sender"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The regression this ticket exists for (postguard#402): an upload that
+    /// claims a sender but proves nothing must not be able to charge that
+    /// sender's *proven* bucket. Goes red by charging the victim, not by
+    /// asserting a bare boolean -- the attacker's byte count is deliberately
+    /// different from the victim's recorded usage, so a check that (wrongly)
+    /// let the two collapse into one bucket would still leave the two numbers
+    /// distinguishable here.
+    #[rocket::async_test]
+    async fn unproven_upload_does_not_charge_the_provens_sender_bucket() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        // Bob is the "victim" here: a real, established proven sender.
+        let attack = seal_payload(&setup, b"an attacker's crafted container").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let now = chrono::offset::Utc::now().timestamp();
+        let victim_recorded_usage = 1_000_000u64;
+        assert_ne!(
+            victim_recorded_usage,
+            attack.len() as u64,
+            "the two numbers must differ or the assertions below pass vacuously"
+        );
+        store.record_upload(
+            format!("proven:{}", SENDER_EMAIL),
+            victim_recorded_usage,
+            now,
+        );
+
+        // The attack: a container naming the victim's identity, finalized
+        // with no proof header at all.
+        assert_eq!(
+            upload_sealed(&client, &attack).await,
+            Status::Ok,
+            "an unproven upload is not refused -- rejecting it would break every client that has not shipped the proof header"
+        );
+
+        assert_eq!(
+            store
+                .get_usage(&format!("proven:{}", SENDER_EMAIL), now)
+                .used_bytes,
+            victim_recorded_usage,
+            "the victim's proven bucket must be untouched by an upload that never proved it"
+        );
+        assert_eq!(
+            store.get_usage(&unproven_sender_key(), now).used_bytes,
+            attack.len() as u64,
+            "the attacker's bytes must land in the unproven bucket instead"
+        );
+
+        // The denial the ticket is about: the attacker filling the unproven
+        // bucket must not make the victim's own, later, *proven* finalize
+        // fail the rolling check.
+        let genuine = seal_payload(&setup, b"the victim's own, later upload").await;
+        let claim = upload_with_proof(&client, &genuine, |uuid, challenge| {
+            Some(proof_header(&setup.signing_keys[2], uuid, challenge))
+        })
+        .await;
+        assert!(
+            matches!(claim, Some(SenderClaim::Proven { .. })),
+            "the victim must still be able to prove and upload after the attack"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The mirror of the regression above: a proof-backed upload accrues to
+    /// the proven bucket, and not to the unproven one -- so a client that
+    /// upgrades to sending the header becomes structurally immune to the
+    /// attack, rather than merely sharing a bucket with it.
+    #[rocket::async_test]
+    async fn a_proven_upload_accrues_to_the_provens_bucket() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"a proof-backed upload").await;
+        let (client, dir) = test_client(&setup).await;
+
+        let claim = upload_with_proof(&client, &sealed, |uuid, challenge| {
+            Some(proof_header(&setup.signing_keys[2], uuid, challenge))
+        })
+        .await;
+        assert!(matches!(claim, Some(SenderClaim::Proven { .. })));
+
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let now = chrono::offset::Utc::now().timestamp();
+        assert_eq!(
+            store
+                .get_usage(&format!("proven:{}", SENDER_EMAIL), now)
+                .used_bytes,
+            sealed.len() as u64,
+            "a proven upload must accrue to the proven bucket"
+        );
+        assert_eq!(
+            store.get_usage(&unproven_sender_key(), now).used_bytes,
+            0,
+            "a proven upload must not also accrue to the unproven bucket"
         );
 
         let _ = std::fs::remove_dir_all(dir);
