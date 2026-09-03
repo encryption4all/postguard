@@ -112,6 +112,11 @@ const SEAL_COMMAND: &str = "cargo run --locked -p pg-core --features stream --ex
 /// that still runs and still reports green -- rather than failing it.
 const CHANGELOG_COVERAGE_COMMAND: &str = "scripts/changelog-coverage.sh";
 
+/// The coverage script's own regression suite. `build.yml`'s `ruleset-drift`
+/// job must also run this (#412 review) -- see
+/// [`the_changelog_coverage_checkers_self_test_runs_in_ci`].
+const CHANGELOG_COVERAGE_TEST_COMMAND: &str = "scripts/changelog-coverage-test.sh";
+
 /// The Rust reader half: `pg-compat` builds against crates.io `pg-core`, which
 /// is what makes opening the sealed set mean anything. It has its own lockfile,
 /// hence `--locked` again.
@@ -640,4 +645,40 @@ fn the_delivery_workflow_still_checks_changelog_coverage() {
     let steps = steps(&job);
 
     step_with(&steps, CHANGELOG_COVERAGE_COMMAND, DELIVERY_WORKFLOW);
+}
+
+/// The checker's own regression suite (#412 review): until this step exists,
+/// `scripts/changelog-coverage-test.sh` -- which pins the 0/1/2 exit contract
+/// against fixtures already in this repo's tag history -- runs nowhere in CI.
+/// That is the same defect the gate itself exists to catch, one level up: a
+/// checker nobody runs is indistinguishable from a checker that passes.
+///
+/// Hosted in `ruleset-drift` rather than a new job: that job already pairs a
+/// drift check with an offline self-test of the script behind it
+/// (`scripts/ruleset-drift-test.sh`), so this is the established pattern, not
+/// a new one. Its fixtures are real tags, so the job needs full history and
+/// tags, not the default shallow checkout -- without `fetch-depth: 0` the
+/// checker reports exit 2 (undetermined) on every fixture, which
+/// `changelog-coverage-test.sh` reads as a failure, not a pass.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_delivery_workflow_still_checks_changelog_coverage`]: the
+/// `dobby-coder` App cannot push `.github/workflows/*.yml`, so the `build.yml`
+/// patch that adds this step is posted for a maintainer to apply, not pushed
+/// here.
+#[test]
+fn the_changelog_coverage_checkers_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, CHANGELOG_COVERAGE_TEST_COMMAND, BUILD_WORKFLOW);
+
+    let checkout = step_with(&steps, "actions/checkout", BUILD_WORKFLOW);
+    assert!(
+        checkout.contains("fetch-depth: 0"),
+        "ruleset-drift's checkout no longer fetches full history and tags, so \
+         changelog-coverage-test.sh's fixtures -- real tags in this repo's \
+         history -- make changelog-coverage.sh report exit 2 (undetermined) \
+         on every one of them instead of exercising the case",
+    );
 }
