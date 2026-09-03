@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- *(pg-core, pg-wasm)* the pre-decrypt sender identity is claimed, not verified ([#376](https://github.com/encryption4all/postguard/pull/376))
 - cut CLAUDE.md to orientation and gate its size ([#374](https://github.com/encryption4all/postguard/pull/374))
 - give the wire-compat sample set a non-canonical sender identity ([#367](https://github.com/encryption4all/postguard/pull/367))
 
