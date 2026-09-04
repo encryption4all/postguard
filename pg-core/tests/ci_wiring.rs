@@ -128,6 +128,34 @@ const WASM_PUBLISH_VERSION_COMMAND: &str =
 /// [`the_changelog_coverage_checkers_self_test_runs_in_ci`].
 const CHANGELOG_COVERAGE_TEST_COMMAND: &str = "scripts/changelog-coverage-test.sh";
 
+/// A marker unique to the `node -e` heredoc `Assemble package` used to write
+/// (#427). If this string is still in the step, the manifest is still being
+/// authored inline instead of copied from the committed `pg-wasm/package.json`
+/// -- the two can coexist (a copy added without the heredoc removed), and this
+/// is what would say so.
+const WASM_ASSEMBLE_MANIFEST_HEREDOC_MARKER: &str = "const pkg = {";
+
+/// The two copies `Assemble package` must make instead of writing JSON by hand
+/// or leaving the README out (#427): `pg-wasm/package.json` and
+/// `pg-wasm/README.md`, committed one level up from the `pkg/` working
+/// directory the step runs in.
+const WASM_ASSEMBLE_COPY_MANIFEST: &str = "cp ../package.json package.json";
+const WASM_ASSEMBLE_COPY_README: &str = "cp ../README.md README.md";
+
+/// The pre-publish gate on the assembled directory (#427): a package missing
+/// its README or its manifest fields has been publishable-by-CI's-standards
+/// since this package's first release, because nothing between "wasm-pack
+/// built it" and "npm accepted it" ever looked at what was actually in
+/// `pkg/`. `scripts/wasm-package-check-test.sh` pins the script's own 0/1/2
+/// exit contract; this only asserts the workflow still calls it, and calls it
+/// early enough to matter.
+const WASM_PACKAGE_CHECK_COMMAND: &str = "scripts/wasm-package-check.sh pg-wasm/pkg";
+
+/// The checker's own regression suite, same reasoning as
+/// [`CHANGELOG_COVERAGE_TEST_COMMAND`]: a checker nobody runs is
+/// indistinguishable from a checker that passes.
+const WASM_PACKAGE_CHECK_TEST_COMMAND: &str = "scripts/wasm-package-check-test.sh";
+
 /// The Rust reader half: `pg-compat` builds against crates.io `pg-core`, which
 /// is what makes opening the sealed set mean anything. It has its own lockfile,
 /// hence `--locked` again.
@@ -685,6 +713,90 @@ fn the_wasm_publish_still_takes_its_version_from_pg_core() {
     );
 }
 
+/// The npm page has served the literal placeholder `ERROR: No README data
+/// found!` since this package's first release (#427), because `Assemble
+/// package` never copied one in and always wrote its manifest from a
+/// `node -e` heredoc instead of the committed file. This asserts the fix
+/// actually replaced that step rather than growing a copy alongside it: a
+/// step that copies the committed files *and* still runs the heredoc leaves
+/// whichever runs last as the one that decides what gets published, silently.
+///
+/// This assertion is RED on this branch, and that is correct -- see the
+/// module doc and [`the_delivery_workflow_still_checks_changelog_coverage`]
+/// for why: the `dobby-coder` App cannot push `.github/workflows/*.yml`, so
+/// the patch this looks for is posted on the issue for a maintainer to apply,
+/// not pushed here.
+#[test]
+fn the_wasm_assemble_step_copies_the_committed_manifest_and_readme() {
+    let job = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "publish-wasm",
+        DELIVERY_WORKFLOW,
+    );
+    let steps = steps(&job);
+
+    let assemble = step_with(&steps, "Assemble package", DELIVERY_WORKFLOW);
+
+    assert!(
+        assemble.contains(WASM_ASSEMBLE_COPY_MANIFEST)
+            && assemble.contains(WASM_ASSEMBLE_COPY_README),
+        "publish-wasm's `Assemble package` step no longer copies both the committed \
+         `pg-wasm/package.json` and `pg-wasm/README.md` into the assembled directory, so the \
+         published package is still missing whichever copy is gone",
+    );
+    assert!(
+        !assemble.contains(WASM_ASSEMBLE_MANIFEST_HEREDOC_MARKER),
+        "publish-wasm's `Assemble package` step still writes the manifest from a `node -e` \
+         heredoc alongside the copy of the committed `pg-wasm/package.json` -- whichever runs \
+         last silently decides what actually gets published",
+    );
+}
+
+/// The pre-publish gate (#427): the assembled directory has to pass
+/// `scripts/wasm-package-check.sh` before `npm publish` runs, not after. A
+/// check that runs after publish protects nothing -- the broken package is
+/// already on the registry by the time it would fail.
+///
+/// `steps()` returns the job's steps in file order, so the ordering itself --
+/// not just the presence of both steps -- is what `iter().position` below is
+/// for: a check step present anywhere *after* `Set version and publish` would
+/// satisfy every other assertion in this file while checking a package that
+/// is already published.
+///
+/// Same RED-on-this-branch reasoning as
+/// [`the_wasm_assemble_step_copies_the_committed_manifest_and_readme`].
+#[test]
+fn the_wasm_package_is_checked_before_it_is_published() {
+    let job = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "publish-wasm",
+        DELIVERY_WORKFLOW,
+    );
+    let steps = steps(&job);
+
+    // Requiring exactly one match for each (via `step_with`) before comparing
+    // positions rules out the case a plain `position()` search would miss: a
+    // second, duplicate check step added after publish while the first stays
+    // before it.
+    step_with(&steps, WASM_PACKAGE_CHECK_COMMAND, DELIVERY_WORKFLOW);
+    step_with(&steps, "Set version and publish", DELIVERY_WORKFLOW);
+
+    let check_pos = steps
+        .iter()
+        .position(|step| step.contains(WASM_PACKAGE_CHECK_COMMAND))
+        .expect("just asserted this step exists");
+    let publish_pos = steps
+        .iter()
+        .position(|step| step.contains("Set version and publish"))
+        .expect("just asserted this step exists");
+
+    assert!(
+        check_pos < publish_pos,
+        "publish-wasm runs {WASM_PACKAGE_CHECK_COMMAND:?} at step {check_pos} but publishes at \
+         step {publish_pos} -- a check that runs after `npm publish` protects nothing",
+    );
+}
+
 /// The checker's own regression suite (#412 review): until this step exists,
 /// `scripts/changelog-coverage-test.sh` -- which pins the 0/1/2 exit contract
 /// against fixtures already in this repo's tag history -- runs nowhere in CI.
@@ -719,4 +831,26 @@ fn the_changelog_coverage_checkers_self_test_runs_in_ci() {
          history -- make changelog-coverage.sh report exit 2 (undetermined) \
          on every one of them instead of exercising the case",
     );
+}
+
+/// The wasm-package checker's own regression suite (#427), same reasoning as
+/// [`the_changelog_coverage_checkers_self_test_runs_in_ci`] one level up: a
+/// checker nobody runs in CI is indistinguishable from one that always
+/// passes. Hosted in the same `ruleset-drift` job for the same reason --
+/// that job is already the established home for an offline script self-test,
+/// not a new one -- and it needs no `fetch-depth: 0` of its own, since
+/// `scripts/wasm-package-check-test.sh` builds every fixture it needs in a
+/// temp dir rather than reading this repo's history.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_changelog_coverage_checkers_self_test_runs_in_ci`]: the
+/// `dobby-coder` App cannot push `.github/workflows/*.yml`, so the `build.yml`
+/// patch that adds this step is posted for a maintainer to apply, not pushed
+/// here.
+#[test]
+fn the_wasm_package_checkers_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, WASM_PACKAGE_CHECK_TEST_COMMAND, BUILD_WORKFLOW);
 }

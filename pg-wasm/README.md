@@ -1,5 +1,15 @@
 ## pg-wasm
 
+Most consumers want [`@e4a/pg-js`](https://www.npmjs.com/package/@e4a/pg-js)
+instead of this package directly — it wraps these bindings with a friendlier
+API, and `@e4a/pg-wasm` is its dependency.
+
+This package is published to npm on every `pg-core` release, at `pg-core`'s
+version, and has no release cycle of its own. For what changed in a given
+version, read
+[`pg-core`'s changelog](https://github.com/encryption4all/postguard/blob/main/pg-core/CHANGELOG.md)
+for the same version number.
+
 This package contains automatically generated WebAssembly bindings to call into
 the PostGuard Rust library from Javascript or Typescript. This library has been
 configured to run in a browser via a bundler.
@@ -13,7 +23,7 @@ If not available, please consider using a polyfill, see
 
 ## Usage
 
-See [the examples repo](https://github.com/encryption4all/pg-example)
+See [the examples in `postguard-js`](https://github.com/encryption4all/postguard-js/tree/main/examples)
 for working examples.
 
 ### Fetching keys
@@ -212,39 +222,3 @@ it is advised to perform the sealing and unsealing off the main thread, e.g.,
 in a [Web Worker](https://developer.mozilla.org/en-US/docs/Web/API/Worker).
 [Comlink](https://github.com/GoogleChromeLabs/comlink) can be a useful library
 to communicate between threads.
-
-## Building the package from the crate
-
-### Prerequisites
-
-Make sure the latest version of wasm-pack is installed:
-
-```
-cargo install --git https://github.com/rustwasm/wasm-pack.git
-```
-
-### Building
-
-To build the bindings package, run:
-
-```
-wasm-pack build --release -d pkg/ --out-name index --scope e4a --target bundler
-```
-
-Note that this includes a scope.
-
-### Testings
-
-To test the bindings package, run:
-
-```
-wasm-pack test --chrome --headless
-```
-
-### Publishing (on npm)
-
-The following command publishes the wasm module as a package on npm:
-
-```
-wasm-pack publish
-```
