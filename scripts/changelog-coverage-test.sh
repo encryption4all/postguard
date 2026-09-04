@@ -65,6 +65,18 @@ expect 1 "cryptify-v0.1.36's entry (at the tag) is missing #408" \
 expect 1 "pg-core-v0.6.5's entry (at the tag) is missing #376" \
   pg-core pg-core-v0.6.5 "#376"
 
+# The third instance, and the first this gate found itself rather than a
+# historical sweep -- four days after #411 measured the whole tag history and
+# reported exactly two. Its mechanism is the one to remember, because it is not
+# the "a commit lands while the release PR sits open for days" story that #411
+# wrote down: #421 merged at 08:37:09 and started a `release-plz-pr` run whose
+# job ran 08:37:55-08:45:17 and SUCCEEDED, but release PR #418 was merged at
+# 08:40:42 -- inside that window -- so the update it was computing went into a
+# fresh PR (#423) instead of into the release being cut. The exposure is the
+# length of that job, minutes, and it is the merge that walks into it.
+expect 1 "pg-core-v0.6.6's entry (at the tag) is missing #421" \
+  pg-core pg-core-v0.6.6 "#421"
+
 # --- known-good: the immediately preceding release, corrected already -------
 expect 0 "cryptify-v0.1.35's entry accounts for its one commit" \
   cryptify cryptify-v0.1.35
