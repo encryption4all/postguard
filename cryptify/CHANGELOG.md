@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.37](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.36...cryptify-v0.1.37) - 2026-09-03
+
+### Added
+
+- assert a released tag's changelog entry lists every commit it contains ([#414](https://github.com/encryption4all/postguard/pull/414))
+
+### Fixed
+
+- *(cryptify)* make an unflushed chunk write unrepresentable ([#417](https://github.com/encryption4all/postguard/pull/417))
+
 ## [0.1.36](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.35...cryptify-v0.1.36) - 2026-09-03
 
 ### Fixed
