@@ -112,6 +112,17 @@ const SEAL_COMMAND: &str = "cargo run --locked -p pg-core --features stream --ex
 /// that still runs and still reports green -- rather than failing it.
 const CHANGELOG_COVERAGE_COMMAND: &str = "scripts/changelog-coverage.sh";
 
+/// The line `publish-wasm`'s `Set version and publish` step must run (#419).
+/// `pg-wasm/CHANGELOG.md` is a pointer document whose entire premise is that
+/// the published npm version *is* `pg-core`'s -- that is the only reason
+/// reading `pg-core`'s changelog at the same version number is a correct
+/// answer for `@e4a/pg-wasm`. If someone changes how this step derives the
+/// version -- a literal, a separate input, a computed bump -- the pointer
+/// silently becomes a lie about every published version, and nothing else in
+/// either repo would say so.
+const WASM_PUBLISH_VERSION_COMMAND: &str =
+    r#"npm version "${{ needs.release-plz-release.outputs.pg_core_version }}""#;
+
 /// The coverage script's own regression suite. `build.yml`'s `ruleset-drift`
 /// job must also run this (#412 review) -- see
 /// [`the_changelog_coverage_checkers_self_test_runs_in_ci`].
@@ -645,6 +656,33 @@ fn the_delivery_workflow_still_checks_changelog_coverage() {
     let steps = steps(&job);
 
     step_with(&steps, CHANGELOG_COVERAGE_COMMAND, DELIVERY_WORKFLOW);
+}
+
+/// `pg-wasm/CHANGELOG.md` (#419) is a pointer document, not a per-version
+/// record: it tells a reader to look up `pg-core`'s changelog entry for the
+/// same version number, because `@e4a/pg-wasm` is published to npm on every
+/// `pg-core` release *at `pg-core`'s version*. That premise lives in exactly
+/// one place -- this step's `npm version` call -- and nowhere else in either
+/// repo checks it. If the derivation ever changes to a literal, a separate
+/// input, or a computed bump, the pointer silently becomes a lie about every
+/// version published from that point on, and this is the only thing that
+/// would say so.
+#[test]
+fn the_wasm_publish_still_takes_its_version_from_pg_core() {
+    let job = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "publish-wasm",
+        DELIVERY_WORKFLOW,
+    );
+    let steps = steps(&job);
+
+    let publish = step_with(&steps, "Set version and publish", DELIVERY_WORKFLOW);
+    assert!(
+        publish.contains(WASM_PUBLISH_VERSION_COMMAND),
+        "publish-wasm's `Set version and publish` step no longer sets the npm version from \
+         `pg_core_version`, so `pg-wasm/CHANGELOG.md`'s pointer to pg-core's changelog is no \
+         longer true for versions published from here on",
+    );
 }
 
 /// The checker's own regression suite (#412 review): until this step exists,
