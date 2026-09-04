@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - assert a released tag's changelog entry lists every commit it contains ([#414](https://github.com/encryption4all/postguard/pull/414))
 
+### Other
+
+- *(pg-wasm, pg-core)* make the changelog a pointer to pg-core's, and pin the premise ([#421](https://github.com/encryption4all/postguard/pull/421))
+
 ## [0.6.5](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.4...pg-core-v0.6.5) - 2026-08-24
 
 ### Added
