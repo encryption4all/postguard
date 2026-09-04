@@ -1,6 +1,17 @@
 [workspace]
 git_tag_name = "{{ package }}-v{{ version }}"
 
+# Turning this back on costs ~8½ minutes on every release-plz-pr run (median
+# job duration 8m41s) -- and that run time is the window in which a release
+# PR merge loses a changelog update (#412, #426, #430).
+#
+# It is safe off: pg-core, the only publish = true crate with a library API,
+# is already checked against the same crates.io baseline by the required
+# semver-checks job (scripts/semver-checks.sh). pg-cli, the other publish =
+# true crate, is a binary crate with no lib.rs, so cargo-semver-checks has no
+# exported surface to check for it regardless of this setting.
+semver_check = false
+
 # pg-core: publish to crates.io
 [[package]]
 name = "pg-core"

@@ -511,6 +511,8 @@ fn the_js_wire_gate_still_opens_the_bytes_the_rust_half_sealed() {
 /// The semver gate: it is a shell script in this repo, so the half that can
 /// drift is the workflow's -- whether the script is still called, on what, and
 /// whether the breaking-change declaration still comes off the PR title.
+/// `release-plz.toml`'s `semver_check = false` is safe only while this test
+/// stays green; `pg-core/tests/release_config.rs` pins that setting.
 #[test]
 fn the_semver_gate_still_calls_the_script_this_repo_pins() {
     let job = job(&workflow(BUILD_WORKFLOW), "semver-checks", BUILD_WORKFLOW);
