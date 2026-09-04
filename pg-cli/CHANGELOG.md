@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.11...pg-cli-v0.3.12) - 2026-09-04
+
+### Other
+
+- updated the following local packages: pg-core
+
 ## [0.3.11](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.10...pg-cli-v0.3.11) - 2026-09-03
 
 ### Other
