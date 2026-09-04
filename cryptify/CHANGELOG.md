@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.38](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.37...cryptify-v0.1.38) - 2026-09-04
+
+### Other
+
+- updated the following local packages: pg-core, pg-core
+
 ## [0.1.37](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.36...cryptify-v0.1.37) - 2026-09-03
 
 ### Added
