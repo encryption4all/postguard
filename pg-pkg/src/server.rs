@@ -91,6 +91,38 @@ pub struct ParametersData {
     pub etag: EntityTag,
 }
 
+/// Build the CORS middleware. Shared by the production server and the preflight
+/// tests below, so the header allow-list under test is the one that is deployed.
+/// A copy nobody exercised is how the list stayed four headers long while the
+/// Outlook add-in started sending a fifth (`CRYPTIFY_SOURCE_HEADER`), and every
+/// browser session start from that add-in failed on the preflight for a month.
+///
+/// An origin list containing `"*"` allows any origin; `run` has already logged
+/// which mode is in effect.
+pub(crate) fn build_cors(allowed_origins: &[String]) -> Cors {
+    let mut cors = Cors::default()
+        .allowed_methods(vec!["GET", "POST"])
+        .allowed_header(header::CONTENT_TYPE)
+        .allowed_header(header::AUTHORIZATION)
+        .allowed_header(header::ETAG)
+        .allowed_header(PG_CLIENT_HEADER)
+        // actix-cors answers a preflight that names an unlisted header with a
+        // 400 that carries no `Access-Control-Allow-Origin`, which the browser
+        // reports as a CORS failure and the client sees as a dead PKG. pg-js
+        // sends the same header set to Cryptify and to the PKG, so Cryptify's
+        // channel tag has to pass here even though nothing here reads it.
+        .allowed_header(CRYPTIFY_SOURCE_HEADER)
+        .max_age(86400);
+    if allowed_origins.iter().any(|o| o == "*") {
+        cors = cors.allow_any_origin();
+    } else {
+        for origin in allowed_origins {
+            cors = cors.allowed_origin(origin);
+        }
+    }
+    cors
+}
+
 #[actix_rt::main]
 pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
     let ServerOpts {
@@ -231,23 +263,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
                     req.match_pattern().unwrap_or("-".to_string())
                 }),
             )
-            .wrap({
-                let mut cors = Cors::default()
-                    .allowed_methods(vec!["GET", "POST"])
-                    .allowed_header(header::CONTENT_TYPE)
-                    .allowed_header(header::AUTHORIZATION)
-                    .allowed_header(header::ETAG)
-                    .allowed_header(PG_CLIENT_HEADER)
-                    .max_age(86400);
-                if allow_any_origin {
-                    cors = cors.allow_any_origin();
-                } else {
-                    for origin in &allowed_origins {
-                        cors = cors.allowed_origin(origin);
-                    }
-                }
-                cors
-            });
+            .wrap(build_cors(&allowed_origins));
 
         // Add database pool to app data if available
         if let Some(ref pool) = db_pool {
@@ -375,8 +391,10 @@ pub(crate) mod tests {
     use super::*;
 
     use actix_http::Request;
+    use actix_web::body::MessageBody;
     use actix_web::dev::{Service, ServiceResponse};
-    use actix_web::{test, web, App, Error};
+    use actix_web::http::Method;
+    use actix_web::{test, web, App, Error, HttpResponse};
 
     use crate::middleware::irma_noauth::NoAuth;
     use futures_util::future::Either;
@@ -1534,5 +1552,111 @@ pub(crate) mod tests {
             msg.contains("vaule"),
             "the 400 must name the unknown field, got: {msg}"
         );
+    }
+
+    // ---- CORS preflight -------------------------------------------------
+    //
+    // These wrap `build_cors` itself rather than a test-local copy, so they
+    // fail when the deployed allow-list changes, not when a copy of it does.
+
+    // The CORS middleware wraps the body, so this is not the bare
+    // `ServiceResponse` the other helpers return.
+    async fn cors_app(
+        origins: &[&str],
+    ) -> impl Service<Request, Response = ServiceResponse<impl MessageBody>, Error = Error> {
+        let origins: Vec<String> = origins.iter().map(|o| o.to_string()).collect();
+        test::init_service(
+            App::new()
+                .wrap(build_cors(&origins))
+                .route("/v2/request/start", web::post().to(HttpResponse::Ok)),
+        )
+        .await
+    }
+
+    fn preflight(origin: &str, request_headers: &str) -> test::TestRequest {
+        test::TestRequest::default()
+            .method(Method::OPTIONS)
+            .uri("/v2/request/start")
+            .insert_header(("Origin", origin))
+            .insert_header(("Access-Control-Request-Method", "POST"))
+            .insert_header(("Access-Control-Request-Headers", request_headers))
+    }
+
+    // Regression for the Outlook add-in, which tags uploads with
+    // `X-Cryptify-Source` for Cryptify's metrics. pg-js forwards that header
+    // to the PKG too, so the browser lists it on this preflight. From the
+    // add-in's 2026-07-30 release until this header was allowed, the PKG
+    // answered 400 without `Access-Control-Allow-Origin` and no Yivi session
+    // could start from Outlook on the web, new Outlook on Windows or the Mac
+    // task pane.
+    #[actix_web::test]
+    async fn preflight_allows_x_cryptify_source() {
+        let app = cors_app(&["https://addin.postguard.eu"]).await;
+
+        let resp = preflight(
+            "https://addin.postguard.eu",
+            "content-type,x-postguard-client-version,x-cryptify-source",
+        )
+        .send_request(&app)
+        .await;
+
+        assert!(
+            resp.status().is_success(),
+            "preflight status {}",
+            resp.status()
+        );
+        assert_eq!(
+            resp.headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("https://addin.postguard.eu")
+        );
+        let allow_headers = resp
+            .headers()
+            .get("access-control-allow-headers")
+            .expect("preflight advertises the allowed headers")
+            .to_str()
+            .unwrap()
+            .to_ascii_lowercase();
+        for expected in [
+            "content-type",
+            "x-postguard-client-version",
+            "x-cryptify-source",
+        ] {
+            assert!(
+                allow_headers.contains(expected),
+                "Access-Control-Allow-Headers `{allow_headers}` lacks {expected}"
+            );
+        }
+    }
+
+    // The list is still an allow-list: a header nobody sends is refused, and
+    // the refusal has the shape browsers report (no allow-origin header).
+    #[actix_web::test]
+    async fn preflight_refuses_unlisted_header() {
+        let app = cors_app(&["https://addin.postguard.eu"]).await;
+
+        let resp = preflight(
+            "https://addin.postguard.eu",
+            "content-type,x-not-a-postguard-header",
+        )
+        .send_request(&app)
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(resp.headers().get("access-control-allow-origin").is_none());
+    }
+
+    // Allowing the header does not loosen the origin check.
+    #[actix_web::test]
+    async fn preflight_refuses_unlisted_origin() {
+        let app = cors_app(&["https://addin.postguard.eu"]).await;
+
+        let resp = preflight("https://evil.example", "content-type,x-cryptify-source")
+            .send_request(&app)
+            .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(resp.headers().get("access-control-allow-origin").is_none());
     }
 }

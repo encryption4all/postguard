@@ -19,6 +19,14 @@ use twox_hash::XxHash64;
 
 pub(crate) const PG_CLIENT_HEADER: &str = "X-POSTGUARD-CLIENT-VERSION";
 
+/// Channel tag Cryptify reads for its per-channel upload metrics. The PKG never
+/// reads it, but pg-js attaches a caller's headers to every request it makes,
+/// to Cryptify and to the PKG alike, so a browser client that sets this header
+/// for Cryptify also lists it on the PKG's CORS preflight. It is allowed there
+/// (see `server::build_cors`) so a header meant for one PostGuard service cannot
+/// lock a browser client out of another.
+pub(crate) const CRYPTIFY_SOURCE_HEADER: &str = "X-Cryptify-Source";
+
 // Strongly-typed wrappers for IRMA URL and token so actix-web can store both as distinct Data<T>.
 #[derive(Debug, Clone)]
 pub(crate) struct IrmaUrl(pub String);
