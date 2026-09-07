@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.6...pg-core-v0.6.7) - 2026-09-07
+
+### Added
+
+- *(pg-wasm)* ship the README, commit the manifest, refuse to publish without either ([#428](https://github.com/encryption4all/postguard/pull/428))
+
+### Fixed
+
+- *(release-plz)* stop recomputing a semver check the required gate already ran ([#431](https://github.com/encryption4all/postguard/pull/431))
+
+### Other
+
+- *(pg-core)* record the commit pg-core-v0.6.6's changelog omitted ([#424](https://github.com/encryption4all/postguard/pull/424))
+
 ## [0.6.6](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.5...pg-core-v0.6.6) - 2026-09-03
 
 ### Added
