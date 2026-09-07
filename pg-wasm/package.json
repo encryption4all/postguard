@@ -1,0 +1,31 @@
+{
+  "name": "@e4a/pg-wasm",
+  "type": "module",
+  "collaborators": [
+    "Leon Botros <l.botros@cs.ru.nl>",
+    "Bas Westerbaan <bas@westerbaan.name>"
+  ],
+  "description": "PostGuard WebAssembly bindings for the browser",
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/encryption4all/postguard.git",
+    "directory": "pg-wasm"
+  },
+  "homepage": "https://github.com/encryption4all/postguard/tree/main/pg-wasm#readme",
+  "exports": {
+    ".": {
+      "types": "./bundler/index.d.ts",
+      "import": "./bundler/index.js"
+    },
+    "./web": {
+      "types": "./web/index.d.ts",
+      "import": "./web/index.js"
+    }
+  },
+  "main": "./bundler/index.js",
+  "types": "./bundler/index.d.ts",
+  "sideEffects": ["./bundler/index.js", "./snippets/*"],
+  "keywords": ["ibe", "encryption", "ecc"]
+}

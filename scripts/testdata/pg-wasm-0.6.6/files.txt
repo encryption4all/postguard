@@ -1,0 +1,11 @@
+bundler/index_bg.js
+bundler/index_bg.wasm
+bundler/index_bg.wasm.d.ts
+bundler/index.d.ts
+bundler/index.js
+bundler/LICENSE.md
+web/index_bg.wasm
+web/index_bg.wasm.d.ts
+web/index.d.ts
+web/index.js
+web/LICENSE.md
