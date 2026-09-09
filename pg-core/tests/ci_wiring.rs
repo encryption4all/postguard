@@ -107,10 +107,25 @@ const SEMVER_FILTER: [&str; 7] = [
 /// was never committed.
 const SEAL_COMMAND: &str = "cargo run --locked -p pg-core --features stream --example seal-samples";
 
-/// The coverage script `delivery.yml`'s `changelog-coverage` job must call
-/// (#412). Pinned so a rename of the script disarms the job -- an empty step
-/// that still runs and still reports green -- rather than failing it.
-const CHANGELOG_COVERAGE_COMMAND: &str = "scripts/changelog-coverage.sh";
+/// The reporter script `delivery.yml`'s `changelog-coverage` job must call, as
+/// one bare command (#429). The job used to run the reporting loop -- reading
+/// existing issue titles, iterating tags, filing issues -- inline in YAML, and
+/// a `run:` block with no `shell:` key executes as `bash -e {0}`:
+/// `code=$(scripts/changelog-coverage.sh ...); code=$?` is a plain assignment
+/// whose exit status is the substitution's, so a non-zero exit there aborted
+/// the step before `code=$?` was ever reached. That is why #412's first real
+/// finding (`pg-core-v0.6.6` omitting #421) filed no issue. Pinned so a rename
+/// of the script disarms the job -- an empty step that still runs and still
+/// reports green -- rather than failing it, same reasoning as #412.
+const CHANGELOG_COVERAGE_REPORT_COMMAND: &str = "scripts/changelog-coverage-report.sh";
+
+/// What the reporting loop would look like if it moved back into the YAML
+/// (#429): the `gh issue create` call and the `existing_titles` read that used
+/// to sit above it. Either one back in the step means the hazard the reporter
+/// script exists to remove -- a fallible read or write inside a `run:` block
+/// nothing correctly branches on -- is back too, whatever the reporter script
+/// itself still does.
+const CHANGELOG_COVERAGE_LOOP_MARKERS: [&str; 2] = ["gh issue create", "existing_titles"];
 
 /// The line `publish-wasm`'s `Set version and publish` step must run (#419).
 /// `pg-wasm/CHANGELOG.md` is a pointer document whose entire premise is that
@@ -127,6 +142,13 @@ const WASM_PUBLISH_VERSION_COMMAND: &str =
 /// job must also run this (#412 review) -- see
 /// [`the_changelog_coverage_checkers_self_test_runs_in_ci`].
 const CHANGELOG_COVERAGE_TEST_COMMAND: &str = "scripts/changelog-coverage-test.sh";
+
+/// The reporter script's own regression suite (#429), same reasoning as
+/// [`CHANGELOG_COVERAGE_TEST_COMMAND`] one level up: a reporter nobody runs in
+/// CI is indistinguishable from one that always exits 0. `build.yml`'s
+/// `ruleset-drift` job must also run this -- see
+/// [`the_changelog_coverage_reporters_self_test_runs_in_ci`].
+const CHANGELOG_COVERAGE_REPORT_TEST_COMMAND: &str = "scripts/changelog-coverage-report-test.sh";
 
 /// A marker unique to the `node -e` heredoc `Assemble package` used to write
 /// (#427). If this string is still in the step, the manifest is still being
@@ -662,13 +684,22 @@ fn every_job_this_test_reads_is_still_found() {
     );
 }
 
-/// The delivery workflow's coverage half (#412): a released tag's changelog
-/// entry has twice fallen silently short of the commits the tag actually
-/// contains (cryptify-v0.1.36, pg-core-v0.6.5), and nothing caught either time
-/// -- every check stayed green because nothing compared a tag's contents
-/// against its own entry. This is the same instrument the tests above point at
-/// `build.yml`, pointed at `delivery.yml` instead: read the job back and
-/// assert what it runs, rather than trust that a posted patch was applied.
+/// The delivery workflow's coverage half (#412, #429): a released tag's
+/// changelog entry has twice fallen silently short of the commits the tag
+/// actually contains (cryptify-v0.1.36, pg-core-v0.6.5), and nothing caught
+/// either time -- every check stayed green because nothing compared a tag's
+/// contents against its own entry. This is the same instrument the tests
+/// above point at `build.yml`, pointed at `delivery.yml` instead: read the job
+/// back and assert what it runs, rather than trust that a posted patch was
+/// applied.
+///
+/// #429 moved the reporting loop that used to live in this step's YAML into
+/// scripts/changelog-coverage-report.sh -- see
+/// [`CHANGELOG_COVERAGE_REPORT_COMMAND`] for why. So this now asserts two
+/// things: that the step is the bare reporter invocation, and that the loop
+/// has not crept back into the YAML alongside it. A step that both calls the
+/// reporter *and* still contains `gh issue create` or `existing_titles` has
+/// the hazard back, whatever the reporter script itself does.
 ///
 /// This assertion is RED on this branch, and that is correct. The
 /// `dobby-coder` App has no `workflows: write`, so the `changelog-coverage`
@@ -685,7 +716,56 @@ fn the_delivery_workflow_still_checks_changelog_coverage() {
     );
     let steps = steps(&job);
 
-    step_with(&steps, CHANGELOG_COVERAGE_COMMAND, DELIVERY_WORKFLOW);
+    let check = step_with(&steps, CHANGELOG_COVERAGE_REPORT_COMMAND, DELIVERY_WORKFLOW);
+
+    for marker in CHANGELOG_COVERAGE_LOOP_MARKERS {
+        assert!(
+            !check.contains(marker),
+            "the `changelog-coverage` step contains {marker:?} -- the reporting loop is back \
+             in the YAML instead of staying inside scripts/changelog-coverage-report.sh, which \
+             is the defect #429 exists to remove",
+        );
+    }
+}
+
+/// The shape underneath #429, generalized (decision 2): a `run:` block with no
+/// `shell:` key executes as `bash -e {0}`, so `x=$(cmd); code=$?` aborts the
+/// step at `cmd`'s non-zero exit, before `code=$?` is ever reached -- the
+/// exact defect that made #412's first finding (`pg-core-v0.6.6` omitting
+/// #421) file no issue. `delivery.yml:118`'s `code=$?` was the sole
+/// occurrence of this shape anywhere in `.github/workflows/` before #429
+/// moved the reporting loop it belonged to into a script. This is what stops
+/// the shape growing back, in that job or any other, in either workflow.
+///
+/// This does **not** catch `delivery.yml:111`'s shape --
+/// `existing_titles=$(gh issue list ...)`, a bare assignment from a fallible
+/// command that nothing ever branches on at all. That is a different failure
+/// than capturing `$?` and losing the branch to `-e`: there is no `$?`
+/// capture to grep for, only a command substitution nothing reads the status
+/// of. #429 moved that read into scripts/changelog-coverage-report.sh, where
+/// it is branched on explicitly (see [`CHANGELOG_COVERAGE_REPORT_COMMAND`]);
+/// nothing in this suite catches the bare-fallible-assignment shape anywhere
+/// else in the tree, and a future reader should know that is this gate's edge
+/// rather than assume it covers the class.
+#[test]
+fn no_workflow_step_captures_dollar_question_mark() {
+    for file in [BUILD_WORKFLOW, DELIVERY_WORKFLOW] {
+        let workflow = workflow(file);
+        for id in job_ids(&workflow) {
+            let job = job(&workflow, &id, file);
+            for step in steps(&job) {
+                assert!(
+                    !step.contains("=$?"),
+                    "job `{id}` in {} has a step that captures `$?`. A `run:` block with no \
+                     `shell:` key executes as `bash -e {{0}}`, so a non-zero exit from the \
+                     command immediately before the capture aborts the step before the capture \
+                     is ever reached -- see #429, which removed the one occurrence this repo \
+                     had (delivery.yml's old inline changelog-coverage loop)",
+                    workflow_path(file).display(),
+                );
+            }
+        }
+    }
 }
 
 /// `pg-wasm/CHANGELOG.md` (#419) is a pointer document, not a per-version
@@ -832,6 +912,44 @@ fn the_changelog_coverage_checkers_self_test_runs_in_ci() {
          changelog-coverage-test.sh's fixtures -- real tags in this repo's \
          history -- make changelog-coverage.sh report exit 2 (undetermined) \
          on every one of them instead of exercising the case",
+    );
+}
+
+/// The reporter's own regression suite (#429), same reasoning as
+/// [`the_changelog_coverage_checkers_self_test_runs_in_ci`] just above: a
+/// reporter nobody runs in CI is indistinguishable from one that always
+/// exits 0. Hosted in the same `ruleset-drift` job, the established home for
+/// an offline script self-test, and it depends on that job's
+/// `fetch-depth: 0` for the same reason its sibling does:
+/// scripts/changelog-coverage-report-test.sh stubs only `gh` and drives the
+/// real scripts/changelog-coverage.sh over real tags in this repo's history,
+/// so a shallow checkout makes every one of those fixtures report exit 2
+/// instead of exercising the case.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_delivery_workflow_still_checks_changelog_coverage`]: the
+/// `dobby-coder` App cannot push `.github/workflows/*.yml`, so the `build.yml`
+/// patch that adds this step is posted for a maintainer to apply, not pushed
+/// here.
+#[test]
+fn the_changelog_coverage_reporters_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(
+        &steps,
+        CHANGELOG_COVERAGE_REPORT_TEST_COMMAND,
+        BUILD_WORKFLOW,
+    );
+
+    let checkout = step_with(&steps, "actions/checkout", BUILD_WORKFLOW);
+    assert!(
+        checkout.contains("fetch-depth: 0"),
+        "ruleset-drift's checkout no longer fetches full history and tags, so \
+         changelog-coverage-report-test.sh's fixtures -- real tags in this \
+         repo's history, driven through the real scripts/changelog-coverage.sh \
+         -- make it report exit 2 (undetermined) on every one of them instead \
+         of exercising the case",
     );
 }
 
