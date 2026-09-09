@@ -484,3 +484,7 @@ jobs:
       - name: Test the wasm-package checker
         shell: bash
         run: scripts/wasm-package-check-test.sh
+
+      - name: Test the changelog-coverage reporter
+        shell: bash
+        run: scripts/changelog-coverage-report-test.sh

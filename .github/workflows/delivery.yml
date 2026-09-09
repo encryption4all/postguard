@@ -105,55 +105,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RELEASES: ${{ needs.release-plz-release.outputs.releases }}
-        run: |
-          set -uo pipefail
-
-          existing_titles=$(gh issue list --state open --label bug --json title --jq '.[].title')
-
-          failed=0
-          while IFS=$'\t' read -r package tag; do
-            [[ -z $package ]] && continue
-
-            output=$(scripts/changelog-coverage.sh "$package" "$tag")
-            code=$?
-
-            if [[ $code -eq 0 ]]; then
-              echo "changelog-coverage: OK -- $tag"
-              continue
-            fi
-
-            if [[ $code -eq 2 ]]; then
-              # Undetermined is not the same failure as "the entry is missing
-              # a commit" -- the script's own contract keeps exit 1 (drift)
-              # and exit 2 (could not tell) apart, and that distinction has to
-              # survive here. Failing rather than warning matters because a
-              # shallow checkout makes the script report exit 2 on every
-              # package: dropping `fetch-depth: 0` above -- a plausible
-              # tidy-up, since most jobs in this file do not need full
-              # history -- would otherwise disable this gate entirely while
-              # it kept reporting green. No issue is filed: an unrunnable
-              # checker is not a changelog gap, and filing one would
-              # misreport it as one.
-              failed=1
-              echo "::error::changelog-coverage.sh could not determine coverage for $package $tag (exit $code) -- the checker did not run, this is not a changelog gap"
-              continue
-            fi
-
-            failed=1
-            echo "::error::$tag's changelog entry is missing commit(s) it contains"
-
-            title="changelog: $tag omits commits it contains"
-            if grep -qFx "$title" <<<"$existing_titles"; then
-              echo "an open issue already names \"$title\", not filing a duplicate"
-              continue
-            fi
-
-            body=$(printf 'The changelog entry for `%s` does not list every commit the tag contains.\n\nMissing, paste-ready:\n\n```\n%s\n```\n' \
-              "$tag" "$output")
-            gh issue create --title "$title" --body "$body" --label bug
-          done < <(jq -r '.[] | [.package_name, .tag] | @tsv' <<<"$RELEASES")
-
-          [[ $failed -eq 0 ]]
+        run: scripts/changelog-coverage-report.sh
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:
