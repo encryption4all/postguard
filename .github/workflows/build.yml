@@ -90,21 +90,35 @@ jobs:
           - browser: safari
             os: macos-latest
     runs-on: ${{ matrix.os }}
+    # The suite is 16 tests and finishes in ~25s; a passing job is 2-6 minutes,
+    # almost all of it `cargo install wasm-pack` and the release build. 12
+    # minutes is ~2x the slowest observed success. The previous budget was 20
+    # minutes inside a `nick-fields/retry` wrapper, which on 2026-09-03 turned
+    # three wedged safari sessions into ~22-minute jobs with ~17 minutes of
+    # silence each (#416).
+    timeout-minutes: 12
     env:
-      WASM_BINDGEN_TEST_TIMEOUT: 120
+      # ~6x the slowest single test (~5s). This is a per-test timer running
+      # inside the browser page, so it does NOT bound a wedged safaridriver
+      # session -- that is what `timeout-minutes` above is for. It was 120,
+      # which is both 24x the slowest test and, at 16 tests, a 32-minute
+      # worst case that the job budget could never reach.
+      WASM_BINDGEN_TEST_TIMEOUT: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install
         run: cargo install wasm-pack
       - if: ${{ matrix.browser == 'firefox' }}
         run: sudo apt update && sudo apt install firefox
+      # A plain `run:`, not `nick-fields/retry`. The wrapper retried genuine
+      # non-zero exits (hiding a real failure behind a second roll) and did
+      # NOT retry a timeout, which is the only shape this job has ever hit
+      # -- `retry_on: error` excludes timeouts, so `max_attempts: 2` never
+      # engaged. Dropping it also removes the literal backslash the action
+      # input required (`--\${{ matrix.browser }}`), which survived into the
+      # resolved command and only worked because a shell stripped it.
       - name: Run wasm-pack browser tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 2
-          retry_on: error
-          timeout_minutes: 20
-          command: wasm-pack test --release --headless --\${{ matrix.browser }} ./pg-wasm
+        run: wasm-pack test --release --headless --${{ matrix.browser }} ./pg-wasm
 
   # ---------------------------------------------------------------------------
   # Wire compatibility: HEAD-sealed containers must open with published readers

@@ -178,6 +178,28 @@ const WASM_PACKAGE_CHECK_COMMAND: &str = "scripts/wasm-package-check.sh pg-wasm/
 /// indistinguishable from a checker that passes.
 const WASM_PACKAGE_CHECK_TEST_COMMAND: &str = "scripts/wasm-package-check-test.sh";
 
+/// `test-wasm-browsers`'s corrected step (#416): a bare `run:` invoking
+/// `wasm-pack test` directly, with the browser flag intact and no backslash
+/// ahead of it. The backslash at `build.yml:107` was an artifact of
+/// `nick-fields/retry@v3`'s `command:` input needing it escaped, and it only
+/// ever worked because the action handed the string to a shell that stripped
+/// it before `wasm-pack` saw it -- a bare `run:` gets no such stripping, so
+/// this exact line is what the fix has to produce, not just "no backslash
+/// somewhere".
+const WASM_BROWSER_TEST_RUN_COMMAND: &str =
+    "run: wasm-pack test --release --headless --${{ matrix.browser }} ./pg-wasm";
+
+/// The pre-#416 hazard itself, checked for separately from
+/// [`WASM_BROWSER_TEST_RUN_COMMAND`] so a step that grew a second, backslashed
+/// copy alongside the corrected one -- which would still satisfy the positive
+/// check above -- fails here instead of passing silently.
+const WASM_BROWSER_TEST_BACKSLASH_MARKER: &str = "--\\${{ matrix.browser }}";
+
+/// The three browsers #416 decided `test-wasm-browsers`' matrix keeps,
+/// `safari` included -- the one leg that actually wedged. Pinned so quietly
+/// narrowing the matrix fails loudly instead of just shrinking it.
+const WASM_BROWSER_MATRIX: [&str; 3] = ["chrome", "firefox", "safari"];
+
 /// The Rust reader half: `pg-compat` builds against crates.io `pg-core`, which
 /// is what makes opening the sealed set mean anything. It has its own lockfile,
 /// hence `--locked` again.
@@ -973,4 +995,72 @@ fn the_wasm_package_checkers_self_test_runs_in_ci() {
     let steps = steps(&job);
 
     step_with(&steps, WASM_PACKAGE_CHECK_TEST_COMMAND, BUILD_WORKFLOW);
+}
+
+/// #416, implemented: `test-wasm-browsers` gets an honest job-level timeout
+/// instead of the `nick-fields/retry@v3` wrapper that inverted its own
+/// failure handling.
+///
+/// On 2026-09-03 a wedged safari session ran three times -- once on a push to
+/// `main`, twice on PRs -- each burning ~22 minutes with ~17 of them in total
+/// silence, because `retry_on: error` never engaged `max_attempts: 2`: a
+/// timeout is not `error` in that action's taxonomy. (A chrome run the wrapper
+/// did retry correctly, `Child_process exited with error code 1`, shows the
+/// other half of the inversion -- it re-rolls a genuine failure it should
+/// have just reported.) The fix is a job-level `timeout-minutes` a maintainer
+/// applies directly (`dobby-coder` has no `workflows: write`) and a bare
+/// `run:` in place of the action, which needs no backslash ahead of
+/// `${{ matrix.browser }}` because there is no longer a shell-stripped action
+/// input for the backslash to survive as an artifact of.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_wasm_assemble_step_copies_the_committed_manifest_and_readme`]: the
+/// workflow patch is posted on the issue for a maintainer to apply, not
+/// pushed here.
+#[test]
+fn the_wasm_browser_job_has_an_honest_timeout_and_no_retry_wrapper() {
+    let job = job(
+        &workflow(BUILD_WORKFLOW),
+        "test-wasm-browsers",
+        BUILD_WORKFLOW,
+    );
+
+    assert!(
+        field(&job, "timeout-minutes").is_some(),
+        "test-wasm-browsers has no job-level `timeout-minutes`, so a wedged browser session \
+         runs to GitHub's 6-hour default -- the pre-#416 failure amplified roughly 18x over \
+         even the retry wrapper's own 20-minute budget",
+    );
+
+    assert!(
+        !job.contains("uses: nick-fields/retry"),
+        "test-wasm-browsers still uses `nick-fields/retry`, which re-rolls a genuine test \
+         failure (`retry_on: error`) but never retries the one failure shape this job has \
+         actually hit -- a timeout is not `error` in that action's taxonomy, so \
+         `max_attempts: 2` never engaged on 2026-09-03's three wedged safari runs",
+    );
+
+    let steps = steps(&job);
+    let run = step_with(&steps, "wasm-pack test", BUILD_WORKFLOW);
+
+    assert!(
+        run.contains(WASM_BROWSER_TEST_RUN_COMMAND),
+        "test-wasm-browsers no longer runs {WASM_BROWSER_TEST_RUN_COMMAND:?} as a bare `run:` \
+         step -- either the browser flag changed or the step is wrapped in an action again",
+    );
+    assert!(
+        !run.contains(WASM_BROWSER_TEST_BACKSLASH_MARKER),
+        "test-wasm-browsers' `wasm-pack test` step still carries the literal backslash from \
+         build.yml:107 ({WASM_BROWSER_TEST_BACKSLASH_MARKER:?}) -- it only ever worked because \
+         `nick-fields/retry`'s `command:` input handed the string to a shell that stripped it \
+         before `wasm-pack` saw it, and a bare `run:` gets no such stripping",
+    );
+
+    for browser in WASM_BROWSER_MATRIX {
+        assert!(
+            job.contains(&format!("browser: {browser}")),
+            "test-wasm-browsers' matrix no longer includes `{browser}` -- #416 decided all \
+             three browsers stay, `safari` included, the one that actually wedged",
+        );
+    }
 }
