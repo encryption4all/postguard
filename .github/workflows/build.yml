@@ -468,6 +468,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # For the reporter's `gh issue create` below (#422). Only the
+      # required_status_checks half of the ruleset is asserted anywhere in
+      # this job: the review-requirement half lives in classic protection
+      # (`required_approving_review_count`), and `/branches/main/protection`
+      # 403s for the Actions token, so it cannot be read from CI at all.
+      # `postguard-js` asserts its review rule only because it keeps that
+      # rule in a ruleset instead.
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -485,7 +493,8 @@ jobs:
           # It is passed because the runner's anonymous budget is 60/hour per
           # shared IP, and exhausting it would show up as exit 2 noise.
           GH_TOKEN: ${{ github.token }}
-        run: scripts/ruleset-drift.sh
+          GH_REPO: ${{ github.repository }}
+        run: scripts/ruleset-drift-report.sh
 
       - name: Exit codes still mean what the gate reports
         shell: bash
@@ -502,3 +511,7 @@ jobs:
       - name: Test the changelog-coverage reporter
         shell: bash
         run: scripts/changelog-coverage-report-test.sh
+
+      - name: Test the ruleset-drift reporter
+        shell: bash
+        run: scripts/ruleset-drift-report-test.sh

@@ -119,13 +119,21 @@ const SEAL_COMMAND: &str = "cargo run --locked -p pg-core --features stream --ex
 /// reports green -- rather than failing it, same reasoning as #412.
 const CHANGELOG_COVERAGE_REPORT_COMMAND: &str = "scripts/changelog-coverage-report.sh";
 
-/// What the reporting loop would look like if it moved back into the YAML
-/// (#429): the `gh issue create` call and the `existing_titles` read that used
-/// to sit above it. Either one back in the step means the hazard the reporter
-/// script exists to remove -- a fallible read or write inside a `run:` block
-/// nothing correctly branches on -- is back too, whatever the reporter script
-/// itself still does.
-const CHANGELOG_COVERAGE_LOOP_MARKERS: [&str; 2] = ["gh issue create", "existing_titles"];
+/// What a reporting loop would look like if it moved back into a workflow's
+/// YAML instead of staying inside its extracted script: the `gh issue create`
+/// call and the `existing_titles` read that used to sit above it in
+/// `delivery.yml`'s `changelog-coverage` job, before #429 moved them into
+/// `scripts/changelog-coverage-report.sh`. Either one back in a step means the
+/// hazard the extraction exists to remove -- a fallible read or write inside a
+/// `run:` block nothing correctly branches on -- is back too, whatever the
+/// reporter script itself still does.
+///
+/// Guards two jobs now, not one: `changelog-coverage` in `delivery.yml`
+/// (#429) and `ruleset-drift` in `build.yml` (#422), the same extracted-script
+/// shape applied a second time. One list rather than a second copy under a
+/// second name, because the two markers are the same hazard pointed at a
+/// second job.
+const REPORTING_LOOP_MARKERS: [&str; 2] = ["gh issue create", "existing_titles"];
 
 /// The line `publish-wasm`'s `Set version and publish` step must run (#419).
 /// `pg-wasm/CHANGELOG.md` is a pointer document whose entire premise is that
@@ -149,6 +157,22 @@ const CHANGELOG_COVERAGE_TEST_COMMAND: &str = "scripts/changelog-coverage-test.s
 /// `ruleset-drift` job must also run this -- see
 /// [`the_changelog_coverage_reporters_self_test_runs_in_ci`].
 const CHANGELOG_COVERAGE_REPORT_TEST_COMMAND: &str = "scripts/changelog-coverage-report-test.sh";
+
+/// The reporter script `build.yml`'s `ruleset-drift` job must call in place of
+/// `scripts/ruleset-drift.sh` directly (#422). Same shape as
+/// [`CHANGELOG_COVERAGE_REPORT_COMMAND`] and the same reason: the job used to
+/// run the checker bare, reddening on drift and filing nothing, and in this
+/// fleet a red job has gone unread for 15 days without anyone noticing -- a
+/// red is not a signal by itself here. Pinned so a rename of the reporter
+/// disarms the filing half silently: the checker keeps running through
+/// `scripts/ruleset-drift-test.sh`, so a job that lost this step would still
+/// look wired.
+const RULESET_DRIFT_REPORT_COMMAND: &str = "scripts/ruleset-drift-report.sh";
+
+/// The reporter's own regression suite (#422), same reasoning as
+/// [`CHANGELOG_COVERAGE_REPORT_TEST_COMMAND`] one level up: a reporter nobody
+/// runs in CI is indistinguishable from one that always exits 0.
+const RULESET_DRIFT_REPORT_TEST_COMMAND: &str = "scripts/ruleset-drift-report-test.sh";
 
 /// A marker unique to the `node -e` heredoc `Assemble package` used to write
 /// (#427). If this string is still in the step, the manifest is still being
@@ -638,12 +662,23 @@ fn the_semver_gate_still_calls_the_script_this_repo_pins() {
 /// The script's own behaviour -- drift is 1, undetermined is 2, and they are
 /// never conflated -- is pinned by `scripts/ruleset-drift-test.sh`, which the
 /// same job runs. This asserts only that the job still calls both.
+///
+/// #422 put a reporting script in front of the checker, the same shape as
+/// #429's `scripts/changelog-coverage-report.sh`: the job now calls
+/// [`RULESET_DRIFT_REPORT_COMMAND`] rather than `scripts/ruleset-drift.sh`
+/// directly, so this file no longer names the checker anywhere. The
+/// checker->reporter link -- that the reporter's default
+/// `RULESET_DRIFT_CHECKER` still resolves to a real, executable
+/// `scripts/ruleset-drift.sh` -- is pinned by case 11 of
+/// `scripts/ruleset-drift-report-test.sh` instead of from the YAML here, the
+/// same division #429 left between `delivery.yml` and
+/// `scripts/changelog-coverage.sh`.
 #[test]
 fn the_registry_gate_still_reads_the_ruleset_back() {
     let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
     let steps = steps(&job);
 
-    step_with(&steps, "scripts/ruleset-drift.sh", BUILD_WORKFLOW);
+    step_with(&steps, RULESET_DRIFT_REPORT_COMMAND, BUILD_WORKFLOW);
     step_with(&steps, "scripts/ruleset-drift-test.sh", BUILD_WORKFLOW);
 
     // Without a checkout there is no script to run, and the job fails in a way
@@ -740,7 +775,7 @@ fn the_delivery_workflow_still_checks_changelog_coverage() {
 
     let check = step_with(&steps, CHANGELOG_COVERAGE_REPORT_COMMAND, DELIVERY_WORKFLOW);
 
-    for marker in CHANGELOG_COVERAGE_LOOP_MARKERS {
+    for marker in REPORTING_LOOP_MARKERS {
         assert!(
             !check.contains(marker),
             "the `changelog-coverage` step contains {marker:?} -- the reporting loop is back \
@@ -973,6 +1008,96 @@ fn the_changelog_coverage_reporters_self_test_runs_in_ci() {
          -- make it report exit 2 (undetermined) on every one of them instead \
          of exercising the case",
     );
+}
+
+/// The filing half of the registry gate (#422): until this lands, `build.yml`'s
+/// `ruleset-drift` job reddens on drift and files nothing, and in this fleet a
+/// red job has gone unread for 15 days without anyone noticing -- a red is
+/// not a signal by itself here, so the filing step is the load-bearing part
+/// of this gate, not a nicety.
+///
+/// This is the only thing that would notice a partially-applied patch, or
+/// `issues: write` dropped later while tidying permissions -- either turns
+/// `gh issue create` into a 403 at the exact moment the gate finally has
+/// something to say, and the job would otherwise look identical to a working
+/// one: the reporter step still runs, still calls the same script, and still
+/// reports the same result on every push and pull request that finds no
+/// drift.
+///
+/// Does **not** assert the push-to-`main` guard: under this shape that guard
+/// lives inside `scripts/ruleset-drift-report.sh`, not in the YAML at all, by
+/// design (see that script's header comment) -- cases 4 through 6 of
+/// `scripts/ruleset-drift-report-test.sh` are what pin it. Its absence from
+/// this test is not the oversight the original ticket's section 1 would have
+/// made it; asserting it here too would just be reading the same absence
+/// twice.
+///
+/// This assertion is RED on this branch, and that is correct. The
+/// `dobby-coder` App has no `workflows: write`, so the `build.yml` patch this
+/// looks for is posted for a maintainer to apply, not pushed here -- do not
+/// weaken, `#[ignore]`, or delete this assertion to make CI green before that
+/// patch lands.
+#[test]
+fn the_ruleset_drift_gate_files_what_it_finds() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    assert!(
+        job.contains("issues: write"),
+        "the `ruleset-drift` job no longer declares `issues: write`, so its reporter's \
+         `gh issue create` would 403 at the exact moment the gate has something to say",
+    );
+
+    let report = step_with(&steps, RULESET_DRIFT_REPORT_COMMAND, BUILD_WORKFLOW);
+    assert!(
+        report
+            .lines()
+            .any(|line| line.trim() == format!("run: {RULESET_DRIFT_REPORT_COMMAND}")),
+        "the `ruleset-drift` job's reporter step is no longer a bare invocation of \
+         {RULESET_DRIFT_REPORT_COMMAND:?} on its own `run:` line",
+    );
+
+    for marker in REPORTING_LOOP_MARKERS {
+        assert!(
+            !report.contains(marker),
+            "the reporter step contains {marker:?} -- the filing loop has crept back into the \
+             YAML instead of staying inside {RULESET_DRIFT_REPORT_COMMAND}, the defect this \
+             gate exists to remove",
+        );
+    }
+
+    assert!(
+        report.contains("GH_TOKEN"),
+        "the reporter step no longer passes `GH_TOKEN`, so both its dedupe read and any \
+         `gh issue create` it attempts would run unauthenticated against the runner's shared \
+         60/hour budget",
+    );
+}
+
+/// The reporter's own regression suite (#422), same reasoning as
+/// [`the_changelog_coverage_reporters_self_test_runs_in_ci`] just above: a
+/// reporter nobody runs in CI is indistinguishable from one that always exits
+/// 0. Hosted in the same `ruleset-drift` job, the established home for an
+/// offline script self-test, not a new one.
+///
+/// Needs no `fetch-depth: 0` clause of its own, unlike its changelog-coverage
+/// sibling above: `scripts/ruleset-drift-report-test.sh` stubs both `gh` and
+/// the checker it drives (through `RULESET_DRIFT_CHECKER`), and builds every
+/// fixture it needs in a temp directory rather than reading this repo's own
+/// tag history. The omission is deliberate, not a copy-paste slip against the
+/// changelog reporter's version.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_delivery_workflow_still_checks_changelog_coverage`]: the
+/// `dobby-coder` App cannot push `.github/workflows/*.yml`, so the `build.yml`
+/// patch that adds this step is posted for a maintainer to apply, not pushed
+/// here.
+#[test]
+fn the_ruleset_drift_reporters_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, RULESET_DRIFT_REPORT_TEST_COMMAND, BUILD_WORKFLOW);
 }
 
 /// The wasm-package checker's own regression suite (#427), same reasoning as
