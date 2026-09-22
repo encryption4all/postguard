@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.7...pg-core-v0.6.8) - 2026-09-10
+
+### Fixed
+
+- *(ci)* pin test-wasm-browsers' timeout and retry-wrapper shape in ci_wiring ([#440](https://github.com/encryption4all/postguard/pull/440))
+- *(delivery)* move changelog-coverage's reporting loop out of YAML ([#438](https://github.com/encryption4all/postguard/pull/438))
+
 ## [0.6.7](https://github.com/encryption4all/postguard/compare/pg-core-v0.6.6...pg-core-v0.6.7) - 2026-09-07
 
 ### Added
