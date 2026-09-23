@@ -202,6 +202,13 @@ const WASM_PACKAGE_CHECK_COMMAND: &str = "scripts/wasm-package-check.sh pg-wasm/
 /// indistinguishable from a checker that passes.
 const WASM_PACKAGE_CHECK_TEST_COMMAND: &str = "scripts/wasm-package-check-test.sh";
 
+/// The map-budget checker's own regression suite (#445), same reasoning as
+/// [`WASM_PACKAGE_CHECK_TEST_COMMAND`] just above: a checker nobody runs in
+/// CI is indistinguishable from one that always exits 0. `build.yml`'s
+/// `ruleset-drift` job must also run this -- see
+/// [`the_map_budget_checkers_self_test_runs_in_ci`].
+const MAP_BUDGET_TEST_COMMAND: &str = "scripts/map-budget-test.sh";
+
 /// `test-wasm-browsers`'s corrected step (#416): a bare `run:` invoking
 /// `wasm-pack test` directly, with the browser flag intact and no backslash
 /// ahead of it. The backslash at `build.yml:107` was an artifact of
@@ -1120,6 +1127,28 @@ fn the_wasm_package_checkers_self_test_runs_in_ci() {
     let steps = steps(&job);
 
     step_with(&steps, WASM_PACKAGE_CHECK_TEST_COMMAND, BUILD_WORKFLOW);
+}
+
+/// The map-budget checker's own regression suite (#445), same reasoning as
+/// [`the_wasm_package_checkers_self_test_runs_in_ci`] just above: a checker
+/// nobody runs in CI is indistinguishable from one that always exits 0.
+/// Hosted in the same `ruleset-drift` job for the same reason -- that job is
+/// already the established home for an offline script self-test, not a new
+/// one -- and it needs no `fetch-depth: 0` of its own, since
+/// `scripts/map-budget-test.sh` builds every fixture it needs in a temp dir
+/// (plus one committed snapshot read straight off disk) rather than reading
+/// this repo's history.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_wasm_package_checkers_self_test_runs_in_ci`]: the `dobby-coder` App
+/// cannot push `.github/workflows/*.yml`, so the `build.yml` patch that adds
+/// this step is posted for a maintainer to apply, not pushed here.
+#[test]
+fn the_map_budget_checkers_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, MAP_BUDGET_TEST_COMMAND, BUILD_WORKFLOW);
 }
 
 /// #416, implemented: `test-wasm-browsers` gets an honest job-level timeout

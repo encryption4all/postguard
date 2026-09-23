@@ -515,3 +515,7 @@ jobs:
       - name: Test the ruleset-drift reporter
         shell: bash
         run: scripts/ruleset-drift-report-test.sh
+
+      - name: Test the map-budget checker
+        shell: bash
+        run: scripts/map-budget-test.sh
