@@ -144,6 +144,22 @@ no_heading="$tmp/no-heading.md"
 printf '## Notes\n\nSome notes, no decisions section at all.\n' >"$no_heading"
 expect 2 "a body with no '## Decisions so far' heading is undetermined" "$no_heading" "Decisions so far"
 
+# --- undetermined: a heading-level typo is not the heading -----------------
+#
+# "### Decisions so far" (three '#'s) must not satisfy the existence check:
+# an unanchored `grep -qF` match would find "## Decisions so far" as a
+# substring of that line and report found, while the awk section-extractor's
+# anchored `^## Decisions so far` never matches it, so the section comes back
+# empty and every entry inside it -- however far over the cap -- is silently
+# skipped. That combination reported exit 0 "OK" on a body it could not
+# actually parse, the case the module comment above disclaims.
+typo_heading="$tmp/typo-heading.md"
+make_body "$typo_heading" <<EOF
+$(ascii_entry 450)
+EOF
+sed -i 's/^## Decisions so far$/### Decisions so far/' "$typo_heading"
+expect 2 "a '### Decisions so far' heading-level typo is undetermined, not a pass despite a 450-byte entry inside it" "$typo_heading" "Decisions so far"
+
 # --- boundary: a '- [' line outside the section is ignored -----------------
 outside="$tmp/outside.md"
 {

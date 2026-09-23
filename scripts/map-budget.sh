@@ -74,7 +74,7 @@ if [[ $body_bytes -eq 0 ]]; then
   exit 2
 fi
 
-if ! grep -qF '## Decisions so far' "$path"; then
+if ! grep -qE '^## Decisions so far' "$path"; then
   echo "map-budget: '$path' has no '## Decisions so far' heading" >&2
   exit 2
 fi
