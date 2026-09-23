@@ -1,0 +1,93 @@
+name: Map budget
+#
+# Checks #247's two stated budgets on every edit to its body (#442, #445):
+# the whole body <=153,600 bytes (150 KiB), every "Decisions so far" entry
+# <=400 bytes. See scripts/map-budget.sh for the full rule, and why both
+# are byte counts rather than character counts.
+#
+# `issues: edited`, not a schedule: the event being budgeted is the body
+# changing, and that event exists. No `push` trigger either -- a push says
+# nothing about an issue body.
+#
+# Deliberately NOT a required context. It watches an issue body, which no PR
+# can fix, so making it required would block every merge on an edit nobody
+# on that PR could act on.
+
+on:
+  issues:
+    types: [edited]
+  workflow_dispatch:
+
+jobs:
+  map-budget:
+    name: Map body stays within budget
+    runs-on: ubuntu-latest
+    # The label, not the issue number, so a second wayfinder map is covered
+    # for free and no number is hardcoded in two places. `workflow_dispatch`
+    # carries no `issue`, so a manual run of this workflow as it stands
+    # always evaluates false and skips -- that is #445's decided shape, not
+    # an oversight; wiring a manual re-run to a specific issue would need an
+    # `issue_number` input this ticket does not ask for.
+    if: contains(github.event.issue.labels.*.name, 'wayfinder:map')
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write the issue body to a file
+        env:
+          # Never interpolated into a `run:` block: the body is a Markdown
+          # document full of backticks and $(...) shell examples, and
+          # interpolating it would execute them.
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: printf '%s' "$ISSUE_BODY" >"$RUNNER_TEMP/map-body.md"
+
+      - name: Check the map body's budgets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # `if cmd; then ... else code=$?; fi` rather than
+          # `out=$(cmd); code=$?`: this step has no `shell:` key, so it runs
+          # as `bash -e {0}`, and a bare command substitution's own non-zero
+          # exit would abort the step before a following `code=$?` line was
+          # ever reached (#429, #422). `if`'s condition is exempt from `-e`,
+          # so this survives the failure -- but `$?` must be captured as the
+          # *first* thing in the `else` branch: bash resets `$?` to 0 for the
+          # `if` statement itself once the `then` branch is skipped, so a
+          # `code=$?` placed after `fi` instead would always read 0.
+          if output=$(scripts/map-budget.sh "$RUNNER_TEMP/map-body.md" 2>&1); then
+            echo "map-budget: OK -- within both stated budgets"
+            exit 0
+          else
+            code=$?
+          fi
+
+          if [[ $code -eq 2 ]]; then
+            echo "::error::scripts/map-budget.sh could not determine the map body's budgets (exit 2) -- the checker did not run to completion, this is not a finding"
+            printf '%s\n' "$output"
+            exit 2
+          fi
+
+          # Only 1 (a real finding) remains. Dedupe against the most recent
+          # comment so an edit storm does not spam the issue with the same
+          # finding repeatedly. `--paginate` walks every page -- without it,
+          # a plain `.[-1]` reads only the API's first page (30 comments by
+          # default), and once #247 crosses that count the dedup silently
+          # stops seeing the true most recent comment, reintroducing the
+          # edit-storm spam this step exists to prevent. The body
+          # round-trips through base64 because `--paginate` applies the
+          # `--jq` filter once per page and prints one result per page: a
+          # multi-line comment body would otherwise span multiple output
+          # lines, and `tail -n 1` would grab only its last line rather than
+          # the whole last comment.
+          last_comment=$(gh api --paginate "repos/$GH_REPO/issues/$ISSUE_NUMBER/comments" --jq '.[-1].body // "" | @base64' | tail -n 1 | base64 -d)
+          if [[ $last_comment == "$output" ]]; then
+            echo "map-budget: over budget, but the most recent comment already says so -- not reposting"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "$output"
+          fi
+          printf '%s\n' "$output"
+          exit 1
