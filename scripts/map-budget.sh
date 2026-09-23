@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
 # Checks the two stated budgets on the map body of #247 (#442, #445): the
-# whole body must be <=150,000 bytes, and every entry in "## Decisions so
-# far" must be <=400 bytes. Both are UTF-8 *byte* counts, not character
-# counts -- several entries carry em-dashes and arrows that are 3 bytes each,
-# so a character-based check would pass lines that are actually over.
+# whole body must be <=153,600 bytes (150 KiB), and every entry in "##
+# Decisions so far" must be <=400 bytes. Both are UTF-8 *byte* counts, not
+# character counts -- several entries carry em-dashes and arrows that are 3
+# bytes each, so a character-based check would pass lines that are actually
+# over.
 #
 # Usage:
 #   scripts/map-budget.sh <path-to-body-file>
@@ -13,15 +14,19 @@
 # this is testable offline with no network and no credential.
 #
 # What it checks:
-#   * BODY_BUDGET_BYTES: the whole file, stated in #247's own "## Notes"
-#     header comment.
+#   * BODY_BUDGET_BYTES: the whole file. #247's own "## Notes" header
+#     comment says only "keep the body under 150 KB", not an exact byte
+#     count -- read as 150 KiB (153,600 bytes) to match the binary-KB
+#     convention that same sentence uses for GitHub's exact 262,144-byte
+#     (256*1024) hard cap.
 #   * ENTRY_BUDGET_BYTES: every line beginning "- [" inside the
 #     "## Decisions so far" section, stated in that section's own header
-#     comment. The section runs from the "## Decisions so far" heading to
-#     the next "## " heading (or EOF, if none follows).
+#     comment as an exact, hard 400 bytes. The section runs from the "##
+#     Decisions so far" heading to the next "## " heading (or EOF, if none
+#     follows).
 #
-# Deliberately out of scope: "## Notes"'s own 16,000-byte budget and
-# "## Findings not yet in Notes"'s 4,000-byte budget. Both are read by a
+# Deliberately out of scope: "## Notes"'s own 16 KiB (16,384-byte) budget
+# and "## Findings not yet in Notes"'s 4,000-byte budget. Both are read by a
 # human deciding what to promote, the parse surface for per-section budgets
 # is larger, and #442 decided to check the two numbers the map's rules
 # actually state rather than every number on the page.
@@ -45,8 +50,9 @@
 #
 set -euo pipefail
 
-# 150,000 bytes, stated in #247's "## Notes" header comment.
-readonly BODY_BUDGET_BYTES=150000
+# 153,600 bytes (150 KiB) -- #247's "## Notes" header comment says "150 KB",
+# read as binary KB per the module comment above.
+readonly BODY_BUDGET_BYTES=153600
 # 400 bytes, stated in #247's "## Decisions so far" header comment.
 readonly ENTRY_BUDGET_BYTES=400
 

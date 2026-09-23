@@ -84,15 +84,15 @@ make_body "$good" <<'EOF'
 EOF
 expect 0 "a body inside both budgets" "$good"
 
-# --- real finding: the whole body is over 150,000 bytes -----------------
+# --- real finding: the whole body is over 153,600 bytes -----------------
 big="$tmp/big.md"
 make_body "$big" <<'EOF'
 - [an entry well under the byte cap](https://example.com/1) -- fine.
 EOF
-# Padding well past the 150,000-byte budget without touching the section
+# Padding well past the 153,600-byte budget without touching the section
 # syntax the parser looks for.
 head -c 155000 </dev/zero | tr '\0' 'x' >>"$big"
-expect 1 "a body over the 150,000-byte budget" "$big" "150"
+expect 1 "a body over the 153,600-byte budget" "$big" "153600"
 
 # --- real finding: one 401-byte entry ------------------------------------
 over_entry="$tmp/over-entry.md"
