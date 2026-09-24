@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>encryption4all/renovate-config"],
+  "packageRules": [
+    {
+      "description": "pg-compat/Cargo.toml's pg-core-0-6-5 and pg-core-0-5-10 are `=`-exact, aliased (package = \"pg-core\") pins on the wire-compat gate's published readers, moved deliberately under the one-pin-per-minor-line rule (no_two_pinned_readers_share_a_minor_line in pg-compat/tests/support_window.rs). postguard-e2e's check-reader-rows.mjs watches their currency. The preset's fleet-wide first-party rule already covers pg-core; this repo-level rule is belt and braces, and it is the one pg-core/tests/renovate_config.rs pins.",
+      "matchFileNames": ["pg-compat/Cargo.toml"],
+      "matchPackageNames": ["pg-core"],
+      "enabled": false
+    }
+  ]
+}
