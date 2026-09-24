@@ -98,12 +98,12 @@ jobs:
     # silence each (#416).
     timeout-minutes: 12
     env:
-      # ~6x the slowest single test (~5s). This is a per-test timer running
-      # inside the browser page, so it does NOT bound a wedged safaridriver
-      # session -- that is what `timeout-minutes` above is for. It was 120,
-      # which is both 24x the slowest test and, at 16 tests, a 32-minute
-      # worst case that the job budget could never reach.
-      WASM_BINDGEN_TEST_TIMEOUT: 30
+      # A timer over the whole `wasm-pack test` run, not per test: it starts
+      # after the page navigates and waits, in one clock, for `test result: `
+      # to appear across all 16 tests (#453). Safari's green runs take up to
+      # ~31s; 70 is ~2x that. It does NOT bound a wedged safaridriver session
+      # -- that is what `timeout-minutes` above is for.
+      WASM_BINDGEN_TEST_TIMEOUT: 70
     steps:
       - uses: actions/checkout@v4
       - name: Install

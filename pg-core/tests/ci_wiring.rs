@@ -1218,3 +1218,58 @@ fn the_wasm_browser_job_has_an_honest_timeout_and_no_retry_wrapper() {
         );
     }
 }
+
+/// #453 established that `WASM_BINDGEN_TEST_TIMEOUT` is a timer over the
+/// whole `wasm-pack test` run, not a per-test one: wasm-bindgen's
+/// `headless.rs` (identical at 0.2.121 and 0.2.128) starts the clock after
+/// `goto` returns and waits, in one loop, for `test result: ` to appear in
+/// the page's output. #432's "~6x the slowest single test" reasoning sized a
+/// per-test clock that was never running.
+///
+/// Safari's green suite takes 18.7-30.9s (median 27.4s, n=22, #453's
+/// measurement). Four red Safari runs since 2026-09-10 each cut off 26-28s
+/// in, with 8-12 of 16 tests passed -- one deadline crossed mid-suite, not a
+/// hung test. 30 clips that tail. 70 is ~2x the observed max, plus the few
+/// seconds the clock can run before `running 16 tests` even prints.
+///
+/// A value planted near the suite's real duration does not fail every run --
+/// it fails the unlucky ones, so a green CI run proves nothing about the
+/// margin left. That is why the gate here is the literal number, not a
+/// passing job: only the literal check catches a later edit drifting it back
+/// toward 30.
+///
+/// This assertion is RED on this branch, same reason and same fix path as
+/// [`the_wasm_browser_job_has_an_honest_timeout_and_no_retry_wrapper`]: the
+/// workflow patch is posted on the issue for a maintainer to apply, not
+/// pushed here.
+#[test]
+fn the_wasm_browser_timeout_is_pinned_above_safaris_observed_tail() {
+    let job = job(
+        &workflow(BUILD_WORKFLOW),
+        "test-wasm-browsers",
+        BUILD_WORKFLOW,
+    );
+
+    let line = job
+        .lines()
+        .find(|line| line.trim_start().starts_with("WASM_BINDGEN_TEST_TIMEOUT:"))
+        .unwrap_or_else(|| {
+            panic!(
+                "test-wasm-browsers sets no `WASM_BINDGEN_TEST_TIMEOUT` in {}",
+                workflow_path(BUILD_WORKFLOW).display(),
+            )
+        });
+    let value = line
+        .trim()
+        .strip_prefix("WASM_BINDGEN_TEST_TIMEOUT:")
+        .unwrap()
+        .trim();
+
+    assert_eq!(
+        value, "70",
+        "test-wasm-browsers' WASM_BINDGEN_TEST_TIMEOUT is {value}, not 70 -- #453 measured \
+         Safari's green suite at up to 30.9s against a whole-run clock, so a value near that \
+         duration (30 clipped four real runs) fails intermittently rather than every time, and \
+         only a check on the literal value catches a later edit drifting it back down",
+    );
+}
